@@ -8,22 +8,22 @@ Bundle Adjustment (BA) jointly optimizes 3D landmark positions and camera poses 
 
 ## Modeling Bundle Adjustment with `SimpleError2`
 
-Using [`EuclideanVector`](@ref) and [`SimpleError2`](@ref), you can define a bundle adjustment problem concisely by specializing [`NLLSModels.generatemeasurement`](@ref):
+Using `SVector` and [`SimpleError2`](@ref), you can define a bundle adjustment problem concisely by specializing [`NLLSModels.generatemeasurement`](@ref):
 
 ```julia
 using NLLSModels
 using Static, StaticArrays, LinearAlgebra
 
 # Define projection of 3D point X by 6-DoF affine camera pose
-function NLLSModels.generatemeasurement(pose::EuclideanVector{6, T}, X::EuclideanVector{3, U}) where {T, U}
+function NLLSModels.generatemeasurement(pose::SVector{6, T}, X::SVector{3, U}) where {T, U}
     return SVector(
         dot(@inbounds(view(pose, SUnitRange(1, 3))), X),
         dot(@inbounds(view(pose, SUnitRange(4, 6))), X)
     )
 end
 
-const CamType = EuclideanVector{6, Float64}
-const PtType  = EuclideanVector{3, Float64}
+const CamType = SVector{6, Float64}
+const PtType  = SVector{3, Float64}
 const ObsType = SimpleError2{2, Float64, CamType, PtType}
 
 problem = NLLSProblem(Union{CamType, PtType}, ObsType)

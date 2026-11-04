@@ -34,7 +34,7 @@ end
 NLLSModels.ndeps(::MTTestDynamicRes) = static(1)
 NLLSModels.nres(::MTTestDynamicRes) = static(1)
 NLLSModels.varindices(::MTTestDynamicRes) = 1
-NLLSModels.getvars(::MTTestDynamicRes, vars::AbstractVector) = (vars[1]::NLLSModels.DynamicVector{Float64},)
+NLLSModels.getvars(::MTTestDynamicRes, vars::AbstractVector) = (vars[1]::Vector{Float64},)
 NLLSModels.computeresidual(res::MTTestDynamicRes, w) = dot(res.X, w) - res.y
 Base.eltype(::MTTestDynamicRes) = Float64
 
@@ -166,7 +166,7 @@ alloc_ephemeral(ls, ind) = @allocated NLLSModels.LinearSystem(ls, ind)
 
     # 2. UniVariateLSdynamic
     dim = 20
-    prob_dyn = NLLSProblem(NLLSModels.DynamicVector{Float64})
+    prob_dyn = NLLSProblem(Vector{Float64})
     addvariable!(prob_dyn, zeros(dim))
     for k in 1:120
         addcost!(prob_dyn, MTTestDynamicRes(1.0, randn(dim)))

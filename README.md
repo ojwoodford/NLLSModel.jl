@@ -1,11 +1,15 @@
 # NLLSModels.jl
 
+[![Documentation](https://img.shields.io/badge/docs-dev-blue.svg)](https://ojwoodford.github.io/NLLSModels.jl/dev/)
+[![Build Status](https://github.com/ojwoodford/NLLSModels.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/ojwoodford/NLLSModels.jl/actions/workflows/CI.yml?query=branch%3Amain)
+[![codecov](https://codecov.io/gh/ojwoodford/NLLSModels.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/ojwoodford/NLLSModels.jl)
+
 Nonlinear Least Squares (NLLS) and factor-graph modeling in Julia.
 
 ## Features
 
 - **Factor-Graph Problem Representation**: Build bipartite variable-cost graphs with `NLLSProblem`, `addvariable!`, and `addcost!`.
-- **Heterogeneous Variables & Manifolds**: Mix `Float64`, `SVector` (`EuclideanVector`), `Vector` (`DynamicVector`), `ZeroToInfScalar`, `ZeroToOneScalar`, and custom manifold types (via `OptimizationVariableInterface.jl`) in a single problem.
+- **Heterogeneous Variables & Manifolds**: Mix `Float64`, `SVector`, `Vector`, `ZeroToInfScalar`, `ZeroToOneScalar`, and custom manifold types (via `OptimizationVariableInterface.jl`) in a single problem.
 - **Automatic & Analytic Derivatives**: Uses `ForwardDiff.jl` automatically on `computeresidual`, or user-defined analytic Jacobians via `computeresjac`.
 - **Robust M-Estimators**: Built-in `HuberKernel`, `Huber2oKernel`, `GemanMcclureKernel`, `GemanMcclure2oKernel`, `Scaled`, and adaptive `ContaminatedGaussian`.
 - **Block-Dense & Block-Sparse Linear Algebra**: Uses `BlockDenseMatrix` and `BlockSparseMatrix` from `BlockMatrices.jl` for fast, zero-allocation Hessian assembly.
