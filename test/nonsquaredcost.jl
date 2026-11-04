@@ -9,7 +9,7 @@ end
 NLLSModels.ndeps(::LinearResidualStatic) = static(1)
 NLLSModels.nres(::LinearResidualStatic) = static(NDIMS)
 NLLSModels.varindices(res::LinearResidualStatic) = res.varind
-NLLSModels.getvars(res::LinearResidualStatic, vars::Vector) = (vars[res.varind]::NLLSModels.EuclideanVector{NDIMS, Float64},)
+NLLSModels.getvars(res::LinearResidualStatic, vars::Vector) = (vars[res.varind]::SVector{NDIMS, Float64},)
 NLLSModels.computeresidual(res::LinearResidualStatic, w) = res.X * w - res.y
 Base.eltype(::LinearResidualStatic) = Float64
 
@@ -21,7 +21,7 @@ end
 NLLSModels.ndeps(::LinearResidualDynamic) = static(1)
 NLLSModels.nres(res::LinearResidualDynamic) = length(res.y)
 NLLSModels.varindices(res::LinearResidualDynamic) = res.varind
-NLLSModels.getvars(res::LinearResidualDynamic, vars::Vector) = (vars[res.varind]::NLLSModels.DynamicVector{Float64},)
+NLLSModels.getvars(res::LinearResidualDynamic, vars::Vector) = (vars[res.varind]::Vector{Float64},)
 NLLSModels.computeresidual(res::LinearResidualDynamic, w) = res.X * w - res.y
 Base.eltype(::LinearResidualDynamic) = Float64
 
@@ -31,7 +31,7 @@ struct LinearCostStatic <: NLLSModels.AbstractCost
 end
 NLLSModels.ndeps(::LinearCostStatic) = static(1)
 NLLSModels.varindices(cost::LinearCostStatic) = cost.varind
-NLLSModels.getvars(cost::LinearCostStatic, vars::Vector) = (vars[cost.varind]::NLLSModels.EuclideanVector{NDIMS, Float64},)
+NLLSModels.getvars(cost::LinearCostStatic, vars::Vector) = (vars[cost.varind]::SVector{NDIMS, Float64},)
 NLLSModels.computecost(cost::LinearCostStatic, w) = cost.y' * w
 Base.eltype(::LinearCostStatic) = Float64
 
@@ -41,7 +41,7 @@ struct LinearCostDynamic <: NLLSModels.AbstractCost
 end
 NLLSModels.ndeps(::LinearCostDynamic) = static(1)
 NLLSModels.varindices(cost::LinearCostDynamic) = cost.varind
-NLLSModels.getvars(cost::LinearCostDynamic, vars::Vector) = (vars[cost.varind]::NLLSModels.DynamicVector{Float64},)
+NLLSModels.getvars(cost::LinearCostDynamic, vars::Vector) = (vars[cost.varind]::Vector{Float64},)
 NLLSModels.computecost(cost::LinearCostDynamic, w) = cost.y' * w
 Base.eltype(::LinearCostDynamic) = Float64
 
@@ -53,7 +53,7 @@ Base.eltype(::LinearCostDynamic) = Float64
 
     # Create the problem
     problem = NLLSModels.NLLSProblem()
-    NLLSModels.addvariable!(problem, zeros(NLLSModels.EuclideanVector{NDIMS, Float64}))
+    NLLSModels.addvariable!(problem, zeros(SVector{NDIMS, Float64}))
     NLLSModels.addcost!(problem, LinearResidualStatic(y, X, 1))
     NLLSModels.addcost!(problem, LinearCostStatic(y, 1))
     NLLSModels.addvariable!(problem, zeros(NDIMS))

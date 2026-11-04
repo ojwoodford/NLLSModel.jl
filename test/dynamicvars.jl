@@ -7,7 +7,7 @@ end
 NLLSModels.ndeps(::LinearResidual) = static(1) # Residual depends on 1 variables
 NLLSModels.nres(::LinearResidual) = static(1) # Residual has length 1
 NLLSModels.varindices(::LinearResidual) = 1
-NLLSModels.getvars(::LinearResidual, vars::Vector) = (vars[1]::NLLSModels.DynamicVector{Float64},)
+NLLSModels.getvars(::LinearResidual, vars::Vector) = (vars[1]::Vector{Float64},)
 NLLSModels.computeresidual(res::LinearResidual, w) = res.X' * w - res.y
 Base.eltype(::LinearResidual) = Float64
 
@@ -17,7 +17,7 @@ end
 NLLSModels.ndeps(::NormResidual) = static(1) # Residual depends on 1 variables
 NLLSModels.nres(res::NormResidual) = res.len
 NLLSModels.varindices(::NormResidual) = 1
-NLLSModels.getvars(::NormResidual, vars::Vector) = (vars[1]::NLLSModels.DynamicVector{Float64},)
+NLLSModels.getvars(::NormResidual, vars::Vector) = (vars[1]::Vector{Float64},)
 NLLSModels.computeresidual(::NormResidual, w) = w
 Base.eltype(::NormResidual) = Float64
 
@@ -28,7 +28,7 @@ Base.eltype(::NormResidual) = Float64
     n = length(X)
 
     # Create the problem
-    problem = NLLSModels.NLLSProblem(NLLSModels.DynamicVector{Float64})
+    problem = NLLSModels.NLLSProblem(Vector{Float64})
     NLLSModels.addvariable!(problem, zeros(n))
     NLLSModels.addcost!(problem, LinearResidual(1.0, X))
     NLLSModels.addcost!(problem, NormResidual(n))

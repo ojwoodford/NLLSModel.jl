@@ -17,8 +17,6 @@ VectorRepo
 ## Variables & Built-In Variable Types
 
 ```@docs
-EuclideanVector
-DynamicVector
 ZeroToInfScalar
 ZeroToOneScalar
 copyvars

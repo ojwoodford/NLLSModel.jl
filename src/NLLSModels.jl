@@ -15,7 +15,7 @@ import BlockMatrices:
 
 import OptimizationVariableInterface:
     nvars, update, update!, copyvars, syncvars!, isbitsvartype,
-    EuclideanVector, DynamicVector, ZeroToInfScalar, ZeroToOneScalar
+    ZeroToInfScalar, ZeroToOneScalar
 
 import FastLinAlg: sqnorm, fast_dot, fast_norm, fast_bAb
 import ValueDispatch: valuedispatch
@@ -24,7 +24,7 @@ import ValueDispatch: valuedispatch
 export NLLSProblem
 export AbstractCost, AbstractResidual, AbstractAdaptiveResidual, AbstractRobustifier, AbstractAdaptiveRobustifier
 export NoRobust, Scaled, HuberKernel, Huber2oKernel, GemanMcclureKernel, GemanMcclure2oKernel, ContaminatedGaussian
-export EuclideanVector, DynamicVector, ZeroToInfScalar, ZeroToOneScalar
+export ZeroToInfScalar, ZeroToOneScalar
 export SimpleError2, SimpleError3, SimpleError4
 export BlockSparseMatrix, BlockDenseMatrix, VectorRepo
 export addvariable!, addcost!, addresidual!, updatevarcostmap!, subproblem, subproblem!

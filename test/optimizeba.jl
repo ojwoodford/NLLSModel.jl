@@ -1,32 +1,32 @@
 using NLLSModels, Test, Static, StaticArrays, SparseArrays, Random, LinearAlgebra
 
 # Simple affine projection transform
-NLLSModels.generatemeasurement(pose::EuclideanVector{6, T}, X::EuclideanVector{3, U}) where {T, U} = SVector(dot(@inbounds(view(pose, NLLSModels.SR(1, 3))), X), dot(@inbounds(view(pose, NLLSModels.SR(4, 6))), X))
+NLLSModels.generatemeasurement(pose::SVector{6, T}, X::SVector{3, U}) where {T, U} = SVector(dot(@inbounds(view(pose, NLLSModels.SR(1, 3))), X), dot(@inbounds(view(pose, NLLSModels.SR(4, 6))), X))
 
 function create_ba_problem(ncameras, nlandmarks, propvisible)
-    problem = NLLSProblem(Union{EuclideanVector{6, Float64}, EuclideanVector{3, Float64}}, SimpleError2{2, Float64, EuclideanVector{6, Float64}, EuclideanVector{3, Float64}})
+    problem = NLLSProblem(Union{SVector{6, Float64}, SVector{3, Float64}}, SimpleError2{2, Float64, SVector{6, Float64}, SVector{3, Float64}})
 
     # Generate the cameras on a unit sphere, pointing to the origin
     camoffset = SVector(1.0, 0.0, 0.0, 0.0, 1.0, 0.0)
     for i = 1:ncameras
-        addvariable!(problem, randn(EuclideanVector{6, Float64}) .+ camoffset)
+        addvariable!(problem, randn(SVector{6, Float64}) .+ camoffset)
     end
     
     # Generate the landmarks in a unit cube centered on the origin
     lmoffset = SVector(-0.5, -0.5, 10.0)
     for i = 1:nlandmarks
-        addvariable!(problem, rand(EuclideanVector{3, Float64}) .+ lmoffset)
+        addvariable!(problem, rand(SVector{3, Float64}) .+ lmoffset)
     end
 
     # Generate the measurements
     visibility = abs.(repeat(vec(1:ncameras), outer=(1, nlandmarks)) .- LinRange(2, ncameras-1, nlandmarks)')
     visibility = visibility .<= sort(vec(visibility))[Int(ceil(length(visibility)*propvisible))]
     for camind = 1:ncameras
-        camera = problem.variables[camind]::EuclideanVector{6, Float64}
+        camera = problem.variables[camind]::SVector{6, Float64}
         for (landmark, tf) in enumerate(view(visibility, camind, :)')
             if tf
                 landmarkind = landmark + ncameras
-                addcost!(problem, SimpleError2{EuclideanVector{6, Float64}, EuclideanVector{3, Float64}}(generatemeasurement(camera, problem.variables[landmarkind]::EuclideanVector{3, Float64}), camind, landmarkind))
+                addcost!(problem, SimpleError2{SVector{6, Float64}, SVector{3, Float64}}(generatemeasurement(camera, problem.variables[landmarkind]::SVector{3, Float64}), camind, landmarkind))
             end
         end
     end
@@ -37,10 +37,10 @@ end
 
 function perturb_ba_problem(problem, pointnoise, posenoise)
     for ind in 1:lastindex(problem.variables)
-        if isa(problem.variables[ind], EuclideanVector{3, Float64})
-            problem.variables[ind]::EuclideanVector{3, Float64} += randn(SVector{3, Float64}) * pointnoise
+        if isa(problem.variables[ind], SVector{3, Float64})
+            problem.variables[ind]::SVector{3, Float64} += randn(SVector{3, Float64}) * pointnoise
         else
-            problem.variables[ind]::EuclideanVector{6, Float64} += randn(SVector{6, Float64}) * posenoise
+            problem.variables[ind]::SVector{6, Float64} += randn(SVector{6, Float64}) * posenoise
         end
     end
     return problem
@@ -59,7 +59,7 @@ end
     # Test reordering the costs
     problem = perturb_ba_problem(problem, 0.003, 0.0)
     costbefore = cost(problem)
-    landmarks = isa.(problem.variables, EuclideanVector{3, Float64})
+    landmarks = isa.(problem.variables, SVector{3, Float64})
     NLLSModels.reordercostsforschur!(problem, landmarks)
     @test cost(problem) ≈ costbefore
 
