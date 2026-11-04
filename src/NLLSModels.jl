@@ -8,16 +8,15 @@ using Static, StaticArrays, SparseArrays, LinearAlgebra
 
 import BlockMatrices:
     BlockSparseMatrix, BlockDenseMatrix,
-    block, validblock, zero!, copy_structure, uniformscaling!,
-    symmetrifyfull, symmetrifyfull!, symmetrifysparse,
-    makesparseindices, cacheindices, clearindicescache, updatelastrowsym!,
-    sparse_dense_decision, block_sparse_nnz, computestartindices, find_diag_inds
+    block, zero!, copy_structure,
+    symmetrifyfull, makesparseindices,
+    sparse_dense_decision, computestartindices, find_diag_inds
 
 import OptimizationVariableInterface:
-    nvars, update, update!, copyvars, syncvars!, isbitsvartype,
+    nvars, update, update!,
     ZeroToInfScalar, ZeroToOneScalar
 
-import FastLinAlg: sqnorm, fast_dot, fast_norm, fast_bAb
+import FastLinAlg: sqnorm
 import ValueDispatch: valuedispatch
 
 # Export NLLSModels types and functions
