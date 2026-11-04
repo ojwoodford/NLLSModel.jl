@@ -6,10 +6,3 @@ NLLSModels = "b7e28c5a-4e6f-4d8b-9a1c-5d3e2f1a0b9c"
 OptimizationVariableInterface = "f1c3d78e-8b2a-4c9d-9e4f-4a7b6c0d3e17"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 ValueDispatch = "c8e4d12a-5f3b-4a9c-8d2e-1f6b3a7c9e04"
-
-[sources]
-BlockMatrices = {path = "/Users/olly/.julia/dev/BlockMatrices.jl"}
-FastNorm = {path = "/Users/olly/.julia/dev/FastNorm.jl"}
-NLLSModels = {path = ".."}
-OptimizationVariableInterface = {path = "/Users/olly/.julia/dev/OptimizationVariableInterface.jl"}
-ValueDispatch = {path = "/Users/olly/.julia/dev/ValueDispatch.jl"}
