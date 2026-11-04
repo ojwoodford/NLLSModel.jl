@@ -88,7 +88,7 @@ uuid = "62783981-4cbd-42fc-bca8-16325de8dc4b"
 version = "0.1.6"
 
 [[deps.BlockMatrices]]
-deps = ["FastLinAlg", "HybridArrays", "LinearAlgebra", "SparseArrays", "Static", "StaticArrays"]
+deps = ["FastNorm", "HybridArrays", "LinearAlgebra", "SparseArrays", "Static", "StaticArrays"]
 path = "/Users/olly/.julia/dev/BlockMatrices.jl"
 uuid = "a7d4e89f-9c3b-4d0e-8f5a-5b8c7d1e4f28"
 version = "0.1.0"
@@ -195,11 +195,11 @@ registries = "General"
 uuid = "2e619515-83b5-522b-bb60-26c02a35a201"
 version = "2.10.0+0"
 
-[[deps.FastLinAlg]]
+[[deps.FastNorm]]
 deps = ["LoopVectorization", "SparseArrays", "StaticArrays"]
-path = "/Users/olly/.julia/dev/FastLinAlg.jl"
-uuid = "e4b2c56d-7a1e-4f9b-8c3d-3e6f5a9b2c06"
-version = "0.1.0"
+path = "/Users/olly/.julia/dev/FastNorm.jl"
+uuid = "9ae3a7d3-f420-46c0-9803-30469fdd2dd1"
+version = "0.1.1"
 
 [[deps.FileWatching]]
 uuid = "7b1f6079-737a-58dc-b8bc-7a2ca5c1b5ee"
@@ -424,7 +424,7 @@ uuid = "14a3606d-f60d-562e-9121-12d972cd8159"
 version = "2026.10.20"
 
 [[deps.NLLSModels]]
-deps = ["BlockMatrices", "DiffResults", "FastLinAlg", "ForwardDiff", "HybridArrays", "LinearAlgebra", "LoopVectorization", "OptimizationVariableInterface", "Polyester", "SparseArrays", "Static", "StaticArrays", "ValueDispatch"]
+deps = ["BlockMatrices", "DiffResults", "FastNorm", "ForwardDiff", "HybridArrays", "LinearAlgebra", "LoopVectorization", "OptimizationVariableInterface", "Polyester", "SparseArrays", "Static", "StaticArrays", "ValueDispatch"]
 path = ".."
 uuid = "b7e28c5a-4e6f-4d8b-9a1c-5d3e2f1a0b9c"
 version = "0.1.0"

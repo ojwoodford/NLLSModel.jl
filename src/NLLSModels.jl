@@ -1,7 +1,7 @@
 module NLLSModels
 
 using BlockMatrices
-using FastLinAlg
+using FastNorm
 using OptimizationVariableInterface
 using ValueDispatch
 using Static, StaticArrays, SparseArrays, LinearAlgebra
@@ -16,7 +16,7 @@ import OptimizationVariableInterface:
     nvars, update, update!,
     ZeroToInfScalar, ZeroToOneScalar
 
-import FastLinAlg: sqnorm
+import FastNorm: sqnorm
 import ValueDispatch: valuedispatch
 
 # Export NLLSModels types and functions
