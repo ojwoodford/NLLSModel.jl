@@ -1,6 +1,7 @@
 # NLLSModels.jl
 
-[![Documentation](https://img.shields.io/badge/docs-dev-blue.svg)](https://ojwoodford.github.io/NLLSModels.jl/dev/)
+[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://ojwoodford.github.io/NLLSModels.jl/stable/)
+[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://ojwoodford.github.io/NLLSModels.jl/dev/)
 [![Build Status](https://github.com/ojwoodford/NLLSModels.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/ojwoodford/NLLSModels.jl/actions/workflows/CI.yml?query=branch%3Amain)
 [![codecov](https://codecov.io/gh/ojwoodford/NLLSModels.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/ojwoodford/NLLSModels.jl)
 

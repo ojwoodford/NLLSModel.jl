@@ -12,7 +12,7 @@ makedocs(
     remotes = nothing,
     warnonly = false,
     format = Documenter.HTML(
-        prettyurls = false,
+        prettyurls = get(ENV, "CI", nothing) == "true",
         sidebar_sitename = true,
     ),
     pages = [
@@ -29,4 +29,9 @@ makedocs(
             "From Ceres Solver (C++)" => "migration/from_ceres.md",
         ],
     ]
+)
+
+deploydocs(
+    repo = "github.com/ojwoodford/NLLSModels.jl.git",
+    devbranch = "main",
 )
