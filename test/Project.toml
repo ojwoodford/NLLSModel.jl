@@ -10,10 +10,3 @@ Static = "aedffcd0-7271-4cad-89d0-dc628f76c6d3"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 ValueDispatch = "c8e4d12a-5f3b-4a9c-8d2e-1f6b3a7c9e04"
-
-[sources]
-BlockMatrices = {path = "/Users/olly/.julia/dev/BlockMatrices.jl"}
-FastNorm = {path = "/Users/olly/.julia/dev/FastNorm.jl"}
-NLLSModels = {path = "/Users/olly/.julia/dev/NLLSModels.jl"}
-OptimizationVariableInterface = {path = "/Users/olly/.julia/dev/OptimizationVariableInterface.jl"}
-ValueDispatch = {path = "/Users/olly/.julia/dev/ValueDispatch.jl"}
