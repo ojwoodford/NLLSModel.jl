@@ -13,13 +13,13 @@ mutable struct NLLSProblem{VarTypes, CostTypes, CostVecs}
     # Constructors
     function NLLSProblem{VarTypes, CostTypes}(
         vars::Vector{VarTypes} = Vector{VarTypes}(),
-        costs = CostStruct{CostTypes}(),
+        costs::CostStruct = CostStruct{CostTypes}(),
         varcostmap = spzeros(Bool, 0, 0),
         varcostmapvalid = false
     ) where {VarTypes, CostTypes}
         TCT = tupelize(CostTypes)
-        actual_costs = costs isa CostStruct{TCT} ? costs : CostStruct{TCT}()
-        return new{VarTypes, TCT, typeof(actual_costs.data)}(actual_costs, vars, varcostmap, varcostmapvalid)
+        costs isa CostStruct{TCT} || throw(ArgumentError("Expected costs of type CostStruct{$TCT}, got $(typeof(costs))"))
+        return new{VarTypes, TCT, typeof(costs.data)}(costs, vars, varcostmap, varcostmapvalid)
     end
     function NLLSProblem{VarTypes, CostTypes, CostVecs}(
         vars::Vector{VarTypes},
@@ -31,8 +31,8 @@ mutable struct NLLSProblem{VarTypes, CostTypes, CostVecs}
     end
 end
 
-NLLSProblem(VT::Union{DataType, Union}, CT::Union{DataType, Union}) = NLLSProblem{VT, CT}()
-NLLSProblem(v::Vector{VT}, CT::Union{DataType, Union}) where VT = NLLSProblem{VT, CT}(v)
+NLLSProblem(::Type{VT}, ::Type{CT}) where {VT, CT} = NLLSProblem{VT, CT}()
+NLLSProblem(v::Vector{VT}, ::Type{CT}) where {VT, CT} = NLLSProblem{VT, CT}(v)
 NLLSProblem(v::Vector{VT}, r::CostStruct{CT}) where {VT, CT} = NLLSProblem{VT, CT}(v, r)
 
 function Base.getproperty(p::NLLSProblem, s::Symbol)
@@ -80,8 +80,9 @@ function selectcosts!(outcosts::CostStruct, incosts::Vector, unfixed::BitVector)
 end
 
 function selectcosts!(outcosts::CostStruct, incosts::Vector{T}, vec::Vector) where T
+    outvec = empty!(get(outcosts, T))
     if !isempty(vec)
-        append!(empty!(get!(outcosts, T)), @inbounds(incosts[vec]))
+        append!(outvec, @inbounds(view(incosts, vec)))
     end
 end
 
@@ -219,7 +220,3 @@ costnum(vec::Vector)  = length(vec)
 costdeps(vec::Vector) = length(vec) != 0 ? length(vec) * ndeps(vec[1]) : 0
 resnum(vec::Vector)   = length(vec) != 0 ? (dynamic(is_static(nres(vec[1]))) ? length(vec) * nres(vec[1]) : sum(nres, vec; init=0)) : 0
 countcosts(fun, costs::CostStruct) = sum(fun, values(costs); init=0)
-countcosts(fun, costs, T::Union) = countcosts(fun, costs, T.a) + countcosts(fun, costs, T.b)
-countcosts(fun, costs, ::Type{Tuple{}}) = 0
-countcosts(fun, costs, ::Type{T}) where T<:Tuple = countcosts(fun, costs, Base.tuple_type_head(T)) + countcosts(fun, costs, Base.tuple_type_tail(T))
-countcosts(fun, costs, T::DataType) = fun(get(costs, T))

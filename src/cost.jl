@@ -6,14 +6,12 @@ cost(problem::NLLSProblem, numthreads::Integer) = cost(problem.variables, proble
 cost(problem::NLLSProblem, numthreads::StaticInt) = cost(problem.variables, problem.costs, numthreads)
 cost(problem::NLLSProblem, options) = cost(problem.variables, problem.costs, options.numthreads)
 cost(vars::AbstractVector, costs::CostStruct)::Float64 = cost(vars, costs, static(1))
-cost(vars::AbstractVector, costs::CostStruct, ::StaticInt{1})::Float64 = cost_repo(vars, costs, static(1))
+cost(vars::AbstractVector, costs::CostStruct, ::StaticInt{1})::Float64 = cost_struct(vars, costs, static(1))
 cost(vars::AbstractVector, costs::CostStruct, numthreads::Integer)::Float64 = cost(vars, costs, static(numthreads))
-cost(vars::AbstractVector, costs::CostStruct, numthreads::StaticInt)::Float64 = cost_repo(vars, costs, numthreads)
+cost(vars::AbstractVector, costs::CostStruct, numthreads::StaticInt)::Float64 = cost_struct(vars, costs, numthreads)
 
-cost_repo(vars, costs::CostStruct, ::StaticInt{1}) = sum(bindleadingargs(computecost, vars), costs; init=0.0)
-cost_repo(vars, costs::CostStruct, numthreads::StaticInt) = cost_multithreaded(vars, costs, numthreads)
-
-cost_vec(vars, costlist::Vector, ::StaticInt{1})::Float64 = cost_range(vars, costlist, eachindex(costlist))
+cost_struct(vars, costs::CostStruct, ::StaticInt{1}) = sum(bindleadingargs(computecost, vars), costs; init=0.0)
+cost_struct(vars, costs::CostStruct, numthreads::StaticInt) = cost_multithreaded(vars, costs, numthreads)
 
 function cost_range(vars, costlist::AbstractVector, rng::AbstractUnitRange)::Float64
     tot = 0.0

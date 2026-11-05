@@ -1,23 +1,25 @@
 using NLLSModels, Test
 
-function fillrepo(vr, floats, ints)
-    # Fill the repo with the data
+function fillcoststruct(cs, floats, ints)
+    # Fill the CostStruct with the data
     Nf = length(floats)
     Ni = length(ints)
-    append!(vr, floats) 
-    append!(vr, ints)
-    push!(vr, 0.0)
-    push!(vr, 0)
+    append!(cs, floats) 
+    append!(cs, ints)
+    push!(cs, 0.0)
+    push!(cs, 0)
 
     # Test that the lengths and values are as expected
-    floats = get(vr, Float64)
-    @test length(floats) == Nf+1 && floats[end] == 0
-    ints = get(vr, Int)
-    @test length(ints) == Ni+1 && ints[end] == 0
+    floats_out = get(cs, Float64)
+    @test length(floats_out) == Nf+1 && floats_out[end] == 0
+    @test cs[Float64] === floats_out && get!(cs, Float64) === floats_out
+    ints_out = get(cs, Int)
+    @test length(ints_out) == Ni+1 && ints_out[end] == 0
+    @test cs[Int] === ints_out && get!(cs, Int) === ints_out
 end
 
 @testset "CostStruct.jl" begin
-    # Generate random data
+    # Generate random data
     floats = rand(10) * 100
     ints = convert(Vector{Int}, ceil.(floats))
     total = sum(floats) + sum(ints)
@@ -27,52 +29,72 @@ end
     bitvecfun(v::Vector{T}) where T = T <: Char ? T[] : view(v, 1:11 .<= 5)
     boolvecfun(v::Vector{T}) where T = T <: Char ? T[] : view(v, map(x->x<=5, 1:11))
 
-    # Construct repos and test the sum reduction
+    # Construct CostStructs and test reductions
     # Union container (converts to Tuple parameter)
-    vr2 = NLLSModels.CostStruct{Union{Float64, Int, Char}}()
-    @test isa(vr2, NLLSModels.CostStruct{<:Tuple})
-    keytup = keys(vr2)
+    cs2 = NLLSModels.CostStruct{Union{Float64, Int, Char}}()
+    @test isa(cs2, NLLSModels.CostStruct{<:Tuple})
+    keytup = keys(cs2)
     @test isa(keytup, Tuple) && length(keytup) == 3
     @test any(keytup .== Float64) && any(keytup .== Int) && any(keytup .== Char)
-    @test sum(i->2i, vr2; init=0.0) == 0.0
-    fillrepo(vr2, floats, ints)
-    @test sum(i->π*i, vr2; init=0.0) ≈ total * π
-    valuetup = values(vr2)
+    @test haskey(cs2, Float64) && haskey(cs2, Int) && haskey(cs2, Char) && !haskey(cs2, String)
+    @test_throws ErrorException get(cs2, String)
+    @test_throws ErrorException cs2[String]
+    @test_throws ErrorException push!(cs2, "invalid")
+    @test_throws ArgumentError sum(i->2i, cs2)
+    @test sum(i->2i, cs2; init=0.0) == 0.0
+    @test sum(i->2i, cs2; init=5.0) == 5.0
+    fillcoststruct(cs2, floats, ints)
+    @test sum(i->π*i, cs2; init=0.0) ≈ total * π
+    @test sum(i->π*i, cs2; init=10.0) ≈ total * π + 10.0
+    @test sum(i->π*i, cs2) ≈ total * π
+    valuetup = values(cs2)
     @test isa(valuetup, Tuple) && length(valuetup) == 3
     @test any(Base.Fix2(isa, Vector{Float64}), valuetup) && any(Base.Fix2(isa, Vector{Int}), valuetup) && any(Base.Fix2(isa, Vector{Char}), valuetup)
 
     # Test subset reductions
-    @test NLLSModels.sumsubset(Float64, vr2, rangefun) == halftotal
-    @test NLLSModels.sumsubset(Float64, vr2, indicesfun) == halftotal
-    @test NLLSModels.sumsubset(Float64, vr2, bitvecfun) == halftotal
-    @test NLLSModels.sumsubset(Float64, vr2, boolvecfun) ≈ halftotal
+    @test NLLSModels.sumsubset(Float64, cs2, rangefun) == halftotal
+    @test NLLSModels.sumsubset(Float64, cs2, rangefun; init=7.0) == halftotal + 7.0
+    @test NLLSModels.sumsubset(Float64, cs2, indicesfun) == halftotal
+    @test NLLSModels.sumsubset(Float64, cs2, bitvecfun) == halftotal
+    @test NLLSModels.sumsubset(Float64, cs2, boolvecfun) ≈ halftotal
 
     # Tuple container
-    vr2_tup = NLLSModels.CostStruct{Tuple{Float64, Int, Char}}()
-    @test isa(vr2_tup, NLLSModels.CostStruct{Tuple{Float64, Int, Char}})
-    keytup = keys(vr2_tup)
+    cs2_tup = NLLSModels.CostStruct{Tuple{Float64, Int, Char}}()
+    @test isa(cs2_tup, NLLSModels.CostStruct{Tuple{Float64, Int, Char}})
+    keytup = keys(cs2_tup)
     @test isa(keytup, Tuple) && length(keytup) == 3
     @test any(keytup .== Float64) && any(keytup .== Int) && any(keytup .== Char)
-    fillrepo(vr2_tup, floats, ints)
-    @test sum(i->π*i, vr2_tup; init=0.0) ≈ total * π
-    valuetup = values(vr2_tup)
+    fillcoststruct(cs2_tup, floats, ints)
+    @test sum(i->π*i, cs2_tup; init=0.0) ≈ total * π
+    valuetup = values(cs2_tup)
     @test isa(valuetup, Tuple) && length(valuetup) == 3
     @test any(Base.Fix2(isa, Vector{Float64}), valuetup) && any(Base.Fix2(isa, Vector{Int}), valuetup) && any(Base.Fix2(isa, Vector{Char}), valuetup)
-    @test NLLSModels.sumsubset(Float64, vr2_tup, rangefun) == halftotal
+    @test NLLSModels.sumsubset(Float64, cs2_tup, rangefun) == halftotal
 
     # Initialize from single vector
-    vr3 = NLLSModels.CostStruct([1, 2])
-    @test isa(vr3, NLLSModels.CostStruct{Tuple{Int}})
-    @test sum(i->i, vr3) == 3
-    @test NLLSModels.sumsubset(Float64, vr3, v -> view(v, 1:1)) == 1.0
-    keytup = keys(vr3)
+    cs3 = NLLSModels.CostStruct([1, 2])
+    @test isa(cs3, NLLSModels.CostStruct{Tuple{Int}})
+    @test sum(i->i, cs3) == 3
+    @test sum(cs3) == 3
+    @test NLLSModels.sumsubset(Float64, cs3, v -> view(v, 1:1)) == 1.0
+    keytup = keys(cs3)
     @test isa(keytup, Tuple) && length(keytup) == 1 && keytup[1] == Int
 
     # Single type container
-    vr5 = NLLSModels.CostStruct{Float64}()
-    @test isa(vr5, NLLSModels.CostStruct{Tuple{Float64}})
-    push!(vr5, 3.14)
-    @test sum(identity, vr5) == 3.14
-    @test keys(vr5) == (Float64,)
-    @test values(vr5) == ([3.14],)
+    cs5 = NLLSModels.CostStruct{Float64}()
+    @test isa(cs5, NLLSModels.CostStruct{Tuple{Float64}})
+    push!(cs5, 3.14)
+    @test sum(identity, cs5) == 3.14
+    @test sum(cs5) == 3.14
+    @test keys(cs5) == (Float64,)
+    @test values(cs5) == ([3.14],)
+
+    # Empty Union{} container & NLLSProblem cost type validation
+    cs_empty = NLLSModels.CostStruct{Union{}}()
+    @test isa(cs_empty, NLLSModels.CostStruct{Tuple{}})
+    @test keys(cs_empty) == ()
+    @test values(cs_empty) == ()
+    @test sum(identity, cs_empty; init=0.0) == 0.0
+    @test_throws ErrorException get(cs_empty, Float64)
+    @test_throws ArgumentError NLLSProblem{Float64, Int}(Float64[], cs5)
 end

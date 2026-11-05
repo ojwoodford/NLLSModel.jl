@@ -67,7 +67,7 @@ alloc_ephemeral(ls, ind) = @allocated NLLSModels.LinearSystem(ls, ind)
     @test NLLSModels.cost_range(vars_cr, costs_cr, 1:50) + NLLSModels.cost_range(vars_cr, costs_cr, 51:100) ≈ serial
 
     # Threaded cost matches serial cost for any thread count, above and below the threading threshold,
-    # and for both Union and Any cost repositories
+    # and for both Union and Tuple CostStructs
     for ncosts in (100, 60000)
         prob_union = NLLSProblem{Float64, Union{MTTestScalarRes, MTTestPairRes}}()
         prob_tuple = NLLSProblem{Float64, Tuple{MTTestScalarRes, MTTestPairRes}}()
@@ -122,7 +122,7 @@ alloc_ephemeral(ls, ind) = @allocated NLLSModels.LinearSystem(ls, ind)
     ls_static_shared_1 = NLLSModels.LinearSystemShared(ls_static_single.x, SVector{1}(ls_static_single.ls), MVector{1, Float64}(undef))
     @test NLLSModels.costgradhess!(ls_static_shared_1, prob_static.variables, prob_static.costs) ≈ c_s
 
-    # Threaded costgradhess! with concrete DataType and Union cost repos
+    # Threaded costgradhess! with concrete DataType and Union CostStructs
     prob_static_typed = NLLSProblem{Float64, MTTestScalarRes}()
     addvariable!(prob_static_typed, 2.0)
     for k in 1:120

@@ -1,17 +1,20 @@
 """
     NLLSProblem{VarTypes, CostTypes}([variables, costs])
+    NLLSProblem(VT, CT)
+    NLLSProblem(variables, CT)
+    NLLSProblem(variables, costs::CostStruct)
 
 Bipartite graph nonlinear least squares problem representation holding costs and variables.
 
 # Fields
-- `costs::CostStruct{CostTypes}`: Vector repository of cost/residual blocks.
+- `costs::CostStruct{CostTypes, CostVecs}`: Tuple-backed container of cost/residual vectors grouped by concrete type.
 - `variables::Vector{VarTypes}`: Vector of variable blocks.
 - `varcostmap::SparseMatrixCSC{Bool, Int}`: Variable-to-cost bipartite incidence matrix.
 - `varcostmapvalid::Bool`: Flag tracking validity of `varcostmap`.
 
 # Example
 ```julia
-problem = NLLSProblem(Float64)
+problem = NLLSProblem(Float64, MyResidual)
 addvariable!(problem, 0.0)
 addcost!(problem, MyResidual(1.0))
 ```
@@ -167,8 +170,9 @@ SimpleError4
 
 """
     CostStruct{T}()
+    CostStruct(v::Vector{T})
 
-Type-indexed repository storing heterogeneous cost or residual vectors by concrete type.
+Tuple-backed container storing heterogeneous cost or residual vectors grouped by concrete type (`T` may be a concrete type, `Union`, or `Tuple` of concrete types).
 """
 CostStruct
 
@@ -197,7 +201,7 @@ Appends a variable block to `problem` and returns its 1-based index.
 
 # Example
 ```julia
-problem = NLLSProblem(Float64)
+problem = NLLSProblem(Float64, MyResidual)
 idx = addvariable!(problem, 1.0) # 1
 ```
 """

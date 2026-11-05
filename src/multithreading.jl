@@ -23,7 +23,7 @@ function cost_multithreaded(vars, costs::CostStruct, ::StaticInt{N})::Float64 wh
     return tot
 end
 
-costgradhess_chunk_repo!(ls, vars, costs::CostStruct, N, taskid) = sumsubset(bindleadingargs(costgradhess!, ls, vars), costs, bindleadingargs(ithchunk, N, taskid); init=0.0)
+costgradhess_chunk!(ls, vars, costs::CostStruct, N, taskid) = sumsubset(bindleadingargs(costgradhess!, ls, vars), costs, bindleadingargs(ithchunk, N, taskid); init=0.0)
 
 function costgradhess!(linsystem::LinearSystemShared{F, V, N}, vars::AbstractVector, costs::CostStruct)::Float64 where {F, V, N}
     if N == 1
@@ -37,7 +37,7 @@ function costgradhess!(linsystem::LinearSystemShared{F, V, N}, vars::AbstractVec
     @batch for taskid in 1:N
         ls = LinearSystem(linsystem, taskid)
         zero!(ls)
-        linsystem.costs[taskid] = costgradhess_chunk_repo!(ls, vars, costs, N, taskid)
+        linsystem.costs[taskid] = costgradhess_chunk!(ls, vars, costs, N, taskid)
     end
 
     # Phase 2: Parallel tree reduction across the N buffers
