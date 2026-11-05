@@ -3,7 +3,7 @@
 ## Problem Representation
 
 ```@docs
-NLLSProblem
+NLLSModel
 addvariable!
 addcost!
 addresidual!
@@ -54,6 +54,6 @@ ContaminatedGaussian
 ## NLPModels Integration
 
 ```@docs
-NLLSModel
+NLPLSModel
 syncvars!
 ```

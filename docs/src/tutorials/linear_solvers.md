@@ -8,7 +8,7 @@ In nonlinear least squares, the normal equations at each iteration have the form
 
 ## Automatic Dense vs Sparse Block Selection
 
-`NLLSModels.jl` automatically inspects the variable-cost bipartite graph (`getvarcostmap(problem)`):
+`NLLSModel.jl` automatically inspects the variable-cost bipartite graph (`getvarcostmap(problem)`):
 - For small or dense problems, it assembles the Hessian into a `BlockDenseMatrix`.
 - For larger sparse problems ($\ge 40$ total degrees of freedom with sufficient block sparsity), it assembles the Hessian into a `BlockSparseMatrix` and symmetrifies into a `SparseMatrixCSC`.
 
@@ -22,7 +22,7 @@ Set the `linsolver` keyword in `OptimizationOptions` (or `NLLSOptions`):
 - `:qr`: Uses QR factorization for maximum numerical stability on ill-conditioned systems.
 
 ```julia
-using NLLSModels
+using NLLSModel
 
 options = OptimizationOptions(
     iterator = :levenbergmarquardt_dtd,

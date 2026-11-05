@@ -53,8 +53,8 @@ end
 end
 
 # Multi-variable objective and gradient/Hessian functors
-@inline sync_unfixed_vars!(::NLLSProblem, ::Nothing, vars) = vars
-@inline function sync_unfixed_vars!(problem::NLLSProblem, unfixed_inds::Vector{Int}, vars)
+@inline sync_unfixed_vars!(::NLLSModel, ::Nothing, vars) = vars
+@inline function sync_unfixed_vars!(problem::NLLSModel, unfixed_inds::Vector{Int}, vars)
     @inbounds for (k, idx) in enumerate(unfixed_inds)
         problem.variables[idx] = vars[k]
     end
@@ -115,11 +115,11 @@ end
     return c
 end
 
-function optimvars(problem::NLLSProblem, unfixed=nothing, numthreads=StaticInt(Threads.nthreads()))
+function optimvars(problem::NLLSModel, unfixed=nothing, numthreads=StaticInt(Threads.nthreads()))
     return optimvars_dispatch(problem, convertunfixed(unfixed, problem), static(numthreads))
 end
 
-function optimvars_dispatch(problem::NLLSProblem, unfixed::Integer, numthreads::StaticInt)
+function optimvars_dispatch(problem::NLLSModel, unfixed::Integer, numthreads::StaticInt)
     x0 = problem.variables[unfixed]
     varlen = nvars(x0)
     if dynamic(is_static(varlen)) && varlen <= 16
@@ -133,7 +133,7 @@ function optimvars_dispatch(problem::NLLSProblem, unfixed::Integer, numthreads::
     return (f, fdf!, x0, nothing)
 end
 
-function optimvars_dispatch(problem::NLLSProblem, unfixed::AbstractVector, numthreads::StaticInt)
+function optimvars_dispatch(problem::NLLSModel, unfixed::AbstractVector, numthreads::StaticInt)
     @assert length(problem.variables) > 0
     nblocks = sum(unfixed)
     if nblocks == 1
@@ -165,7 +165,7 @@ function optimvars_dispatch(problem::NLLSProblem, unfixed::AbstractVector, numth
     end
 end
 
-function NLLSModel end
+function NLPLSModel end
 
-NLLSModel(problem::NLLSProblem, args...; kwargs...) =
-    error("NLLSModel requires the NLPModels package. Run `using NLPModels` first.")
+NLPLSModel(problem::NLLSModel, args...; kwargs...) =
+    error("NLPLSModel requires the NLPModels package. Run `using NLPModels` first.")

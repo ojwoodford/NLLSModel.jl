@@ -1,4 +1,4 @@
-module NLLSModels
+module NLLSModel
 
 using BlockMatrices
 using FastNorm
@@ -19,9 +19,9 @@ import OptimizationVariableInterface:
 import FastNorm: sqnorm
 import ValueDispatch: valuedispatch
 
-# Export NLLSModels public interface
+# Export NLLSModel public interface
 # Problem construction & evaluation
-export NLLSProblem, NLLSModel
+export NLLSModel, NLPLSModel
 export addvariable!, addcost!, addresidual!, subproblem, subproblem!
 export cost, optimvars, syncvars!
 
@@ -66,4 +66,4 @@ include("multithreading.jl")
 include("optimize.jl")
 include("docstrings.jl")
 
-end # module NLLSModels
+end # module NLLSModel

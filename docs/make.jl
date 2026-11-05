@@ -1,11 +1,11 @@
 using Documenter
-using NLLSModels
+using NLLSModel
 
-DocMeta.setdocmeta!(NLLSModels, :DocTestSetup, :(using NLLSModels); recursive=true)
+DocMeta.setdocmeta!(NLLSModel, :DocTestSetup, :(using NLLSModel); recursive=true)
 
 makedocs(
-    sitename = "NLLSModels.jl",
-    modules = [NLLSModels],
+    sitename = "NLLSModel.jl",
+    modules = [NLLSModel],
     checkdocs = :exports,
     remotes = nothing,
     warnonly = false,
@@ -31,6 +31,6 @@ makedocs(
 )
 
 deploydocs(
-    repo = "github.com/ojwoodford/NLLSModels.jl.git",
+    repo = "github.com/ojwoodford/NLLSModel.jl.git",
     devbranch = "main",
 )

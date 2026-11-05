@@ -1,7 +1,7 @@
 """
-    NLLSProblem{VarTypes, CostTypes}([variables])
-    NLLSProblem(VT, CT)
-    NLLSProblem(variables, CT)
+    NLLSModel{VarTypes, CostTypes}([variables])
+    NLLSModel(VT, CT)
+    NLLSModel(variables, CT)
 
 Bipartite graph nonlinear least squares problem representation holding costs and variables.
 
@@ -13,17 +13,17 @@ Bipartite graph nonlinear least squares problem representation holding costs and
 
 # Example
 ```julia
-problem = NLLSProblem(Float64, MyResidual)
+problem = NLLSModel(Float64, MyResidual)
 addvariable!(problem, 0.0)
 addcost!(problem, MyResidual(1.0))
 ```
 """
-NLLSProblem
+NLLSModel
 
 """
     AbstractCost
 
-Abstract supertype for all cost blocks in an [`NLLSProblem`](@ref).
+Abstract supertype for all cost blocks in an [`NLLSModel`](@ref).
 """
 AbstractCost
 
@@ -168,21 +168,21 @@ Four-variable residual computing `generatemeasurement(v1, v2, v3, v4) - measurem
 SimpleError4
 
 """
-    addvariable!(problem::NLLSProblem, variable) -> Int
+    addvariable!(problem::NLLSModel, variable) -> Int
 
 Appends a variable block to `problem` and returns its 1-based index.
 
 # Example
 ```julia
-problem = NLLSProblem(Float64, MyResidual)
+problem = NLLSModel(Float64, MyResidual)
 idx = addvariable!(problem, 1.0) # 1
 ```
 """
 addvariable!
 
 """
-    addcost!(problem::NLLSProblem, cost::AbstractCost)
-    addresidual!(problem::NLLSProblem, res::AbstractResidual)
+    addcost!(problem::NLLSModel, cost::AbstractCost)
+    addresidual!(problem::NLLSModel, res::AbstractResidual)
 
 Appends a cost or residual block to `problem`.
 
@@ -194,7 +194,7 @@ addcost!(problem, my_residual)
 addcost!
 
 """
-    optimvars(problem::NLLSProblem, unfixed=nothing, numthreads=StaticInt(Threads.nthreads())) -> (f, fdf!, x0, H)
+    optimvars(problem::NLLSModel, unfixed=nothing, numthreads=StaticInt(Threads.nthreads())) -> (f, fdf!, x0, H)
 
 Constructs the objective function `f`, in-place gradient/Hessian evaluator `fdf!`, initial variable state `x0`, and Hessian template `H` (`nothing` for static/dense systems or a `SparseMatrixCSC` for sparse systems) for `problem`.
 
@@ -205,14 +205,14 @@ x_opt, result = optimize(f, fdf!, x0, options; H=H)
 ```
 
 # Arguments
-- `problem::NLLSProblem`: The nonlinear least squares problem.
+- `problem::NLLSModel`: The nonlinear least squares problem.
 - `unfixed`: Optional variable index (`Integer`), variable type (`DataType`), or boolean mask specifying which variables to optimize (defaults to `nothing`, optimizing all variables).
 - `numthreads`: Number of threads to use for parallel cost and derivative evaluation (`StaticInt` or `Integer`).
 """
 optimvars
 
 """
-    cost(problem::NLLSProblem, numthreads=StaticInt(Threads.nthreads())) -> Float64
+    cost(problem::NLLSModel, numthreads=StaticInt(Threads.nthreads())) -> Float64
 
 Evaluates and returns the total scalar objective cost of `problem`.
 
@@ -224,14 +224,14 @@ c = cost(problem)
 cost
 
 """
-    subproblem(problem::NLLSProblem, unfixed) -> NLLSProblem
+    subproblem(problem::NLLSModel, unfixed) -> NLLSModel
 
 Extracts a subproblem containing only costs connected to `unfixed` variables.
 """
 subproblem
 
 """
-    subproblem!(to::NLLSProblem, from::NLLSProblem, costindices) -> to
+    subproblem!(to::NLLSModel, from::NLLSModel, costindices) -> to
 
 Populates subproblem `to` in-place with the subset of costs from `from` indexed by `costindices`.
 """
@@ -245,7 +245,7 @@ Number of variable blocks `cost` depends upon (returned as `static(N)`).
 
 # Example
 ```julia
-NLLSModels.ndeps(::MyResidual) = static(2)
+NLLSModel.ndeps(::MyResidual) = static(2)
 ```
 """
 function ndeps end
@@ -257,7 +257,7 @@ Dimensionality of the residual vector returned by `cost` (e.g. `static(M)` or an
 
 # Example
 ```julia
-NLLSModels.nres(::MyResidual) = static(3)
+NLLSModel.nres(::MyResidual) = static(3)
 ```
 """
 function nres end
@@ -269,7 +269,7 @@ Indices of variables in `problem.variables` that `cost` depends upon.
 
 # Example
 ```julia
-NLLSModels.varindices(r::MyResidual) = r.varind
+NLLSModel.varindices(r::MyResidual) = r.varind
 ```
 """
 function varindices end
@@ -281,7 +281,7 @@ Extracts the concretely-typed tuple of variables for `cost` from `vars`.
 
 # Example
 ```julia
-NLLSModels.getvars(r::MyResidual, vars::Vector) = (vars[r.varind[1]]::Float64, vars[r.varind[2]]::Float64)
+NLLSModel.getvars(r::MyResidual, vars::Vector) = (vars[r.varind[1]]::Float64, vars[r.varind[2]]::Float64)
 ```
 """
 function getvars end
@@ -300,7 +300,7 @@ Returns the robustifier kernel for `cost` (defaults to [`NoRobust()`](@ref)).
 
 # Example
 ```julia
-NLLSModels.robustkernel(r::MyRobustResidual) = Huber2oKernel(1.5)
+NLLSModel.robustkernel(r::MyRobustResidual) = Huber2oKernel(1.5)
 ```
 """
 function robustkernel end
@@ -333,7 +333,7 @@ Computes the residual vector (or scalar) for `cost` given its unpacked variables
 
 # Example
 ```julia
-NLLSModels.computeresidual(r::MyResidual, x, y) = y - x - r.offset
+NLLSModel.computeresidual(r::MyResidual, x, y) = y - x - r.offset
 ```
 """
 function computeresidual end
@@ -361,24 +361,24 @@ Computes the scalar cost, gradient vector, and Hessian matrix for active variabl
 function computecostgradhess end
 
 """
-    NLLSModel(problem::NLLSProblem; unfixed=nothing, numthreads=1, name="NLLSModel")
+    NLPLSModel(problem::NLLSModel; unfixed=nothing, numthreads=1, name="NLPLSModel")
 
-Wraps an [`NLLSProblem`](@ref) as an `NLPModels.AbstractNLPModel` for use with general
+Wraps an [`NLLSModel`](@ref) as an `NLPModels.AbstractNLPModel` for use with general
 nonlinear programming solvers such as `JSOSolvers`, `Ipopt`, and `Optim`.
 
 Requires loading `NLPModels`:
 ```julia
-using NLLSModels, NLPModels
-nlp = NLLSModel(problem)
+using NLLSModel, NLPModels
+nlp = NLPLSModel(problem)
 ```
 
 # Arguments
-- `problem::NLLSProblem`: The nonlinear least-squares problem to wrap.
+- `problem::NLLSModel`: The nonlinear least-squares problem to wrap.
 
 # Keyword Arguments
 - `unfixed = nothing`: Boolean mask, integer, or vector indicating which variables are unfixed (optimized).
 - `numthreads = 1`: Number of threads for cost and gradient/Hessian evaluation.
-- `name = "NLLSModel"`: Name string assigned to the model metadata.
+- `name = "NLPLSModel"`: Name string assigned to the model metadata.
 
 # Features
 - Automatically selects dense or block-sparse Hessian representations based on problem structure.
@@ -386,11 +386,11 @@ nlp = NLLSModel(problem)
 - Caches cost, gradient, and Gauss-Newton Hessian evaluations across queries at the same point.
 - Transfers solution vectors back to `problem.variables` via [`syncvars!`](@ref).
 """
-NLLSModel
+NLPLSModel
 
 """
-    syncvars!(nlp, x::AbstractVector) -> NLLSProblem
-    syncvars!(prob::NLLSProblem, nlp, x::AbstractVector) -> NLLSProblem
+    syncvars!(nlp, x::AbstractVector) -> NLLSModel
+    syncvars!(prob::NLLSModel, nlp, x::AbstractVector) -> NLLSModel
 
 Copies the flat solution vector `x` back into the problem's `variables` array,
 taking unfixed variable subsets and block variable structures into account.

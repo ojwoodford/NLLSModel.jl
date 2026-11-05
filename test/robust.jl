@@ -1,4 +1,4 @@
-using NLLSModels, Test, StaticArrays
+using NLLSModel, Test, StaticArrays
 
 # Generic function for testing a robustifier
 function testrobustifier(kernel, costs, expected, firstorder=false)
@@ -6,15 +6,15 @@ function testrobustifier(kernel, costs, expected, firstorder=false)
         # Check the value is correct
         @test robustify(kernel, cost) ≈ expected[i]
         # Check the derivatives are correct
-        ad = NLLSModels.autorobustifydcost(kernel, cost)
+        ad = NLLSModel.autorobustifydcost(kernel, cost)
         if firstorder
             ad = (ad[1], ad[2], 0.0)
         end
         @test SVector(robustifydcost(kernel, cost)) ≈ SVector(ad)
-        if isa(kernel, NLLSModels.AbstractAdaptiveRobustifier)
+        if isa(kernel, NLLSModel.AbstractAdaptiveRobustifier)
             # Check the derivatives w.r.t. the kernel parameters
             c, dc, d2c = robustifydkernel(kernel, cost)
-            c_, dc_, d2c_ = NLLSModels.autorobustifydkernel(kernel, cost)
+            c_, dc_, d2c_ = NLLSModel.autorobustifydkernel(kernel, cost)
             @test c ≈ c_
             # @test dc ≈ dc_
             # @test d2c ≈ d2c_

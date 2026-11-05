@@ -1,24 +1,24 @@
-using NLLSModels, Test, Static, Random, LinearAlgebra
+using NLLSModel, Test, Static, Random, LinearAlgebra
 
-struct LinearResidual <: NLLSModels.AbstractResidual
+struct LinearResidual <: NLLSModel.AbstractResidual
     y::Float64
     X::Vector{Float64}
 end
-NLLSModels.ndeps(::LinearResidual) = static(1) # Residual depends on 1 variables
-NLLSModels.nres(::LinearResidual) = static(1) # Residual has length 1
-NLLSModels.varindices(::LinearResidual) = 1
-NLLSModels.getvars(::LinearResidual, vars::Vector) = (vars[1]::Vector{Float64},)
-NLLSModels.computeresidual(res::LinearResidual, w) = res.X' * w - res.y
+NLLSModel.ndeps(::LinearResidual) = static(1) # Residual depends on 1 variables
+NLLSModel.nres(::LinearResidual) = static(1) # Residual has length 1
+NLLSModel.varindices(::LinearResidual) = 1
+NLLSModel.getvars(::LinearResidual, vars::Vector) = (vars[1]::Vector{Float64},)
+NLLSModel.computeresidual(res::LinearResidual, w) = res.X' * w - res.y
 Base.eltype(::LinearResidual) = Float64
 
-struct NormResidual <: NLLSModels.AbstractResidual
+struct NormResidual <: NLLSModel.AbstractResidual
     len::Int
 end
-NLLSModels.ndeps(::NormResidual) = static(1) # Residual depends on 1 variables
-NLLSModels.nres(res::NormResidual) = res.len
-NLLSModels.varindices(::NormResidual) = 1
-NLLSModels.getvars(::NormResidual, vars::Vector) = (vars[1]::Vector{Float64},)
-NLLSModels.computeresidual(::NormResidual, w) = w
+NLLSModel.ndeps(::NormResidual) = static(1) # Residual depends on 1 variables
+NLLSModel.nres(res::NormResidual) = res.len
+NLLSModel.varindices(::NormResidual) = 1
+NLLSModel.getvars(::NormResidual, vars::Vector) = (vars[1]::Vector{Float64},)
+NLLSModel.computeresidual(::NormResidual, w) = w
 Base.eltype(::NormResidual) = Float64
 
 @testset "dynamicvars.jl" begin
@@ -28,10 +28,10 @@ Base.eltype(::NormResidual) = Float64
     n = length(X)
 
     # Create the problem
-    problem = NLLSModels.NLLSProblem(Vector{Float64}, Union{LinearResidual, NormResidual})
-    NLLSModels.addvariable!(problem, zeros(n))
-    NLLSModels.addcost!(problem, LinearResidual(1.0, X))
-    NLLSModels.addcost!(problem, NormResidual(n))
+    problem = NLLSModel.NLLSModel(Vector{Float64}, Union{LinearResidual, NormResidual})
+    NLLSModel.addvariable!(problem, zeros(n))
+    NLLSModel.addcost!(problem, LinearResidual(1.0, X))
+    NLLSModel.addcost!(problem, NormResidual(n))
 
     # Build optimization variables via optimvars
     f, fdf!, x0, H = optimvars(problem)

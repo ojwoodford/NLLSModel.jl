@@ -1,6 +1,6 @@
 module NLPModelExt
 
-using NLLSModels
+using NLLSModel
 using NLPModels
 using LinearAlgebra
 using SparseArrays
@@ -66,8 +66,8 @@ end
 """
     NLLSModelNLP <: AbstractNLPModel{Float64, Vector{Float64}}
 
-Concrete wrapper adapting an `NLLSProblem` to the `NLPModels.AbstractNLPModel` interface.
-Enables solving nonlinear least-squares problems formulated in `NLLSModels` using general
+Concrete wrapper adapting an `NLLSModel` to the `NLPModels.AbstractNLPModel` interface.
+Enables solving nonlinear least-squares problems formulated in `NLLSModel` using general
 NLP solvers including `JSOSolvers`, `Ipopt`, and `Optim`.
 """
 mutable struct NLLSModelNLP{P, F, FDF, X0, H, VarsBuf, BSZ, HIdx, UInd} <: AbstractNLPModel{Float64, Vector{Float64}}
@@ -92,9 +92,9 @@ mutable struct NLLSModelNLP{P, F, FDF, X0, H, VarsBuf, BSZ, HIdx, UInd} <: Abstr
     cache_valid::Base.RefValue{Bool}
 end
 
-function NLLSModels.NLLSModel(problem::NLLSProblem; unfixed=nothing, numthreads=static(1), name="NLLSModel")
+function NLLSModel.NLPLSModel(problem::NLLSModel; unfixed=nothing, numthreads=static(1), name="NLPLSModel")
     f, fdf!, x0, H_temp = optimvars(problem, unfixed, numthreads)
-    conv_unfixed = NLLSModels.convertunfixed(unfixed, problem)
+    conv_unfixed = NLLSModel.convertunfixed(unfixed, problem)
 
     if conv_unfixed isa Integer
         is_single = true
@@ -195,8 +195,8 @@ function NLLSModels.NLLSModel(problem::NLLSProblem; unfixed=nothing, numthreads=
     )
 end
 
-NLPModels.AbstractNLPModel(problem::NLLSProblem; kwargs...) = NLLSModels.NLLSModel(problem; kwargs...)
-Base.convert(::Type{AbstractNLPModel}, problem::NLLSProblem) = NLLSModels.NLLSModel(problem)
+NLPModels.AbstractNLPModel(problem::NLLSModel; kwargs...) = NLLSModel.NLPLSModel(problem; kwargs...)
+Base.convert(::Type{AbstractNLPModel}, problem::NLLSModel) = NLLSModel.NLPLSModel(problem)
 
 function unpack_to_vars!(nlp::NLLSModelNLP, x::AbstractVector)
     if nlp.is_single_var
@@ -303,8 +303,8 @@ end
 
 # Synchronize solution back to problem variables
 """
-    syncvars!(nlp::NLLSModelNLP, x::AbstractVector) -> NLLSProblem
-    syncvars!(prob::NLLSProblem, nlp::NLLSModelNLP, x::AbstractVector) -> NLLSProblem
+    syncvars!(nlp::NLLSModelNLP, x::AbstractVector) -> NLLSModel
+    syncvars!(prob::NLLSModel, nlp::NLLSModelNLP, x::AbstractVector) -> NLLSModel
 
 Copies the flat variable vector `x` back into the wrapped problem's `variables` array.
 """
@@ -322,7 +322,7 @@ function OptimizationVariableInterface.syncvars!(nlp::NLLSModelNLP, x::AbstractV
     return nlp.problem
 end
 
-OptimizationVariableInterface.syncvars!(::NLLSProblem, nlp::NLLSModelNLP, x::AbstractVector) =
+OptimizationVariableInterface.syncvars!(::NLLSModel, nlp::NLLSModelNLP, x::AbstractVector) =
     syncvars!(nlp, x)
 
 end # module NLPModelExt

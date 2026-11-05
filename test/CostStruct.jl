@@ -1,4 +1,4 @@
-using NLLSModels, Test
+using NLLSModel, Test
 
 function fillcoststruct(cs, floats, ints)
     # Fill the CostStruct with the data
@@ -31,8 +31,8 @@ end
 
     # Construct CostStructs and test reductions
     # Union container (converts to Tuple parameter)
-    cs2 = NLLSModels.CostStruct{Union{Float64, Int, Char}}()
-    @test isa(cs2, NLLSModels.CostStruct{<:Tuple})
+    cs2 = NLLSModel.CostStruct{Union{Float64, Int, Char}}()
+    @test isa(cs2, NLLSModel.CostStruct{<:Tuple})
     keytup = keys(cs2)
     @test isa(keytup, Tuple) && length(keytup) == 3
     @test any(keytup .== Float64) && any(keytup .== Int) && any(keytup .== Char)
@@ -52,15 +52,15 @@ end
     @test any(Base.Fix2(isa, Vector{Float64}), valuetup) && any(Base.Fix2(isa, Vector{Int}), valuetup) && any(Base.Fix2(isa, Vector{Char}), valuetup)
 
     # Test subset reductions
-    @test NLLSModels.sumsubset(Float64, cs2, rangefun) == halftotal
-    @test NLLSModels.sumsubset(Float64, cs2, rangefun; init=7.0) == halftotal + 7.0
-    @test NLLSModels.sumsubset(Float64, cs2, indicesfun) == halftotal
-    @test NLLSModels.sumsubset(Float64, cs2, bitvecfun) == halftotal
-    @test NLLSModels.sumsubset(Float64, cs2, boolvecfun) ≈ halftotal
+    @test NLLSModel.sumsubset(Float64, cs2, rangefun) == halftotal
+    @test NLLSModel.sumsubset(Float64, cs2, rangefun; init=7.0) == halftotal + 7.0
+    @test NLLSModel.sumsubset(Float64, cs2, indicesfun) == halftotal
+    @test NLLSModel.sumsubset(Float64, cs2, bitvecfun) == halftotal
+    @test NLLSModel.sumsubset(Float64, cs2, boolvecfun) ≈ halftotal
 
     # Tuple container
-    cs2_tup = NLLSModels.CostStruct{Tuple{Float64, Int, Char}}()
-    @test isa(cs2_tup, NLLSModels.CostStruct{Tuple{Float64, Int, Char}})
+    cs2_tup = NLLSModel.CostStruct{Tuple{Float64, Int, Char}}()
+    @test isa(cs2_tup, NLLSModel.CostStruct{Tuple{Float64, Int, Char}})
     keytup = keys(cs2_tup)
     @test isa(keytup, Tuple) && length(keytup) == 3
     @test any(keytup .== Float64) && any(keytup .== Int) && any(keytup .== Char)
@@ -69,32 +69,32 @@ end
     valuetup = values(cs2_tup)
     @test isa(valuetup, Tuple) && length(valuetup) == 3
     @test any(Base.Fix2(isa, Vector{Float64}), valuetup) && any(Base.Fix2(isa, Vector{Int}), valuetup) && any(Base.Fix2(isa, Vector{Char}), valuetup)
-    @test NLLSModels.sumsubset(Float64, cs2_tup, rangefun) == halftotal
+    @test NLLSModel.sumsubset(Float64, cs2_tup, rangefun) == halftotal
 
     # Initialize from single vector
-    cs3 = NLLSModels.CostStruct([1, 2])
-    @test isa(cs3, NLLSModels.CostStruct{Tuple{Int}})
+    cs3 = NLLSModel.CostStruct([1, 2])
+    @test isa(cs3, NLLSModel.CostStruct{Tuple{Int}})
     @test sum(i->i, cs3) == 3
     @test sum(cs3) == 3
-    @test NLLSModels.sumsubset(Float64, cs3, v -> view(v, 1:1)) == 1.0
+    @test NLLSModel.sumsubset(Float64, cs3, v -> view(v, 1:1)) == 1.0
     keytup = keys(cs3)
     @test isa(keytup, Tuple) && length(keytup) == 1 && keytup[1] == Int
 
     # Single type container
-    cs5 = NLLSModels.CostStruct{Float64}()
-    @test isa(cs5, NLLSModels.CostStruct{Tuple{Float64}})
+    cs5 = NLLSModel.CostStruct{Float64}()
+    @test isa(cs5, NLLSModel.CostStruct{Tuple{Float64}})
     push!(cs5, 3.14)
     @test sum(identity, cs5) == 3.14
     @test sum(cs5) == 3.14
     @test keys(cs5) == (Float64,)
     @test values(cs5) == ([3.14],)
 
-    # Empty Union{} container & NLLSProblem cost type validation
-    cs_empty = NLLSModels.CostStruct{Union{}}()
-    @test isa(cs_empty, NLLSModels.CostStruct{Tuple{}})
+    # Empty Union{} container & NLLSModel cost type validation
+    cs_empty = NLLSModel.CostStruct{Union{}}()
+    @test isa(cs_empty, NLLSModel.CostStruct{Tuple{}})
     @test keys(cs_empty) == ()
     @test values(cs_empty) == ()
     @test sum(identity, cs_empty; init=0.0) == 0.0
     @test_throws ErrorException get(cs_empty, Float64)
-    @test_throws ArgumentError NLLSProblem{Float64, Int}(Float64[], cs5)
+    @test_throws ArgumentError NLLSModel{Float64, Int}(Float64[], cs5)
 end

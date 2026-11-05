@@ -1,49 +1,49 @@
-using NLLSModels, Test, Static, StaticArrays, LinearAlgebra
+using NLLSModel, Test, Static, StaticArrays, LinearAlgebra
 using OptimizationVariableInterface: update!
 
 const NDIMS = 3
-struct LinearResidualStatic <: NLLSModels.AbstractResidual
+struct LinearResidualStatic <: NLLSModel.AbstractResidual
     y::SVector{NDIMS, Float64}
     X::SMatrix{NDIMS, NDIMS, Float64, NDIMS*NDIMS}
     varind::Int
 end
-NLLSModels.ndeps(::LinearResidualStatic) = static(1)
-NLLSModels.nres(::LinearResidualStatic) = static(NDIMS)
-NLLSModels.varindices(res::LinearResidualStatic) = res.varind
-NLLSModels.getvars(res::LinearResidualStatic, vars::Vector) = (vars[res.varind]::SVector{NDIMS, Float64},)
-NLLSModels.computeresidual(res::LinearResidualStatic, w) = res.X * w - res.y
+NLLSModel.ndeps(::LinearResidualStatic) = static(1)
+NLLSModel.nres(::LinearResidualStatic) = static(NDIMS)
+NLLSModel.varindices(res::LinearResidualStatic) = res.varind
+NLLSModel.getvars(res::LinearResidualStatic, vars::Vector) = (vars[res.varind]::SVector{NDIMS, Float64},)
+NLLSModel.computeresidual(res::LinearResidualStatic, w) = res.X * w - res.y
 Base.eltype(::LinearResidualStatic) = Float64
 
-struct LinearResidualDynamic <: NLLSModels.AbstractResidual
+struct LinearResidualDynamic <: NLLSModel.AbstractResidual
     y::Vector{Float64}
     X::Matrix{Float64}
     varind::Int
 end
-NLLSModels.ndeps(::LinearResidualDynamic) = static(1)
-NLLSModels.nres(res::LinearResidualDynamic) = length(res.y)
-NLLSModels.varindices(res::LinearResidualDynamic) = res.varind
-NLLSModels.getvars(res::LinearResidualDynamic, vars::Vector) = (vars[res.varind]::Vector{Float64},)
-NLLSModels.computeresidual(res::LinearResidualDynamic, w) = res.X * w - res.y
+NLLSModel.ndeps(::LinearResidualDynamic) = static(1)
+NLLSModel.nres(res::LinearResidualDynamic) = length(res.y)
+NLLSModel.varindices(res::LinearResidualDynamic) = res.varind
+NLLSModel.getvars(res::LinearResidualDynamic, vars::Vector) = (vars[res.varind]::Vector{Float64},)
+NLLSModel.computeresidual(res::LinearResidualDynamic, w) = res.X * w - res.y
 Base.eltype(::LinearResidualDynamic) = Float64
 
-struct LinearCostStatic <: NLLSModels.AbstractCost
+struct LinearCostStatic <: NLLSModel.AbstractCost
     y::SVector{NDIMS, Float64}
     varind::Int
 end
-NLLSModels.ndeps(::LinearCostStatic) = static(1)
-NLLSModels.varindices(cost::LinearCostStatic) = cost.varind
-NLLSModels.getvars(cost::LinearCostStatic, vars::Vector) = (vars[cost.varind]::SVector{NDIMS, Float64},)
-NLLSModels.computecost(cost::LinearCostStatic, w) = cost.y' * w
+NLLSModel.ndeps(::LinearCostStatic) = static(1)
+NLLSModel.varindices(cost::LinearCostStatic) = cost.varind
+NLLSModel.getvars(cost::LinearCostStatic, vars::Vector) = (vars[cost.varind]::SVector{NDIMS, Float64},)
+NLLSModel.computecost(cost::LinearCostStatic, w) = cost.y' * w
 Base.eltype(::LinearCostStatic) = Float64
 
-struct LinearCostDynamic <: NLLSModels.AbstractCost
+struct LinearCostDynamic <: NLLSModel.AbstractCost
     y::Vector{Float64}
     varind::Int
 end
-NLLSModels.ndeps(::LinearCostDynamic) = static(1)
-NLLSModels.varindices(cost::LinearCostDynamic) = cost.varind
-NLLSModels.getvars(cost::LinearCostDynamic, vars::Vector) = (vars[cost.varind]::Vector{Float64},)
-NLLSModels.computecost(cost::LinearCostDynamic, w) = cost.y' * w
+NLLSModel.ndeps(::LinearCostDynamic) = static(1)
+NLLSModel.varindices(cost::LinearCostDynamic) = cost.varind
+NLLSModel.getvars(cost::LinearCostDynamic, vars::Vector) = (vars[cost.varind]::Vector{Float64},)
+NLLSModel.computecost(cost::LinearCostDynamic, w) = cost.y' * w
 Base.eltype(::LinearCostDynamic) = Float64
 
 @testset "nonsquaredcost.jl" begin
@@ -53,13 +53,13 @@ Base.eltype(::LinearCostDynamic) = Float64
     solution = (X' * X) \ ((X' - I) * y)
 
     # Create the problem
-    problem = NLLSModels.NLLSProblem(Union{SVector{NDIMS, Float64}, Vector{Float64}}, Union{LinearResidualStatic, LinearCostStatic, LinearResidualDynamic, LinearCostDynamic})
-    NLLSModels.addvariable!(problem, zeros(SVector{NDIMS, Float64}))
-    NLLSModels.addcost!(problem, LinearResidualStatic(y, X, 1))
-    NLLSModels.addcost!(problem, LinearCostStatic(y, 1))
-    NLLSModels.addvariable!(problem, zeros(NDIMS))
-    NLLSModels.addcost!(problem, LinearResidualDynamic(Vector(y), Matrix(X), 2))
-    NLLSModels.addcost!(problem, LinearCostDynamic(Vector(y), 2))
+    problem = NLLSModel.NLLSModel(Union{SVector{NDIMS, Float64}, Vector{Float64}}, Union{LinearResidualStatic, LinearCostStatic, LinearResidualDynamic, LinearCostDynamic})
+    NLLSModel.addvariable!(problem, zeros(SVector{NDIMS, Float64}))
+    NLLSModel.addcost!(problem, LinearResidualStatic(y, X, 1))
+    NLLSModel.addcost!(problem, LinearCostStatic(y, 1))
+    NLLSModel.addvariable!(problem, zeros(NDIMS))
+    NLLSModel.addcost!(problem, LinearResidualDynamic(Vector(y), Matrix(X), 2))
+    NLLSModel.addcost!(problem, LinearCostDynamic(Vector(y), 2))
 
     # Evaluate via optimvars (all variables)
     f, fdf!, x0, H = optimvars(problem)

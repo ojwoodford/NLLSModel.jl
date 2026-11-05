@@ -1,24 +1,24 @@
 using Test
-using NLLSModels
+using NLLSModel
 using NLPModels
 using Static, StaticArrays, SparseArrays, LinearAlgebra
 import OptimizationVariableInterface: nvars, syncvars!
 
 # Define sample residuals for tests
 struct Rosenbrock1 <: AbstractResidual end
-NLLSModels.ndeps(::Rosenbrock1) = static(1)
-NLLSModels.nres(::Rosenbrock1) = static(1)
-NLLSModels.varindices(::Rosenbrock1) = SVector(1)
-NLLSModels.getvars(::Rosenbrock1, vars::Vector) = (vars[1]::SVector{2, Float64},)
-NLLSModels.computeresidual(::Rosenbrock1, x) = SVector(1.0 - x[1])
+NLLSModel.ndeps(::Rosenbrock1) = static(1)
+NLLSModel.nres(::Rosenbrock1) = static(1)
+NLLSModel.varindices(::Rosenbrock1) = SVector(1)
+NLLSModel.getvars(::Rosenbrock1, vars::Vector) = (vars[1]::SVector{2, Float64},)
+NLLSModel.computeresidual(::Rosenbrock1, x) = SVector(1.0 - x[1])
 Base.eltype(::Rosenbrock1) = Float64
 
 struct Rosenbrock2 <: AbstractResidual end
-NLLSModels.ndeps(::Rosenbrock2) = static(1)
-NLLSModels.nres(::Rosenbrock2) = static(1)
-NLLSModels.varindices(::Rosenbrock2) = SVector(1)
-NLLSModels.getvars(::Rosenbrock2, vars::Vector) = (vars[1]::SVector{2, Float64},)
-NLLSModels.computeresidual(::Rosenbrock2, x) = SVector(10.0 * (x[2] - x[1]^2))
+NLLSModel.ndeps(::Rosenbrock2) = static(1)
+NLLSModel.nres(::Rosenbrock2) = static(1)
+NLLSModel.varindices(::Rosenbrock2) = SVector(1)
+NLLSModel.getvars(::Rosenbrock2, vars::Vector) = (vars[1]::SVector{2, Float64},)
+NLLSModel.computeresidual(::Rosenbrock2, x) = SVector(10.0 * (x[2] - x[1]^2))
 Base.eltype(::Rosenbrock2) = Float64
 
 struct PairDiff <: AbstractResidual
@@ -27,32 +27,32 @@ struct PairDiff <: AbstractResidual
     val::Float64
 end
 PairDiff(i, j) = PairDiff(i, j, 1.0)
-NLLSModels.ndeps(::PairDiff) = static(2)
-NLLSModels.nres(::PairDiff) = static(1)
-NLLSModels.varindices(r::PairDiff) = SVector(r.i, r.j)
-NLLSModels.getvars(r::PairDiff, vars::Vector) = (vars[r.i]::SVector{1, Float64}, vars[r.j]::SVector{1, Float64})
-NLLSModels.computeresidual(r::PairDiff, xi, xj) = SVector(xi[1] - xj[1] - r.val)
+NLLSModel.ndeps(::PairDiff) = static(2)
+NLLSModel.nres(::PairDiff) = static(1)
+NLLSModel.varindices(r::PairDiff) = SVector(r.i, r.j)
+NLLSModel.getvars(r::PairDiff, vars::Vector) = (vars[r.i]::SVector{1, Float64}, vars[r.j]::SVector{1, Float64})
+NLLSModel.computeresidual(r::PairDiff, xi, xj) = SVector(xi[1] - xj[1] - r.val)
 Base.eltype(::PairDiff) = Float64
 
 struct AnchorVal <: AbstractResidual
     val::Float64
 end
 AnchorVal() = AnchorVal(0.0)
-NLLSModels.ndeps(::AnchorVal) = static(1)
-NLLSModels.nres(::AnchorVal) = static(1)
-NLLSModels.varindices(::AnchorVal) = SVector(1)
-NLLSModels.getvars(::AnchorVal, vars::Vector) = (vars[1]::SVector{1, Float64},)
-NLLSModels.computeresidual(r::AnchorVal, x1) = SVector(x1[1] - r.val)
+NLLSModel.ndeps(::AnchorVal) = static(1)
+NLLSModel.nres(::AnchorVal) = static(1)
+NLLSModel.varindices(::AnchorVal) = SVector(1)
+NLLSModel.getvars(::AnchorVal, vars::Vector) = (vars[1]::SVector{1, Float64},)
+NLLSModel.computeresidual(r::AnchorVal, x1) = SVector(x1[1] - r.val)
 Base.eltype(::AnchorVal) = Float64
 
 @testset "NLPModelExt - Single-Variable Dense Model" begin
-    prob = NLLSProblem(SVector{2, Float64}, Union{Rosenbrock1, Rosenbrock2})
+    prob = NLLSModel(SVector{2, Float64}, Union{Rosenbrock1, Rosenbrock2})
     addvariable!(prob, SVector(-1.2, 1.0))
     addcost!(prob, Rosenbrock1())
     addcost!(prob, Rosenbrock2())
 
     # Construction
-    nlp = NLLSModel(prob; name="Rosenbrock2D")
+    nlp = NLPLSModel(prob; name="Rosenbrock2D")
     @test nlp isa AbstractNLPModel
     @test get_nvar(nlp.meta) == 2
     @test get_nnzh(nlp.meta) == 3
@@ -132,7 +132,7 @@ Base.eltype(::AnchorVal) = Float64
 end
 
 @testset "NLPModelExt - Multi-Variable Dense Model" begin
-    prob = NLLSProblem(SVector{1, Float64}, Union{PairDiff, AnchorVal})
+    prob = NLLSModel(SVector{1, Float64}, Union{PairDiff, AnchorVal})
     for i in 1:5
         addvariable!(prob, SVector(0.0))
     end
@@ -141,7 +141,7 @@ end
         addcost!(prob, PairDiff(i, i+1, 2.0))
     end
 
-    nlp = NLLSModel(prob)
+    nlp = NLPLSModel(prob)
     @test get_nvar(nlp.meta) == 5
     @test get_nnzh(nlp.meta) == 15 # 5*(6)/2 = 15 for dense
     @test get_x0(nlp.meta) == zeros(5)
@@ -168,7 +168,7 @@ end
 
 @testset "NLPModelExt - Multi-Variable Block-Sparse Model" begin
     N = 60 # >= 40 to trigger sparse linear system
-    prob = NLLSProblem(SVector{1, Float64}, Union{PairDiff, AnchorVal})
+    prob = NLLSModel(SVector{1, Float64}, Union{PairDiff, AnchorVal})
     for i in 1:N
         addvariable!(prob, SVector(0.0))
     end
@@ -177,7 +177,7 @@ end
         addcost!(prob, PairDiff(i, i+1, 1.0))
     end
 
-    nlp = NLLSModel(prob)
+    nlp = NLPLSModel(prob)
     @test get_nvar(nlp.meta) == N
     # Tridiagonal lower triangle: N diagonal entries + (N-1) subdiagonal entries = 2N - 1
     @test get_nnzh(nlp.meta) == 2 * N - 1
@@ -207,13 +207,13 @@ end
 end
 
 @testset "NLPModelExt - Unfixed Subset of Variables" begin
-    prob = NLLSProblem(SVector{1, Float64}, PairDiff)
+    prob = NLLSModel(SVector{1, Float64}, PairDiff)
     addvariable!(prob, SVector(10.0))
     addvariable!(prob, SVector(0.0))
     addcost!(prob, PairDiff(1, 2, 3.0)) # x1 - x2 - 3 = 0 => x2 = 7
 
     # Variable 2 only
-    nlp = NLLSModel(prob; unfixed=2)
+    nlp = NLPLSModel(prob; unfixed=2)
     @test get_nvar(nlp.meta) == 1
     @test get_x0(nlp.meta) == [0.0]
 
@@ -234,7 +234,7 @@ end
 end
 
 @testset "NLPModelExt - AbstractNLPModel Conversion & Constructor" begin
-    prob = NLLSProblem(SVector{2, Float64}, Union{Rosenbrock1, Rosenbrock2})
+    prob = NLLSModel(SVector{2, Float64}, Union{Rosenbrock1, Rosenbrock2})
     addvariable!(prob, SVector(0.0, 0.0))
     addcost!(prob, Rosenbrock1())
 
