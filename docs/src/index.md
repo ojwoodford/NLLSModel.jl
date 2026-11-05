@@ -16,7 +16,7 @@ where:
 
 ## Features
 
-- **Heterogeneous Variable & Cost Blocks**: Store variable blocks and cost types with zero type-instability using [`VectorRepo`](@ref).
+- **Heterogeneous Variable & Cost Blocks**: Store variable blocks and cost types with zero type-instability using [`CostStruct`](@ref).
 - **Fast Block Linear Algebra**: Custom [`BlockDenseMatrix`](@ref) and [`BlockSparseMatrix`](@ref) (from `BlockMatrices.jl`) tailored for sparse $LDL^T$, Cholesky, and QR factorizations.
 - **Automatic Differentiation**: Evaluates residual Jacobians and cost gradients/Hessians automatically via `ForwardDiff.jl`, or uses user-supplied analytic derivatives via [`computeresjac`](@ref).
 - **Robust M-Estimators**: First- and second-order robust kernels plus adaptive robustifiers ([`ContaminatedGaussian`](@ref)).

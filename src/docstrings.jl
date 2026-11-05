@@ -166,11 +166,11 @@ Four-variable residual computing `generatemeasurement(v1, v2, v3, v4) - measurem
 SimpleError4
 
 """
-    VectorRepo{T}()
+    CostStruct{T}()
 
 Type-indexed repository storing heterogeneous cost or residual vectors by concrete type.
 """
-VectorRepo
+CostStruct
 
 """
     optimvars(problem::NLLSProblem, unfixed=nothing, numthreads=StaticInt(Threads.nthreads())) -> (f, fdf!, x0, H)
@@ -218,7 +218,7 @@ addcost!
 
 """
     cost(problem::NLLSProblem, numthreads=StaticInt(Threads.nthreads())) -> Float64
-    cost(vars::AbstractVector, costs::VectorRepo, numthreads=static(1)) -> Float64
+    cost(vars::AbstractVector, costs::CostStruct, numthreads=static(1)) -> Float64
 
 Evaluates and returns the total scalar objective cost of `problem`.
 
@@ -230,7 +230,7 @@ c = cost(problem)
 cost
 
 """
-    costgradhess!(linsystem, vars::AbstractVector, costs::VectorRepo) -> Float64
+    costgradhess!(linsystem, vars::AbstractVector, costs::CostStruct) -> Float64
 
 Evaluates the total cost, gradient, and Gauss-Newton/second-order Hessian approximation of `costs` at `vars` into `linsystem`.
 """

@@ -25,7 +25,7 @@ export AbstractCost, AbstractResidual, AbstractAdaptiveResidual, AbstractRobusti
 export NoRobust, Scaled, HuberKernel, Huber2oKernel, GemanMcclureKernel, GemanMcclure2oKernel, ContaminatedGaussian
 export ZeroToInfScalar, ZeroToOneScalar
 export SimpleError2, SimpleError3, SimpleError4
-export BlockSparseMatrix, BlockDenseMatrix, VectorRepo
+export BlockSparseMatrix, BlockDenseMatrix, CostStruct
 export addvariable!, addcost!, addresidual!, updatevarcostmap!, subproblem, subproblem!
 export cost, costgradhess!, computeresidual, computeresjac, computecost, computecostgradhess
 export optimvars
@@ -47,7 +47,7 @@ const MAX_STATIC_VAR = 64 # Maximum static variable size for static sized autodi
 
 # Includes
 include("utils.jl")
-include("VectorRepo.jl")
+include("CostStruct.jl")
 include("problem.jl")
 const addresidual! = addcost!
 include("unroll.jl")

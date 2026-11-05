@@ -1,33 +1,38 @@
 using Static, SparseArrays
 import OptimizationVariableInterface: nvars
 
-const CostStruct = VectorRepo
-
-mutable struct NLLSProblem{VarTypes, CostTypes}
+mutable struct NLLSProblem{VarTypes, CostTypes, CostVecs}
     # User provided
-    costs::CostStruct{CostTypes} # Set of cost and residual blocks that define the problem
+    costs::CostStruct{CostTypes, CostVecs} # Set of cost and residual blocks that define the problem
     variables::Vector{VarTypes}  # Current state of variables in use by optimizer
 
     # Used internally
     varcostmap::SparseMatrixCSC{Bool, Int} # Map of variables used by each cost block
     varcostmapvalid::Bool        # Flag indicating whether the above variable cost map is valid
 
-    # Constructor
+    # Constructors
     function NLLSProblem{VarTypes, CostTypes}(
-        vars = Vector{VarTypes}(),
+        vars::Vector{VarTypes} = Vector{VarTypes}(),
         costs = CostStruct{CostTypes}(),
         varcostmap = spzeros(Bool, 0, 0),
         varcostmapvalid = false
     ) where {VarTypes, CostTypes}
         TCT = tupelize(CostTypes)
-        return new{VarTypes, TCT}(costs, vars, varcostmap, varcostmapvalid)
+        actual_costs = costs isa CostStruct{TCT} ? costs : CostStruct{TCT}()
+        return new{VarTypes, TCT, typeof(actual_costs.data)}(actual_costs, vars, varcostmap, varcostmapvalid)
+    end
+    function NLLSProblem{VarTypes, CostTypes, CostVecs}(
+        vars::Vector{VarTypes},
+        costs::CostStruct{CostTypes, CostVecs},
+        varcostmap = spzeros(Bool, 0, 0),
+        varcostmapvalid = false
+    ) where {VarTypes, CostTypes, CostVecs}
+        return new{VarTypes, CostTypes, CostVecs}(costs, vars, varcostmap, varcostmapvalid)
     end
 end
 
-NLLSProblem() = NLLSProblem{Any, Any}()
-NLLSProblem(VT::Union{DataType, Union}) = NLLSProblem{VT, Any}()
 NLLSProblem(VT::Union{DataType, Union}, CT::Union{DataType, Union}) = NLLSProblem{VT, CT}()
-NLLSProblem(v::Vector{VT}) where VT = NLLSProblem{VT, Any}(v)
+NLLSProblem(v::Vector{VT}, CT::Union{DataType, Union}) where VT = NLLSProblem{VT, CT}(v)
 NLLSProblem(v::Vector{VT}, r::CostStruct{CT}) where {VT, CT} = NLLSProblem{VT, CT}(v, r)
 
 function Base.getproperty(p::NLLSProblem, s::Symbol)
@@ -76,7 +81,7 @@ end
 
 function selectcosts!(outcosts::CostStruct, incosts::Vector{T}, vec::Vector) where T
     if !isempty(vec)
-        outcosts.data[T] = @inbounds incosts[vec]
+        append!(empty!(get!(outcosts, T)), @inbounds(incosts[vec]))
     end
 end
 

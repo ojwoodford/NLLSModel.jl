@@ -70,8 +70,8 @@ alloc_ephemeral(ls, ind) = @allocated NLLSModels.LinearSystem(ls, ind)
     # and for both Union and Any cost repositories
     for ncosts in (100, 60000)
         prob_union = NLLSProblem{Float64, Union{MTTestScalarRes, MTTestPairRes}}()
-        prob_any = NLLSProblem(Float64)
-        for p in (prob_union, prob_any)
+        prob_tuple = NLLSProblem{Float64, Tuple{MTTestScalarRes, MTTestPairRes}}()
+        for p in (prob_union, prob_tuple)
             addvariable!(p, 1.5)
             addvariable!(p, -0.5)
             for k in 1:ncosts
@@ -84,7 +84,7 @@ alloc_ephemeral(ls, ind) = @allocated NLLSModels.LinearSystem(ls, ind)
                     sum(c -> NLLSModels.computecost(prob_union.variables, c), get(prob_union.costs, MTTestPairRes))
         for n in (1, 2, 3, 4, 7, Threads.nthreads() + 1)
             @test NLLSModels.cost(prob_union.variables, prob_union.costs, static(n)) ≈ ref
-            @test NLLSModels.cost(prob_any.variables, prob_any.costs, static(n)) ≈ ref
+            @test NLLSModels.cost(prob_tuple.variables, prob_tuple.costs, static(n)) ≈ ref
             @test NLLSModels.cost(prob_union, n) ≈ ref
         end
     end
@@ -99,7 +99,7 @@ alloc_ephemeral(ls, ind) = @allocated NLLSModels.LinearSystem(ls, ind)
 
     # Multi-threaded costgradhess! vs single-threaded
     # 1. UniVariateLSstatic
-    prob_static = NLLSProblem(Float64)
+    prob_static = NLLSProblem(Float64, MTTestScalarRes)
     addvariable!(prob_static, 2.0)
     for k in 1:120
         addcost!(prob_static, MTTestScalarRes(k * 0.1, 1))
@@ -166,7 +166,7 @@ alloc_ephemeral(ls, ind) = @allocated NLLSModels.LinearSystem(ls, ind)
 
     # 2. UniVariateLSdynamic
     dim = 20
-    prob_dyn = NLLSProblem(Vector{Float64})
+    prob_dyn = NLLSProblem(Vector{Float64}, MTTestDynamicRes)
     addvariable!(prob_dyn, zeros(dim))
     for k in 1:120
         addcost!(prob_dyn, MTTestDynamicRes(1.0, randn(dim)))
@@ -180,7 +180,7 @@ alloc_ephemeral(ls, ind) = @allocated NLLSModels.LinearSystem(ls, ind)
     @test NLLSModels.gethessian(ls_dyn_single) ≈ NLLSModels.gethessian(ls_dyn_shared)
 
     # 3. MultiVariateLSdense
-    prob_dense = NLLSProblem(Float64)
+    prob_dense = NLLSProblem(Float64, Union{MTTestPairRes, MTTestScalarRes})
     addvariable!(prob_dense, 1.0)
     addvariable!(prob_dense, 2.0)
     for k in 1:120
@@ -199,7 +199,7 @@ alloc_ephemeral(ls, ind) = @allocated NLLSModels.LinearSystem(ls, ind)
     @test ls_dense_reconstructed isa NLLSModels.LinearSystem
 
     # 4. MultiVariateLSsparse
-    prob_sparse = NLLSProblem(Float64)
+    prob_sparse = NLLSProblem(Float64, MTTestPairRes)
     nvars = 40
     for i in 1:nvars
         addvariable!(prob_sparse, Float64(i))
@@ -239,7 +239,7 @@ alloc_ephemeral(ls, ind) = @allocated NLLSModels.LinearSystem(ls, ind)
 
     # Threshold-based decision test (< 1e4 stays single-threaded, >= 1e4 creates LinearSystemShared)
     @test isa(NLLSModels.sharedlinearsystem(ls_static_single, prob_static, static(4)), NLLSModels.LinearSystem)
-    prob_large = NLLSProblem(Float64)
+    prob_large = NLLSProblem(Float64, MTTestScalarRes)
     addvariable!(prob_large, 2.0)
     for k in 1:10000
         addcost!(prob_large, MTTestScalarRes(k * 0.001, 1))

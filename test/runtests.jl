@@ -1,7 +1,7 @@
 using Test
 
 @testset "NLLSModels Tests" begin
-    include("VectorRepo.jl")
+    include("CostStruct.jl")
     include("robust.jl")
     include("dynamicvars.jl")
     include("nonsquaredcost.jl")

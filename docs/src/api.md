@@ -11,7 +11,7 @@ costgradhess!
 updatevarcostmap!
 subproblem
 subproblem!
-VectorRepo
+CostStruct
 ```
 
 ## Variables & Built-In Variable Types

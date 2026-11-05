@@ -11,7 +11,7 @@
 ### 1. `NLLSProblem` Struct Simplification
 In previous versions of `NLLSsolver.jl`, `NLLSProblem` carried internal optimization scratch buffers (`varnext` and `varbest`).
 In `NLLSModels.jl`, [`NLLSProblem`](@ref) stores only the model data:
-- `costs::VectorRepo{CostTypes}`
+- `costs::CostStruct{CostTypes}`
 - `variables::Vector{VarTypes}`
 - `varcostmap::SparseMatrixCSC{Bool, Int}`
 - `varcostmapvalid::Bool`

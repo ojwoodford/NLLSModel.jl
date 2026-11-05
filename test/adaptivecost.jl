@@ -14,7 +14,7 @@ Base.eltype(::SimpleResidual) = Float64
 
 function optimisekernel!(problem, vars=problem.variables)
     # Compute the squared errors
-    squarederrors = [NLLSModels.computeresidual(res, vars[res.varind]) ^ 2 for res in problem.costs.data[SimpleResidual]]
+    squarederrors = [NLLSModels.computeresidual(res, vars[res.varind]) ^ 2 for res in get(problem.costs, SimpleResidual)]
     # Optimize the kernel parameters
     vars[1] = NLLSModels.optimize(vars[1], squarederrors)
     return nothing
