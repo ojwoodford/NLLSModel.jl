@@ -164,3 +164,8 @@ function optimvars_dispatch(problem::NLLSProblem, unfixed::AbstractVector, numth
         return (f, fdf!, x0, nothing)
     end
 end
+
+function NLLSModel end
+
+NLLSModel(problem::NLLSProblem, args...; kwargs...) =
+    error("NLLSModel requires the NLPModels package. Run `using NLPModels` first.")

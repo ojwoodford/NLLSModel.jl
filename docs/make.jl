@@ -21,6 +21,7 @@ makedocs(
             "Robust Cost Functions" => "tutorials/robust_loss.md",
             "Linear Solvers & Sparsity" => "tutorials/linear_solvers.md",
             "Bundle Adjustment & Alternating Minimization" => "tutorials/bundle_adjustment.md",
+            "NLPModels.jl Integration" => "tutorials/nlpmodels.md",
         ],
         "Migration Guides" => [
             "From NLLSsolver.jl" => "migration/from_nllssolver.md",

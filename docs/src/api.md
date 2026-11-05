@@ -50,3 +50,10 @@ GemanMcclureKernel
 GemanMcclure2oKernel
 ContaminatedGaussian
 ```
+
+## NLPModels Integration
+
+```@docs
+NLLSModel
+syncvars!
+```

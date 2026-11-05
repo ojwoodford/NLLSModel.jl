@@ -359,3 +359,40 @@ function computecost end
 Computes the scalar cost, gradient vector, and Hessian matrix for active variables indicated by bitmask `varflags`.
 """
 function computecostgradhess end
+
+"""
+    NLLSModel(problem::NLLSProblem; unfixed=nothing, numthreads=1, name="NLLSModel")
+
+Wraps an [`NLLSProblem`](@ref) as an `NLPModels.AbstractNLPModel` for use with general
+nonlinear programming solvers such as `JSOSolvers`, `Ipopt`, and `Optim`.
+
+Requires loading `NLPModels`:
+```julia
+using NLLSModels, NLPModels
+nlp = NLLSModel(problem)
+```
+
+# Arguments
+- `problem::NLLSProblem`: The nonlinear least-squares problem to wrap.
+
+# Keyword Arguments
+- `unfixed = nothing`: Boolean mask, integer, or vector indicating which variables are unfixed (optimized).
+- `numthreads = 1`: Number of threads for cost and gradient/Hessian evaluation.
+- `name = "NLLSModel"`: Name string assigned to the model metadata.
+
+# Features
+- Automatically selects dense or block-sparse Hessian representations based on problem structure.
+- Implements `obj`, `grad!`, `objgrad!`, `hess_structure!`, `hess_coord!`, and `hprod!`.
+- Caches cost, gradient, and Gauss-Newton Hessian evaluations across queries at the same point.
+- Transfers solution vectors back to `problem.variables` via [`syncvars!`](@ref).
+"""
+NLLSModel
+
+"""
+    syncvars!(nlp, x::AbstractVector) -> NLLSProblem
+    syncvars!(prob::NLLSProblem, nlp, x::AbstractVector) -> NLLSProblem
+
+Copies the flat solution vector `x` back into the problem's `variables` array,
+taking unfixed variable subsets and block variable structures into account.
+"""
+syncvars!

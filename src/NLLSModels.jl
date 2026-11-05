@@ -13,7 +13,7 @@ import BlockMatrices:
     sparse_dense_decision, computestartindices, find_diag_inds
 
 import OptimizationVariableInterface:
-    nvars, update, update!,
+    nvars, update, update!, syncvars!,
     ZeroToInfScalar, ZeroToOneScalar
 
 import FastNorm: sqnorm
@@ -21,9 +21,9 @@ import ValueDispatch: valuedispatch
 
 # Export NLLSModels public interface
 # Problem construction & evaluation
-export NLLSProblem
+export NLLSProblem, NLLSModel
 export addvariable!, addcost!, addresidual!, subproblem, subproblem!
-export cost, optimvars
+export cost, optimvars, syncvars!
 
 # Cost and residual types & definition interface
 export AbstractCost, AbstractResidual, AbstractAdaptiveResidual

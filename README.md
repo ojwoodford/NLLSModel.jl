@@ -15,6 +15,7 @@ Nonlinear Least Squares (NLLS) and factor-graph modeling in Julia.
 - **Robust M-Estimators**: Built-in `HuberKernel`, `GemanMcclureKernel`, `Scaled`, and adaptive `ContaminatedGaussian`.
 - **Block-Dense & Block-Sparse Linear Algebra**: Uses `BlockDenseMatrix` and `BlockSparseMatrix` from `BlockMatrices.jl` for fast, zero-allocation Hessian assembly.
 - **Optimizer-Agnostic Problem Interface**: Extract `(f, fdf!, x0, H) = optimvars(problem, unfixed, numthreads)` for seamless integration with many second order optimizers, such as `SecondOrderOptimization.jl` or `Optim.jl`.
+- **NLPModels.jl Ecosystem**: Load `NLPModels` to wrap any `NLLSProblem` as an `AbstractNLPModel` via `NLLSModel(problem)` and solve with `JSOSolvers.jl` (`trunk`, `tron`), `Ipopt.jl`, or `Optim.jl`.
 
 ## Quick Start
 
@@ -38,4 +39,19 @@ addcost!(problem, OffsetResidual(SVector(3.0, -2.0), v))
 
 f, fdf!, x0, H = optimvars(problem)
 x_opt, result = optimize(f, fdf!, x0, OptimizationOptions(iterator = :levenbergmarquardt); H = H)
+```
+
+### Solving with NLPModels.jl and JSOSolvers
+
+```julia
+using NLLSModels, NLPModels, JSOSolvers
+
+# Wrap the NLLSProblem as an AbstractNLPModel
+nlp = NLLSModel(problem)
+
+# Optimize using trust-region solver
+stats = trunk(nlp)
+
+# Synchronize the optimal variables back into the problem
+syncvars!(nlp, stats.solution)
 ```

@@ -16,12 +16,19 @@ Static = "aedffcd0-7271-4cad-89d0-dc628f76c6d3"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 ValueDispatch = "c8e4d12a-5f3b-4a9c-8d2e-1f6b3a7c9e04"
 
+[weakdeps]
+NLPModels = "a4795742-8479-5a88-8948-cc11e1c8c1a6"
+
+[extensions]
+NLPModelExt = "NLPModels"
+
 [compat]
 BlockMatrices = "0.1"
 DiffResults = "1.1"
 FastNorm = "0.2"
 ForwardDiff = "0.10, 1"
 LinearAlgebra = "1.10"
+NLPModels = "0.20, 0.21"
 OptimizationVariableInterface = "0.1"
 Polyester = "0.7"
 SparseArrays = "1.10"
