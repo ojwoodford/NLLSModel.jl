@@ -13,7 +13,7 @@ end
 end
 
 function cost_multithreaded(vars, costs::CostStruct, ::StaticInt{N})::Float64 where {N}
-    if countcosts(costnum, costs) < 10000
+    if countcosts(costnum, costs) < 100000
         return sum(bindleadingargs(computecost, vars), costs; init=0.0)
     end
     tot = 0.0

@@ -68,7 +68,7 @@ alloc_ephemeral(ls, ind) = @allocated NLLSModels.LinearSystem(ls, ind)
 
     # Threaded cost matches serial cost for any thread count, above and below the threading threshold,
     # and for both Union and Any cost repositories
-    for ncosts in (100, 25000)
+    for ncosts in (100, 60000)
         prob_union = NLLSProblem{Float64, Union{MTTestScalarRes, MTTestPairRes}}()
         prob_any = NLLSProblem(Float64)
         for p in (prob_union, prob_any)
