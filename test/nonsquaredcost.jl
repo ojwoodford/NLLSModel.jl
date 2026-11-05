@@ -53,7 +53,7 @@ Base.eltype(::LinearCostDynamic) = Float64
     solution = (X' * X) \ ((X' - I) * y)
 
     # Create the problem
-    problem = NLLSModel.NLLSModel(Union{SVector{NDIMS, Float64}, Vector{Float64}}, Union{LinearResidualStatic, LinearCostStatic, LinearResidualDynamic, LinearCostDynamic})
+    problem = Model(Union{SVector{NDIMS, Float64}, Vector{Float64}}, Union{LinearResidualStatic, LinearCostStatic, LinearResidualDynamic, LinearCostDynamic})
     NLLSModel.addvariable!(problem, zeros(SVector{NDIMS, Float64}))
     NLLSModel.addcost!(problem, LinearResidualStatic(y, X, 1))
     NLLSModel.addcost!(problem, LinearCostStatic(y, 1))

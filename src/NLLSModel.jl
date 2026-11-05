@@ -21,7 +21,7 @@ import ValueDispatch: valuedispatch
 
 # Export NLLSModel public interface
 # Problem construction & evaluation
-export NLLSModel, NLPLSModel
+export Model, NLPLSModel
 export addvariable!, addcost!, addresidual!, subproblem, subproblem!
 export cost, optimvars, syncvars!
 

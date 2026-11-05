@@ -28,7 +28,7 @@ Base.eltype(::NormResidual) = Float64
     n = length(X)
 
     # Create the problem
-    problem = NLLSModel.NLLSModel(Vector{Float64}, Union{LinearResidual, NormResidual})
+    problem = Model(Vector{Float64}, Union{LinearResidual, NormResidual})
     NLLSModel.addvariable!(problem, zeros(n))
     NLLSModel.addcost!(problem, LinearResidual(1.0, X))
     NLLSModel.addcost!(problem, NormResidual(n))

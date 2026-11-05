@@ -5,7 +5,7 @@ using OptimizationVariableInterface: nvars
 NLLSModel.generatemeasurement(pose::SVector{6, T}, X::SVector{3, U}) where {T, U} = SVector(dot(@inbounds(view(pose, NLLSModel.SR(1, 3))), X), dot(@inbounds(view(pose, NLLSModel.SR(4, 6))), X))
 
 function create_ba_problem(ncameras, nlandmarks, propvisible)
-    problem = NLLSModel(Union{SVector{6, Float64}, SVector{3, Float64}}, SimpleError2{2, Float64, SVector{6, Float64}, SVector{3, Float64}})
+    problem = Model(Union{SVector{6, Float64}, SVector{3, Float64}}, SimpleError2{2, Float64, SVector{6, Float64}, SVector{3, Float64}})
 
     # Generate the cameras on a unit sphere, pointing to the origin
     camoffset = SVector(1.0, 0.0, 0.0, 0.0, 1.0, 0.0)

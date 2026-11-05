@@ -66,7 +66,7 @@ end
 """
     NLLSModelNLP <: AbstractNLPModel{Float64, Vector{Float64}}
 
-Concrete wrapper adapting an `NLLSModel` to the `NLPModels.AbstractNLPModel` interface.
+Concrete wrapper adapting an `NLLSModel.Model` to the `NLPModels.AbstractNLPModel` interface.
 Enables solving nonlinear least-squares problems formulated in `NLLSModel` using general
 NLP solvers including `JSOSolvers`, `Ipopt`, and `Optim`.
 """
@@ -92,7 +92,7 @@ mutable struct NLLSModelNLP{P, F, FDF, X0, H, VarsBuf, BSZ, HIdx, UInd} <: Abstr
     cache_valid::Base.RefValue{Bool}
 end
 
-function NLLSModel.NLPLSModel(problem::NLLSModel; unfixed=nothing, numthreads=static(1), name="NLPLSModel")
+function NLLSModel.NLPLSModel(problem::Model; unfixed=nothing, numthreads=static(1), name="NLPLSModel")
     f, fdf!, x0, H_temp = optimvars(problem, unfixed, numthreads)
     conv_unfixed = NLLSModel.convertunfixed(unfixed, problem)
 
@@ -195,8 +195,8 @@ function NLLSModel.NLPLSModel(problem::NLLSModel; unfixed=nothing, numthreads=st
     )
 end
 
-NLPModels.AbstractNLPModel(problem::NLLSModel; kwargs...) = NLLSModel.NLPLSModel(problem; kwargs...)
-Base.convert(::Type{AbstractNLPModel}, problem::NLLSModel) = NLLSModel.NLPLSModel(problem)
+NLPModels.AbstractNLPModel(problem::Model; kwargs...) = NLLSModel.NLPLSModel(problem; kwargs...)
+Base.convert(::Type{AbstractNLPModel}, problem::Model) = NLLSModel.NLPLSModel(problem)
 
 function unpack_to_vars!(nlp::NLLSModelNLP, x::AbstractVector)
     if nlp.is_single_var
@@ -303,8 +303,8 @@ end
 
 # Synchronize solution back to problem variables
 """
-    syncvars!(nlp::NLLSModelNLP, x::AbstractVector) -> NLLSModel
-    syncvars!(prob::NLLSModel, nlp::NLLSModelNLP, x::AbstractVector) -> NLLSModel
+    syncvars!(nlp::NLLSModelNLP, x::AbstractVector) -> Model
+    syncvars!(prob::Model, nlp::NLLSModelNLP, x::AbstractVector) -> Model
 
 Copies the flat variable vector `x` back into the wrapped problem's `variables` array.
 """
@@ -322,7 +322,7 @@ function OptimizationVariableInterface.syncvars!(nlp::NLLSModelNLP, x::AbstractV
     return nlp.problem
 end
 
-OptimizationVariableInterface.syncvars!(::NLLSModel, nlp::NLLSModelNLP, x::AbstractVector) =
+OptimizationVariableInterface.syncvars!(::Model, nlp::NLLSModelNLP, x::AbstractVector) =
     syncvars!(nlp, x)
 
 end # module NLPModelExt

@@ -1,10 +1,10 @@
 using Static
 import ForwardDiff
 
-cost(problem::NLLSModel) = cost(problem.variables, problem.costs)
-cost(problem::NLLSModel, numthreads::Integer) = cost(problem.variables, problem.costs, static(numthreads))
-cost(problem::NLLSModel, numthreads::StaticInt) = cost(problem.variables, problem.costs, numthreads)
-cost(problem::NLLSModel, options) = cost(problem.variables, problem.costs, options.numthreads)
+cost(problem::Model) = cost(problem.variables, problem.costs)
+cost(problem::Model, numthreads::Integer) = cost(problem.variables, problem.costs, static(numthreads))
+cost(problem::Model, numthreads::StaticInt) = cost(problem.variables, problem.costs, numthreads)
+cost(problem::Model, options) = cost(problem.variables, problem.costs, options.numthreads)
 cost(vars::AbstractVector, costs::CostStruct)::Float64 = cost(vars, costs, static(1))
 cost(vars::AbstractVector, costs::CostStruct, ::StaticInt{1})::Float64 = cost_struct(vars, costs, static(1))
 cost(vars::AbstractVector, costs::CostStruct, numthreads::Integer)::Float64 = cost(vars, costs, static(numthreads))

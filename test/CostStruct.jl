@@ -96,5 +96,5 @@ end
     @test values(cs_empty) == ()
     @test sum(identity, cs_empty; init=0.0) == 0.0
     @test_throws ErrorException get(cs_empty, Float64)
-    @test_throws ArgumentError NLLSModel{Float64, Int}(Float64[], cs5)
+    @test_throws ArgumentError Model{Float64, Int}(Float64[], cs5)
 end

@@ -43,7 +43,7 @@ NLLSModel.computeresidual(res::PointDistanceResidual, x) = x - res.target
 Base.eltype(::PointDistanceResidual) = Float64
 
 # 2. Build the model
-problem = NLLSModel(SVector{2, Float64}, PointDistanceResidual)
+problem = Model(SVector{2, Float64}, PointDistanceResidual)
 idx = addvariable!(problem, SVector(0.0, 0.0))
 addcost!(problem, PointDistanceResidual(SVector(3.0, 4.0), idx))
 

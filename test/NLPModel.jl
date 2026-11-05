@@ -46,7 +46,7 @@ NLLSModel.computeresidual(r::AnchorVal, x1) = SVector(x1[1] - r.val)
 Base.eltype(::AnchorVal) = Float64
 
 @testset "NLPModelExt - Single-Variable Dense Model" begin
-    prob = NLLSModel(SVector{2, Float64}, Union{Rosenbrock1, Rosenbrock2})
+    prob = Model(SVector{2, Float64}, Union{Rosenbrock1, Rosenbrock2})
     addvariable!(prob, SVector(-1.2, 1.0))
     addcost!(prob, Rosenbrock1())
     addcost!(prob, Rosenbrock2())
@@ -132,7 +132,7 @@ Base.eltype(::AnchorVal) = Float64
 end
 
 @testset "NLPModelExt - Multi-Variable Dense Model" begin
-    prob = NLLSModel(SVector{1, Float64}, Union{PairDiff, AnchorVal})
+    prob = Model(SVector{1, Float64}, Union{PairDiff, AnchorVal})
     for i in 1:5
         addvariable!(prob, SVector(0.0))
     end
@@ -168,7 +168,7 @@ end
 
 @testset "NLPModelExt - Multi-Variable Block-Sparse Model" begin
     N = 60 # >= 40 to trigger sparse linear system
-    prob = NLLSModel(SVector{1, Float64}, Union{PairDiff, AnchorVal})
+    prob = Model(SVector{1, Float64}, Union{PairDiff, AnchorVal})
     for i in 1:N
         addvariable!(prob, SVector(0.0))
     end
@@ -207,7 +207,7 @@ end
 end
 
 @testset "NLPModelExt - Unfixed Subset of Variables" begin
-    prob = NLLSModel(SVector{1, Float64}, PairDiff)
+    prob = Model(SVector{1, Float64}, PairDiff)
     addvariable!(prob, SVector(10.0))
     addvariable!(prob, SVector(0.0))
     addcost!(prob, PairDiff(1, 2, 3.0)) # x1 - x2 - 3 = 0 => x2 = 7
@@ -234,7 +234,7 @@ end
 end
 
 @testset "NLPModelExt - AbstractNLPModel Conversion & Constructor" begin
-    prob = NLLSModel(SVector{2, Float64}, Union{Rosenbrock1, Rosenbrock2})
+    prob = Model(SVector{2, Float64}, Union{Rosenbrock1, Rosenbrock2})
     addvariable!(prob, SVector(0.0, 0.0))
     addcost!(prob, Rosenbrock1())
 

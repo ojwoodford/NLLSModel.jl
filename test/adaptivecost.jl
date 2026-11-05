@@ -23,7 +23,7 @@ end
 
 @testset "adaptivecost.jl" begin
     # Create the problem
-    problem = NLLSModel.NLLSModel(Union{NLLSModel.ContaminatedGaussian{Float64}, Float64}, SimpleResidual)
+    problem = Model(Union{NLLSModel.ContaminatedGaussian{Float64}, Float64}, SimpleResidual)
     NLLSModel.addvariable!(problem, ContaminatedGaussian(0.5, 5.0, 0.4))
     NLLSModel.addvariable!(problem, 0.)
     NLLSModel.addvariable!(problem, 0.)

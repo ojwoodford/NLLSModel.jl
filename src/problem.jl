@@ -1,7 +1,7 @@
 using Static, SparseArrays
 import OptimizationVariableInterface: nvars
 
-mutable struct NLLSModel{VarTypes, CostTypes, CostVecs}
+mutable struct Model{VarTypes, CostTypes, CostVecs}
     # User provided
     costs::CostStruct{CostTypes, CostVecs} # Set of cost and residual blocks that define the problem
     variables::Vector{VarTypes}  # Current state of variables in use by optimizer
@@ -11,7 +11,7 @@ mutable struct NLLSModel{VarTypes, CostTypes, CostVecs}
     varcostmapvalid::Bool        # Flag indicating whether the above variable cost map is valid
 
     # Constructors
-    function NLLSModel{VarTypes, CostTypes}(
+    function Model{VarTypes, CostTypes}(
         vars::Vector{VarTypes} = Vector{VarTypes}(),
         costs::CostStruct = CostStruct{CostTypes}(),
         varcostmap = spzeros(Bool, 0, 0),
@@ -21,7 +21,7 @@ mutable struct NLLSModel{VarTypes, CostTypes, CostVecs}
         costs isa CostStruct{TCT} || throw(ArgumentError("Expected costs of type CostStruct{$TCT}, got $(typeof(costs))"))
         return new{VarTypes, TCT, typeof(costs.data)}(costs, vars, varcostmap, varcostmapvalid)
     end
-    function NLLSModel{VarTypes, CostTypes, CostVecs}(
+    function Model{VarTypes, CostTypes, CostVecs}(
         vars::Vector{VarTypes},
         costs::CostStruct{CostTypes, CostVecs},
         varcostmap = spzeros(Bool, 0, 0),
@@ -31,11 +31,11 @@ mutable struct NLLSModel{VarTypes, CostTypes, CostVecs}
     end
 end
 
-NLLSModel(::Type{VT}, ::Type{CT}) where {VT, CT} = NLLSModel{VT, CT}()
-NLLSModel(v::Vector{VT}, ::Type{CT}) where {VT, CT} = NLLSModel{VT, CT}(v)
-NLLSModel(v::Vector{VT}, r::CostStruct{CT}) where {VT, CT} = NLLSModel{VT, CT}(v, r)
+Model(::Type{VT}, ::Type{CT}) where {VT, CT} = Model{VT, CT}()
+Model(v::Vector{VT}, ::Type{CT}) where {VT, CT} = Model{VT, CT}(v)
+Model(v::Vector{VT}, r::CostStruct{CT}) where {VT, CT} = Model{VT, CT}(v, r)
 
-function Base.getproperty(p::NLLSModel, s::Symbol)
+function Base.getproperty(p::Model, s::Symbol)
     if s === :varnext
         if haskey(task_local_storage(), :nlls_varnext)
             val = task_local_storage(:nlls_varnext)
@@ -66,8 +66,8 @@ function Base.getproperty(p::NLLSModel, s::Symbol)
     return getfield(p, s)
 end
 
-function Base.show(io::IO, x::NLLSModel)
-    print(io, "NLLSModel with ", length(x.variables), " variable blocks of total dimension ", UInt(sum(nvars, x.variables)), 
+function Base.show(io::IO, x::Model)
+    print(io, "Model with ", length(x.variables), " variable blocks of total dimension ", UInt(sum(nvars, x.variables)), 
            ",\n             and ", countcosts(costnum, x.costs), " residual blocks of total dimension ", countcosts(resnum, x.costs), ".")
 end
 
@@ -87,12 +87,12 @@ function selectcosts!(outcosts::CostStruct, incosts::Vector{T}, vec::Vector) whe
 end
 
 # Produce a subproblem containing only the relevant costs
-function subproblem(problem::NLLSModel{VT, CT}, unfixed) where {VT, CT}
+function subproblem(problem::Model{VT, CT}, unfixed) where {VT, CT}
     coststruct = CostStruct{CT}()
     for costs in values(problem.costs)
         selectcosts!(coststruct, costs, unfixed)
     end
-    return NLLSModel{VT, CT}(problem.variables, coststruct)
+    return Model{VT, CT}(problem.variables, coststruct)
 end
 
 function selectcosts!(outcosts::CostStruct, incosts::Vector{T}, costindices, lastcost, index) where T
@@ -116,12 +116,12 @@ function selectcosts!(outcosts::CostStruct, incosts::CostStruct, costindices)
     end
 end
 
-function subproblem!(to::NLLSModel{VT, CT}, from::NLLSModel{VT, CT}, costindices::AbstractVector) where {VT, CT}
+function subproblem!(to::Model{VT, CT}, from::Model{VT, CT}, costindices::AbstractVector) where {VT, CT}
     selectcosts!(to.costs, from.costs, costindices)
     return to
 end
 
-function addcost!(problem::NLLSModel, cost::Cost) where Cost <: AbstractCost
+function addcost!(problem::Model, cost::Cost) where Cost <: AbstractCost
     N = ndeps(cost)
     @assert isa(N, StaticInt) && N > 0 && N <= MAX_ARGS "Problem with ndeps()"
     @assert length(varindices(cost)) == N "Problem with varindices()"
@@ -137,7 +137,7 @@ function addcost!(problem::NLLSModel, cost::Cost) where Cost <: AbstractCost
     return nothing
 end
 
-function addvariable!(problem::NLLSModel, variable)
+function addvariable!(problem::Model, variable)
     N = nvars(variable)
     @assert (isa(N, Integer) || isa(N, StaticInt)) && N > 0 "Problem with nvars()"
     push!(problem.variables, variable)
@@ -178,7 +178,7 @@ function updatevarcostmap!(varcostmap::SparseMatrixCSC{Bool, Int}, costs::CostSt
     return nothing
 end
 
-function updatevarcostmap!(problem::NLLSModel)
+function updatevarcostmap!(problem::Model)
     sz = (length(problem.variables), countcosts(costnum, problem.costs))
     if size(problem.varcostmap) != sz
         problem.varcostmap = spzeros(Bool, sz[1], sz[2])
@@ -188,14 +188,14 @@ function updatevarcostmap!(problem::NLLSModel)
     return retval
 end
 
-function getvarcostmap(problem::NLLSModel)
+function getvarcostmap(problem::Model)
     if !problem.varcostmapvalid
         updatevarcostmap!(problem)
     end
     return problem.varcostmap
 end
 
-function reordercostsforschur!(problem::NLLSModel, schurvars)
+function reordercostsforschur!(problem::Model, schurvars)
     schurruns = Dict{DataType, Vector{Int}}()
     costvarmap = sparse(getvarcostmap(problem)')[:,schurvars]
     schurvarpercost = sum(costvarmap; dims=2)

@@ -1,7 +1,7 @@
 """
-    NLLSModel{VarTypes, CostTypes}([variables])
-    NLLSModel(VT, CT)
-    NLLSModel(variables, CT)
+    Model{VarTypes, CostTypes}([variables])
+    Model(VT, CT)
+    Model(variables, CT)
 
 Bipartite graph nonlinear least squares problem representation holding costs and variables.
 
@@ -13,17 +13,17 @@ Bipartite graph nonlinear least squares problem representation holding costs and
 
 # Example
 ```julia
-problem = NLLSModel(Float64, MyResidual)
+problem = Model(Float64, MyResidual)
 addvariable!(problem, 0.0)
 addcost!(problem, MyResidual(1.0))
 ```
 """
-NLLSModel
+Model
 
 """
     AbstractCost
 
-Abstract supertype for all cost blocks in an [`NLLSModel`](@ref).
+Abstract supertype for all cost blocks in a [`Model`](@ref).
 """
 AbstractCost
 
@@ -168,21 +168,21 @@ Four-variable residual computing `generatemeasurement(v1, v2, v3, v4) - measurem
 SimpleError4
 
 """
-    addvariable!(problem::NLLSModel, variable) -> Int
+    addvariable!(problem::Model, variable) -> Int
 
 Appends a variable block to `problem` and returns its 1-based index.
 
 # Example
 ```julia
-problem = NLLSModel(Float64, MyResidual)
+problem = Model(Float64, MyResidual)
 idx = addvariable!(problem, 1.0) # 1
 ```
 """
 addvariable!
 
 """
-    addcost!(problem::NLLSModel, cost::AbstractCost)
-    addresidual!(problem::NLLSModel, res::AbstractResidual)
+    addcost!(problem::Model, cost::AbstractCost)
+    addresidual!(problem::Model, res::AbstractResidual)
 
 Appends a cost or residual block to `problem`.
 
@@ -194,7 +194,7 @@ addcost!(problem, my_residual)
 addcost!
 
 """
-    optimvars(problem::NLLSModel, unfixed=nothing, numthreads=StaticInt(Threads.nthreads())) -> (f, fdf!, x0, H)
+    optimvars(problem::Model, unfixed=nothing, numthreads=StaticInt(Threads.nthreads())) -> (f, fdf!, x0, H)
 
 Constructs the objective function `f`, in-place gradient/Hessian evaluator `fdf!`, initial variable state `x0`, and Hessian template `H` (`nothing` for static/dense systems or a `SparseMatrixCSC` for sparse systems) for `problem`.
 
@@ -205,14 +205,14 @@ x_opt, result = optimize(f, fdf!, x0, options; H=H)
 ```
 
 # Arguments
-- `problem::NLLSModel`: The nonlinear least squares problem.
+- `problem::Model`: The nonlinear least squares problem.
 - `unfixed`: Optional variable index (`Integer`), variable type (`DataType`), or boolean mask specifying which variables to optimize (defaults to `nothing`, optimizing all variables).
 - `numthreads`: Number of threads to use for parallel cost and derivative evaluation (`StaticInt` or `Integer`).
 """
 optimvars
 
 """
-    cost(problem::NLLSModel, numthreads=StaticInt(Threads.nthreads())) -> Float64
+    cost(problem::Model, numthreads=StaticInt(Threads.nthreads())) -> Float64
 
 Evaluates and returns the total scalar objective cost of `problem`.
 
@@ -224,14 +224,14 @@ c = cost(problem)
 cost
 
 """
-    subproblem(problem::NLLSModel, unfixed) -> NLLSModel
+    subproblem(problem::Model, unfixed) -> Model
 
 Extracts a subproblem containing only costs connected to `unfixed` variables.
 """
 subproblem
 
 """
-    subproblem!(to::NLLSModel, from::NLLSModel, costindices) -> to
+    subproblem!(to::Model, from::Model, costindices) -> to
 
 Populates subproblem `to` in-place with the subset of costs from `from` indexed by `costindices`.
 """
@@ -361,9 +361,9 @@ Computes the scalar cost, gradient vector, and Hessian matrix for active variabl
 function computecostgradhess end
 
 """
-    NLPLSModel(problem::NLLSModel; unfixed=nothing, numthreads=1, name="NLPLSModel")
+    NLPLSModel(problem::Model; unfixed=nothing, numthreads=1, name="NLPLSModel")
 
-Wraps an [`NLLSModel`](@ref) as an `NLPModels.AbstractNLPModel` for use with general
+Wraps a [`Model`](@ref) as an `NLPModels.AbstractNLPModel` for use with general
 nonlinear programming solvers such as `JSOSolvers`, `Ipopt`, and `Optim`.
 
 Requires loading `NLPModels`:
@@ -373,7 +373,7 @@ nlp = NLPLSModel(problem)
 ```
 
 # Arguments
-- `problem::NLLSModel`: The nonlinear least-squares problem to wrap.
+- `problem::Model`: The nonlinear least-squares problem to wrap.
 
 # Keyword Arguments
 - `unfixed = nothing`: Boolean mask, integer, or vector indicating which variables are unfixed (optimized).
@@ -389,8 +389,8 @@ nlp = NLPLSModel(problem)
 NLPLSModel
 
 """
-    syncvars!(nlp, x::AbstractVector) -> NLLSModel
-    syncvars!(prob::NLLSModel, nlp, x::AbstractVector) -> NLLSModel
+    syncvars!(nlp, x::AbstractVector) -> Model
+    syncvars!(prob::Model, nlp, x::AbstractVector) -> Model
 
 Copies the flat solution vector `x` back into the problem's `variables` array,
 taking unfixed variable subsets and block variable structures into account.

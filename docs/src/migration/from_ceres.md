@@ -8,7 +8,7 @@ Here is a direct mapping of Ceres Solver concepts to `NLLSModel.jl`:
 
 | Ceres Solver (C++) | NLLSModel.jl (Julia) | Notes |
 | :--- | :--- | :--- |
-| `ceres::Problem` | [`NLLSModel`](@ref) | Container for variable blocks and cost/residual blocks |
+| `ceres::Problem` | [`Model`](@ref) | Container for variable blocks and cost/residual blocks |
 | `ceres::CostFunction` | [`AbstractResidual`](@ref) / [`AbstractCost`](@ref) | Defines residual vector & derivatives |
 | `ceres::LossFunction` | [`AbstractRobustifier`](@ref) | Robust M-estimator kernel ([`HuberKernel`](@ref), [`Huber2oKernel`](@ref), [`GemanMcclure2oKernel`](@ref), etc.) |
 | Parameter Block (`double*`) | Variable (`Float64`, `SVector`, `Vector`, custom struct) | Supports both immutable stack types and mutable arrays |
@@ -57,7 +57,7 @@ NLLSModel.computeresidual(::CostResidual, x) = SVector(10.0 - x)
 NLLSModel.robustkernel(::CostResidual) = Huber2oKernel(1.0)
 Base.eltype(::CostResidual) = Float64
 
-problem = NLLSModel(Float64, CostResidual)
+problem = Model(Float64, CostResidual)
 idx = addvariable!(problem, 0.5)
 addcost!(problem, CostResidual(idx))
 

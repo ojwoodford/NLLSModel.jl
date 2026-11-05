@@ -26,7 +26,7 @@ const CamType = SVector{6, Float64}
 const PtType  = SVector{3, Float64}
 const ObsType = SimpleError2{2, Float64, CamType, PtType}
 
-problem = NLLSModel(Union{CamType, PtType}, ObsType)
+problem = Model(Union{CamType, PtType}, ObsType)
 cam1 = addvariable!(problem, CamType(1.0, 0.0, 0.0, 0.0, 1.0, 0.0))
 pt1  = addvariable!(problem, PtType(0.5, -0.2, 10.0))
 addcost!(problem, SimpleError2{CamType, PtType}(SVector(0.5, -0.2), cam1, pt1))

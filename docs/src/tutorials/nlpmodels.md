@@ -2,7 +2,7 @@
 
 `NLLSModel.jl` provides seamless integration with the [JuliaSmoothOptimizers (JSO)](https://github.com/JuliaSmoothOptimizers) ecosystem via an `NLPModels.jl` package extension.
 
-By loading `NLPModels`, any `NLLSModel` can be wrapped into an `AbstractNLPModel{Float64, Vector{Float64}}` via [`NLPLSModel`](@ref). This enables using general nonlinear programming and trust-region solvers—such as `JSOSolvers.jl` (`trunk`, `tron`), `Ipopt.jl`, and `Optim.jl`—on problems formulated with `NLLSModel`.
+By loading `NLPModels`, any `Model` can be wrapped into an `AbstractNLPModel{Float64, Vector{Float64}}` via [`NLPLSModel`](@ref). This enables using general nonlinear programming and trust-region solvers—such as `JSOSolvers.jl` (`trunk`, `tron`), `Ipopt.jl`, and `Optim.jl`—on problems formulated with `NLLSModel`.
 
 ---
 
@@ -31,8 +31,8 @@ NLLSModel.getvars(::Rosenbrock2, vars::Vector) = (vars[1]::SVector{2, Float64},)
 NLLSModel.computeresidual(::Rosenbrock2, x) = SVector(10.0 * (x[2] - x[1]^2))
 Base.eltype(::Rosenbrock2) = Float64
 
-# 2. Build the NLLSModel
-prob = NLLSModel(SVector{2, Float64}, Union{Rosenbrock1, Rosenbrock2})
+# 2. Build the Model
+prob = Model(SVector{2, Float64}, Union{Rosenbrock1, Rosenbrock2})
 addvariable!(prob, SVector(-1.2, 1.0))
 addcost!(prob, Rosenbrock1())
 addcost!(prob, Rosenbrock2())
@@ -68,4 +68,4 @@ Evaluating gradient and Gauss-Newton Hessian simultaneously via $J^T r$ and $J^T
 `hprod!` computes $H v = (J^T J) v$ directly using in-place symmetric matrix-vector multiplication (`mul!(Hv, Symmetric(H, :L), v)`), allowing Krylov/CG-based solvers such as `JSOSolvers.trunk` to avoid explicit matrix factorizations.
 
 ### 4. Updating Variables with `syncvars!`
-Because `NLLSModel` variables can be stored as static vectors, numbers, or custom manifold/bounded variable blocks, [`syncvars!`](@ref) takes the flat solver solution vector and repopulates `prob.variables` in-place.
+Because `Model` variables can be stored as static vectors, numbers, or custom manifold/bounded variable blocks, [`syncvars!`](@ref) takes the flat solver solution vector and repopulates `prob.variables` in-place.

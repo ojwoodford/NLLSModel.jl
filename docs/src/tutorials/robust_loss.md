@@ -38,7 +38,7 @@ NLLSModel.computeresidual(r::RobustPointResidual, x) = x - r.target
 NLLSModel.robustkernel(r::RobustPointResidual) = r.kernel
 Base.eltype(::RobustPointResidual) = Float64
 
-problem = NLLSModel(SVector{2, Float64}, RobustPointResidual{Huber2oKernel{Float64}})
+problem = Model(SVector{2, Float64}, RobustPointResidual{Huber2oKernel{Float64}})
 idx = addvariable!(problem, SVector(0.0, 0.0))
 addcost!(problem, RobustPointResidual(SVector(1.0, 1.0), idx, Huber2oKernel(1.5)))
 addcost!(problem, RobustPointResidual(SVector(1.1, 0.9), idx, Huber2oKernel(1.5)))

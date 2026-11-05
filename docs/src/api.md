@@ -3,7 +3,7 @@
 ## Problem Representation
 
 ```@docs
-NLLSModel
+Model
 addvariable!
 addcost!
 addresidual!
