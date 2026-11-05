@@ -1,28 +1,42 @@
 
-struct VectorRepo{T}
+struct VectorRepo{T} # T is Any, or a Tuple of Types
     data::Dict{DataType, Vector}
     function VectorRepo{Any}()
         return new{Any}(Dict{DataType, Vector}())
     end
-    function VectorRepo{T}() where T
+    function VectorRepo{T}() where T<:Tuple
         vr = new{T}(Dict{DataType, Vector}())
-        foreach(t -> vr.data[t] = Vector{t}(), uniontotuple(T))
+        foreach(t -> vr.data[t] = Vector{t}(), T.parameters)
         return vr
     end
     function VectorRepo(v::Vector{T}) where T
-        vr = new{T}(Dict{DataType, Vector}())
+        vr = new{Tuple{T}}(Dict{DataType, Vector}())
         vr.data[T] = v
         return vr
     end
 end
+
+# Canonicalize any Union or single type to a Tuple type at compile time
+tupelize(::Type{Union{}}) = Tuple{}
+tupelize(::Type{T}) where T<:Tuple = T
+tupelize(::Type{Any}) = Any
+@generated function tupelize(::Type{T}) where T
+    function extract(t)
+        t isa Union ? [extract(t.a)..., extract(t.b)...] : [t]
+    end
+    types = extract(T)
+    return :( Tuple{$(types...)} )
+end
+
 VectorRepo() = VectorRepo{Any}()
+VectorRepo{T}() where T = VectorRepo{tupelize(T)}()
 
 function Base.get(vr::VectorRepo{Any}, ::Type{type})::Vector{type} where type
     return haskey(vr.data, type) ? @inbounds(vr.data[type]::Vector{type}) : Vector{type}()
 end
 
 function Base.get(vr::VectorRepo{T}, ::Type{type})::Vector{type} where {T, type}
-    @assert type<:T "Invalid type"
+    @assert type in T.parameters "Invalid type"
     return @inbounds vr.data[type]::Vector{type}
 end
 
@@ -42,27 +56,17 @@ Base.append!(vr::VectorRepo, v::Vector{T}) where T = append!(get!(vr, T), v)
 
 # Get the keys
 Base.keys(vr::VectorRepo{Any}) = keys(vr.data)
-# Get a typed Tuple of keys
-Base.keys(::VectorRepo{T}) where T = uniontotuple(T)
+Base.keys(::VectorRepo{T}) where T = ntuple(i -> fieldtype(T, i), Val(fieldcount(T)))
 
-# Get a vector of the vectors (allocates)
+# Get a vector of the vectors (allocates for Any, typed Tuple for T)
 Base.values(vr::VectorRepo{Any}) = values(vr.data)
-# Get a typed Tuple of vectors
-Base.values(vr::VectorRepo{T}) where T = (valuetuple(vr, T)...,)
-valuetuple(vr::VectorRepo, T::Union) = (valuetuple(vr, T.a)..., valuetuple(vr, T.b)...)
-valuetuple(vr::VectorRepo, T::DataType) = (get(vr, T),)
+Base.values(vr::VectorRepo{T}) where T = ntuple(i -> get(vr, fieldtype(T, i)), Val(fieldcount(T)))
+valuetuple(vr::VectorRepo, ::Type{T}) where T = values(vr)
 
 # Sum reduction
-Base.sum(fun, vr::VectorRepo{Any}; kw...) = sum(bindleadingargs(vrsum, fun, kw), values(vr.data); kw...)
+Base.sum(fun, vr::VectorRepo; kw...) = sum(bindleadingargs(vrsum, fun, kw), values(vr); kw...)
 vrsum(fun, kw, v::Vector) = sum(fun, v; kw...)
-# Static dispatch if types are known
-Base.sum(fun, vr::VectorRepo{T}; kw...) where T = vrsum(fun, vr, kw, T)
-vrsum(fun, vr::VectorRepo, kw, T::Union) = vrsum(fun, vr, kw, T.a) + vrsum(fun, vr, kw, T.b)
-vrsum(fun, vr::VectorRepo, kw, T::DataType) = vrsum(fun, kw, get(vr, T))
 
 # Sum reduction over a subset of the elements
-sumsubset(fun, vr::VectorRepo{Any}, subsetfun; init=0.0) = sum(bindleadingargs(sumsubsetvec, fun, subsetfun, init), values(vr.data); init=init)
-sumsubset(fun, vr::VectorRepo{T}, subsetfun; init=0.0) where T = vrsumsubset(fun, subsetfun, vr, init,T)
-vrsumsubset(fun, subsetfun, vr, init, T::Union) = vrsumsubset(fun, subsetfun, vr, init, T.a) + vrsumsubset(fun, subsetfun, vr, init, T.b)
-vrsumsubset(fun, subsetfun, vr, init, T::DataType) = sumsubsetvec(fun, subsetfun, init, get(vr, T))
+sumsubset(fun, vr::VectorRepo, subsetfun; init=0.0) = sum(bindleadingargs(sumsubsetvec, fun, subsetfun, init), values(vr); init=init)
 sumsubsetvec(fun, subsetfun, init, vector) = sum(fun, subsetfun(vector); init=init)

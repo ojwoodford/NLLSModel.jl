@@ -19,7 +19,8 @@ mutable struct NLLSProblem{VarTypes, CostTypes}
         varcostmap = spzeros(Bool, 0, 0),
         varcostmapvalid = false
     ) where {VarTypes, CostTypes}
-        return new{VarTypes, CostTypes}(costs, vars, varcostmap, varcostmapvalid)
+        TCT = tupelize(CostTypes)
+        return new{VarTypes, TCT}(costs, vars, varcostmap, varcostmapvalid)
     end
 end
 
@@ -212,7 +213,8 @@ end
 costnum(vec::Vector)  = length(vec)
 costdeps(vec::Vector) = length(vec) != 0 ? length(vec) * ndeps(vec[1]) : 0
 resnum(vec::Vector)   = length(vec) != 0 ? (dynamic(is_static(nres(vec[1]))) ? length(vec) * nres(vec[1]) : sum(nres, vec; init=0)) : 0
-countcosts(fun, costs::CostStruct{Any}) = sum(fun, values(costs); init=0)
-countcosts(fun, costs::CostStruct{T}) where T = countcosts(fun, costs, T)
+countcosts(fun, costs::CostStruct) = sum(fun, values(costs); init=0)
 countcosts(fun, costs, T::Union) = countcosts(fun, costs, T.a) + countcosts(fun, costs, T.b)
+countcosts(fun, costs, ::Type{Tuple{}}) = 0
+countcosts(fun, costs, ::Type{T}) where T<:Tuple = countcosts(fun, costs, Base.tuple_type_head(T)) + countcosts(fun, costs, Base.tuple_type_tail(T))
 countcosts(fun, costs, T::DataType) = fun(get(costs, T))

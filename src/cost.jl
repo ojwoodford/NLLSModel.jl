@@ -10,17 +10,8 @@ cost(vars::AbstractVector, costs::CostStruct, ::StaticInt{1})::Float64 = cost_re
 cost(vars::AbstractVector, costs::CostStruct, numthreads::Integer)::Float64 = cost(vars, costs, static(numthreads))
 cost(vars::AbstractVector, costs::CostStruct, numthreads::StaticInt)::Float64 = cost_repo(vars, costs, numthreads)
 
-cost_repo(vars, costs::CostStruct{T}, numthreads::StaticInt) where T = cost_repo_type(vars, costs, T, numthreads)
-cost_repo(vars, costs::CostStruct{Any}, numthreads::StaticInt) = sum(c -> cost_vec(vars, c, numthreads), values(costs.data))
-
-@generated function cost_repo_type(vars, costs, ::Type{T}, numthreads) where T
-    if T isa Union
-        return :(cost_repo_type(vars, costs, $(T.a), numthreads) + 
-                 cost_repo_type(vars, costs, $(T.b), numthreads))
-    else
-        return :(cost_vec(vars, get(costs, $T), numthreads))
-    end
-end
+cost_repo(vars, costs::CostStruct, ::StaticInt{1}) = sum(bindleadingargs(computecost, vars), costs; init=0.0)
+cost_repo(vars, costs::CostStruct, numthreads::StaticInt) = cost_multithreaded(vars, costs, numthreads)
 
 cost_vec(vars, costlist::Vector, ::StaticInt{1})::Float64 = cost_range(vars, costlist, eachindex(costlist))
 

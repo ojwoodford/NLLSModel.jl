@@ -12,38 +12,18 @@ end
     return view(collection, chunk_indices(length(collection), N, taskid))
 end
 
-function cost_vec(vars, costlist::Vector, ::StaticInt{N})::Float64 where {N}
-    len = length(costlist)
-    if len < 10000
-        return cost_vec(vars, costlist, static(1))
+function cost_multithreaded(vars, costs::CostStruct, ::StaticInt{N})::Float64 where {N}
+    if countcosts(costnum, costs) < 10000
+        return sum(bindleadingargs(computecost, vars), costs; init=0.0)
     end
     tot = 0.0
     @batch reduction=((+, tot),) for taskid in 1:N
-        tot += cost_range(vars, costlist, chunk_indices(len, N, taskid))
+        tot += sumsubset(bindleadingargs(computecost, vars), costs, bindleadingargs(ithchunk, N, taskid); init=0.0)
     end
     return tot
 end
 
-costgradhess_chunk_repo!(ls, vars, costs::CostStruct{T}, N, taskid) where T = costgradhess_chunk_repo_type!(ls, vars, costs, T, N, taskid)
-costgradhess_chunk_repo_type!(ls, vars, costs, T::Union, N, taskid) = costgradhess_chunk_repo_type!(ls, vars, costs, T.a, N, taskid) + costgradhess_chunk_repo_type!(ls, vars, costs, T.b, N, taskid)
-function costgradhess_chunk_repo_type!(ls, vars, costs, T::DataType, N, taskid)
-    costlist = get(costs, T)
-    rng = chunk_indices(length(costlist), N, taskid)
-    return costgradhess_chunk_vec!(ls, vars, costlist, rng)
-end
-costgradhess_chunk_repo!(ls, vars, costs::CostStruct{Any}, N, taskid) = sum(c -> begin
-    rng = chunk_indices(length(c), N, taskid)
-    costgradhess_chunk_vec!(ls, vars, c, rng)
-end, values(costs.data))
-
-function costgradhess_chunk_vec!(ls, vars, costlist::Vector, rng::UnitRange{Int})::Float64
-    tot = 0.0
-    sub = @inbounds view(costlist, rng)
-    @inbounds for c in sub
-        tot += costgradhess!(ls, vars, c)
-    end
-    return tot
-end
+costgradhess_chunk_repo!(ls, vars, costs::CostStruct, N, taskid) = sumsubset(bindleadingargs(costgradhess!, ls, vars), costs, bindleadingargs(ithchunk, N, taskid); init=0.0)
 
 function costgradhess!(linsystem::LinearSystemShared{F, V, N}, vars::AbstractVector, costs::CostStruct)::Float64 where {F, V, N}
     if N == 1

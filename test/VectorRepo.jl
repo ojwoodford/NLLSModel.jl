@@ -42,8 +42,9 @@ end
     @test NLLSModels.sumsubset(Float64, vr1, bitvecfun) == halftotal
     @test NLLSModels.sumsubset(Float64, vr1, boolvecfun) ≈ halftotal
 
-    # Union container
+    # Union container (converts to Tuple parameter)
     vr2 = NLLSModels.VectorRepo{Union{Float64, Int, Char}}()
+    @test isa(vr2, NLLSModels.VectorRepo{<:Tuple})
     keytup = keys(vr2)
     @test isa(keytup, Tuple) && length(keytup) == 3
     @test any(keytup .== Float64) && any(keytup .== Int) && any(keytup .== Char)
@@ -61,10 +62,32 @@ end
     @test NLLSModels.sumsubset(Float64, vr2, boolvecfun) ≈ halftotal
     @test keys(vr1) == keys(vr1.data)
 
+    # Tuple container
+    vr2_tup = NLLSModels.VectorRepo{Tuple{Float64, Int, Char}}()
+    @test isa(vr2_tup, NLLSModels.VectorRepo{Tuple{Float64, Int, Char}})
+    keytup = keys(vr2_tup)
+    @test isa(keytup, Tuple) && length(keytup) == 3
+    @test any(keytup .== Float64) && any(keytup .== Int) && any(keytup .== Char)
+    fillrepo(vr2_tup, floats, ints)
+    @test sum(i->π*i, vr2_tup; init=0.0) ≈ total * π
+    valuetup = values(vr2_tup)
+    @test isa(valuetup, Tuple) && length(valuetup) == 3
+    @test any(Base.Fix2(isa, Vector{Float64}), valuetup) && any(Base.Fix2(isa, Vector{Int}), valuetup) && any(Base.Fix2(isa, Vector{Char}), valuetup)
+    @test NLLSModels.sumsubset(Float64, vr2_tup, rangefun) == halftotal
+
     # Initialize from single vector
     vr3 = NLLSModels.VectorRepo([1, 2])
+    @test isa(vr3, NLLSModels.VectorRepo{Tuple{Int}})
     @test sum(i->i, vr3) == 3
     @test NLLSModels.sumsubset(Float64, vr3, v -> view(v, 1:1)) == 1.0
     keytup = keys(vr3)
     @test isa(keytup, Tuple) && length(keytup) == 1 && keytup[1] == Int
+
+    # Single type container
+    vr5 = NLLSModels.VectorRepo{Float64}()
+    @test isa(vr5, NLLSModels.VectorRepo{Tuple{Float64}})
+    push!(vr5, 3.14)
+    @test sum(identity, vr5) == 3.14
+    @test keys(vr5) == (Float64,)
+    @test values(vr5) == ([3.14],)
 end
