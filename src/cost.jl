@@ -1,7 +1,7 @@
 using Static
 import ForwardDiff
 
-cost(problem::NLLSProblem) = cost(problem.variables, problem.costs, StaticInt(Threads.nthreads()))
+cost(problem::NLLSProblem) = cost(problem.variables, problem.costs)
 cost(problem::NLLSProblem, numthreads::Integer) = cost(problem.variables, problem.costs, static(numthreads))
 cost(problem::NLLSProblem, numthreads::StaticInt) = cost(problem.variables, problem.costs, numthreads)
 cost(problem::NLLSProblem, options) = cost(problem.variables, problem.costs, options.numthreads)
