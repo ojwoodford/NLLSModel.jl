@@ -1,13 +1,12 @@
 """
-    NLLSProblem{VarTypes, CostTypes}([variables, costs])
+    NLLSProblem{VarTypes, CostTypes}([variables])
     NLLSProblem(VT, CT)
     NLLSProblem(variables, CT)
-    NLLSProblem(variables, costs::CostStruct)
 
 Bipartite graph nonlinear least squares problem representation holding costs and variables.
 
 # Fields
-- `costs::CostStruct{CostTypes, CostVecs}`: Tuple-backed container of cost/residual vectors grouped by concrete type.
+- `costs`: Container of cost and residual blocks that define the problem.
 - `variables::Vector{VarTypes}`: Vector of variable blocks.
 - `varcostmap::SparseMatrixCSC{Bool, Int}`: Variable-to-cost bipartite incidence matrix.
 - `varcostmapvalid::Bool`: Flag tracking validity of `varcostmap`.
@@ -169,32 +168,6 @@ Four-variable residual computing `generatemeasurement(v1, v2, v3, v4) - measurem
 SimpleError4
 
 """
-    CostStruct{T}()
-    CostStruct(v::Vector{T})
-
-Tuple-backed container storing heterogeneous cost or residual vectors grouped by concrete type (`T` may be a concrete type, `Union`, or `Tuple` of concrete types).
-"""
-CostStruct
-
-"""
-    optimvars(problem::NLLSProblem, unfixed=nothing, numthreads=StaticInt(Threads.nthreads())) -> (f, fdf!, x0, H)
-
-Constructs the objective function `f`, in-place gradient/Hessian evaluator `fdf!`, initial variable state `x0`, and Hessian template `H` (`nothing` for static/dense systems or a `SparseMatrixCSC` for sparse systems) for `problem`.
-
-The returned 4-tuple can be passed directly to `SecondOrderOptimization.optimize`:
-```julia
-f, fdf!, x0, H = optimvars(problem)
-x_opt, result = optimize(f, fdf!, x0, options; H=H)
-```
-
-# Arguments
-- `problem::NLLSProblem`: The nonlinear least squares problem.
-- `unfixed`: Optional variable index (`Integer`), variable type (`DataType`), or boolean mask specifying which variables to optimize (defaults to `nothing`, optimizing all variables).
-- `numthreads`: Number of threads to use for parallel cost and derivative evaluation (`StaticInt` or `Integer`).
-"""
-optimvars
-
-"""
     addvariable!(problem::NLLSProblem, variable) -> Int
 
 Appends a variable block to `problem` and returns its 1-based index.
@@ -221,8 +194,25 @@ addcost!(problem, my_residual)
 addcost!
 
 """
+    optimvars(problem::NLLSProblem, unfixed=nothing, numthreads=StaticInt(Threads.nthreads())) -> (f, fdf!, x0, H)
+
+Constructs the objective function `f`, in-place gradient/Hessian evaluator `fdf!`, initial variable state `x0`, and Hessian template `H` (`nothing` for static/dense systems or a `SparseMatrixCSC` for sparse systems) for `problem`.
+
+The returned 4-tuple can be passed directly to `SecondOrderOptimization.optimize`:
+```julia
+f, fdf!, x0, H = optimvars(problem)
+x_opt, result = optimize(f, fdf!, x0, options; H=H)
+```
+
+# Arguments
+- `problem::NLLSProblem`: The nonlinear least squares problem.
+- `unfixed`: Optional variable index (`Integer`), variable type (`DataType`), or boolean mask specifying which variables to optimize (defaults to `nothing`, optimizing all variables).
+- `numthreads`: Number of threads to use for parallel cost and derivative evaluation (`StaticInt` or `Integer`).
+"""
+optimvars
+
+"""
     cost(problem::NLLSProblem, numthreads=StaticInt(Threads.nthreads())) -> Float64
-    cost(vars::AbstractVector, costs::CostStruct, numthreads=static(1)) -> Float64
 
 Evaluates and returns the total scalar objective cost of `problem`.
 
@@ -232,20 +222,6 @@ c = cost(problem)
 ```
 """
 cost
-
-"""
-    costgradhess!(linsystem, vars::AbstractVector, costs::CostStruct) -> Float64
-
-Evaluates the total cost, gradient, and Gauss-Newton/second-order Hessian approximation of `costs` at `vars` into `linsystem`.
-"""
-costgradhess!
-
-"""
-    updatevarcostmap!(problem::NLLSProblem)
-
-Rebuilds the bipartite variable-cost incidence map `problem.varcostmap`.
-"""
-updatevarcostmap!
 
 """
     subproblem(problem::NLLSProblem, unfixed) -> NLLSProblem

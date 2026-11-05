@@ -1,4 +1,5 @@
 using NLLSModels, Test, Static, StaticArrays, Random
+using OptimizationVariableInterface: update!
 
 struct SimpleResidual <: NLLSModels.AbstractAdaptiveResidual
     data::Float64

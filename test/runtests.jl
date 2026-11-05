@@ -1,4 +1,5 @@
 using Test
+using OptimizationVariableInterface: nvars, update, update!
 
 @testset "NLLSModels Tests" begin
     include("CostStruct.jl")

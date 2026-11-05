@@ -10,7 +10,7 @@
 
 ### 1. `NLLSProblem` Struct Simplification & `CostStruct`
 In previous versions of `NLLSsolver.jl`, `NLLSProblem` carried internal optimization scratch buffers (`varnext` and `varbest`), and stored costs in a `Dict`-backed `VectorRepo`.
-In `NLLSModels.jl`, [`NLLSProblem`](@ref) stores only the model data, using a zero-overhead tuple-backed [`CostStruct`](@ref) parameterized on the concrete cost types (`DataType`, `Union`, or `Tuple` of concrete cost types):
+In `NLLSModels.jl`, [`NLLSProblem`](@ref) stores only the model data, using a zero-overhead tuple-backed `CostStruct` parameterized on the concrete cost types (`DataType`, `Union`, or `Tuple` of concrete cost types):
 - `costs::CostStruct{CostTypes, CostVecs}`
 - `variables::Vector{VarTypes}`
 - `varcostmap::SparseMatrixCSC{Bool, Int}`

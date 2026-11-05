@@ -6,21 +6,11 @@
 NLLSProblem
 addvariable!
 addcost!
-cost
-costgradhess!
-updatevarcostmap!
+addresidual!
 subproblem
 subproblem!
-CostStruct
-```
-
-## Variables & Built-In Variable Types
-
-```@docs
-ZeroToInfScalar
-ZeroToOneScalar
-copyvars
-isbitsvartype
+cost
+optimvars
 ```
 
 ## Cost & Residual Interface
@@ -43,12 +33,6 @@ SimpleError4
 generatemeasurement
 ```
 
-## Optimization Interface
-
-```@docs
-optimvars
-```
-
 ## Robust Cost Functions
 
 ```@docs
@@ -65,11 +49,4 @@ Huber2oKernel
 GemanMcclureKernel
 GemanMcclure2oKernel
 ContaminatedGaussian
-```
-
-## Block Matrix Data Structures
-
-```@docs
-BlockDenseMatrix
-BlockSparseMatrix
 ```

@@ -1,4 +1,5 @@
 using NLLSModels, Test, Static, StaticArrays, LinearAlgebra
+using OptimizationVariableInterface: update!
 
 const NDIMS = 3
 struct LinearResidualStatic <: NLLSModels.AbstractResidual

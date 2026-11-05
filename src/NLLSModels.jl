@@ -19,19 +19,24 @@ import OptimizationVariableInterface:
 import FastNorm: sqnorm
 import ValueDispatch: valuedispatch
 
-# Export NLLSModels types and functions
+# Export NLLSModels public interface
+# Problem construction & evaluation
 export NLLSProblem
-export AbstractCost, AbstractResidual, AbstractAdaptiveResidual, AbstractRobustifier, AbstractAdaptiveRobustifier
+export addvariable!, addcost!, addresidual!, subproblem, subproblem!
+export cost, optimvars
+
+# Cost and residual types & definition interface
+export AbstractCost, AbstractResidual, AbstractAdaptiveResidual
+export ndeps, nres, varindices, getvars
+export computeresidual, computeresjac, computecost, computecostgradhess
+
+# Built-in error residuals
+export SimpleError2, SimpleError3, SimpleError4, generatemeasurement
+
+# Robust cost functions & interface
+export AbstractRobustifier, AbstractAdaptiveRobustifier
 export NoRobust, Scaled, HuberKernel, Huber2oKernel, GemanMcclureKernel, GemanMcclure2oKernel, ContaminatedGaussian
-export ZeroToInfScalar, ZeroToOneScalar
-export SimpleError2, SimpleError3, SimpleError4
-export BlockSparseMatrix, BlockDenseMatrix, CostStruct
-export addvariable!, addcost!, addresidual!, updatevarcostmap!, subproblem, subproblem!
-export cost, costgradhess!, computeresidual, computeresjac, computecost, computecostgradhess
-export optimvars
-export getvars, varindices, generatemeasurement, ndeps, nres
 export robustkernel, robustify, robustifydcost, robustifydkernel
-export nvars, update, update!, copyvars, syncvars!, isbitsvartype, zero!
 
 # Exported abstract types
 abstract type AbstractCost end  # Standard (non-squared) cost

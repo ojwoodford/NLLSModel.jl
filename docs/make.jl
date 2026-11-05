@@ -1,14 +1,12 @@
 using Documenter
 using NLLSModels
-using BlockMatrices
-using OptimizationVariableInterface
 
 DocMeta.setdocmeta!(NLLSModels, :DocTestSetup, :(using NLLSModels); recursive=true)
 
 makedocs(
     sitename = "NLLSModels.jl",
-    modules = [NLLSModels, BlockMatrices, OptimizationVariableInterface],
-    checkdocs = :none,
+    modules = [NLLSModels],
+    checkdocs = :exports,
     remotes = nothing,
     warnonly = false,
     format = Documenter.HTML(

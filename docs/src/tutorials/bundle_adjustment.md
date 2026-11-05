@@ -35,7 +35,7 @@ addcost!(problem, SimpleError2{CamType, PtType}(SVector(0.5, -0.2), cam1, pt1))
 ## Joint Sparse Optimization vs Alternating Single-Variable Optimization
 
 Because individual 3D landmarks do not interact directly with each other, you can either:
-1. **Jointly optimize** all cameras and landmarks using [`optimvars`](@ref) with `SecondOrderOptimization.optimize` (or `NLLSsolver.optimize!(problem, options)`), which automatically uses [`BlockSparseMatrix`](@ref) and `LDLFactorizations.jl`.
+1. **Jointly optimize** all cameras and landmarks using [`optimvars`](@ref) with `SecondOrderOptimization.optimize` (or `NLLSsolver.optimize!(problem, options)`), which automatically uses `BlockSparseMatrix` and `LDLFactorizations.jl`.
 2. **Optimize landmarks (or cameras) individually** in alternation using [`optimvars`](@ref) for a single variable index (or `NLLSsolver.optimizesingles!`), which solves a tiny $3 \times 3$ static linear system per 3D point with zero heap allocations:
 
 ```julia

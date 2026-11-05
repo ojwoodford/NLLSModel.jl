@@ -1,4 +1,5 @@
 using NLLSModels, Test, Static, StaticArrays, SparseArrays, Random, LinearAlgebra
+using OptimizationVariableInterface: nvars
 
 # Simple affine projection transform
 NLLSModels.generatemeasurement(pose::SVector{6, T}, X::SVector{3, U}) where {T, U} = SVector(dot(@inbounds(view(pose, NLLSModels.SR(1, 3))), X), dot(@inbounds(view(pose, NLLSModels.SR(4, 6))), X))
