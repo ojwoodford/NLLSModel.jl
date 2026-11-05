@@ -1,6 +1,6 @@
 [deps]
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
-NLLSModels = "b7e28c5a-4e6f-4d8b-9a1c-5d3e2f1a0b9c"
+NLLSModel = "b7e28c5a-4e6f-4d8b-9a1c-5d3e2f1a0b9c"
 NLPModels = "a4795742-8479-5a88-8948-cc11e1c8c1a6"
 OptimizationVariableInterface = "f1c3d78e-8b2a-4c9d-9e4f-4a7b6c0d3e17"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"

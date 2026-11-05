@@ -2,13 +2,13 @@
 
 [Ceres Solver](http://ceres-solver.org/) is an open-source C++ library for modeling and solving large nonlinear least squares problems.
 
-Here is a direct mapping of Ceres Solver concepts to `NLLSModels.jl`:
+Here is a direct mapping of Ceres Solver concepts to `NLLSModel.jl`:
 
 ## Concept Translation Table
 
-| Ceres Solver (C++) | NLLSModels.jl (Julia) | Notes |
+| Ceres Solver (C++) | NLLSModel.jl (Julia) | Notes |
 | :--- | :--- | :--- |
-| `ceres::Problem` | [`NLLSProblem`](@ref) | Container for variable blocks and cost/residual blocks |
+| `ceres::Problem` | [`NLLSModel`](@ref) | Container for variable blocks and cost/residual blocks |
 | `ceres::CostFunction` | [`AbstractResidual`](@ref) / [`AbstractCost`](@ref) | Defines residual vector & derivatives |
 | `ceres::LossFunction` | [`AbstractRobustifier`](@ref) | Robust M-estimator kernel ([`HuberKernel`](@ref), [`Huber2oKernel`](@ref), [`GemanMcclure2oKernel`](@ref), etc.) |
 | Parameter Block (`double*`) | Variable (`Float64`, `SVector`, `Vector`, custom struct) | Supports both immutable stack types and mutable arrays |
@@ -17,7 +17,7 @@ Here is a direct mapping of Ceres Solver concepts to `NLLSModels.jl`:
 | `ceres::Solver::Summary` | `OptimizationResult` (`NLLSResult`) | Costs, timings, iteration/evaluation counts, allocations |
 | `ceres::Solve(options, &problem, &summary)` | [`optimvars(problem)`](@ref optimvars) + `optimize` (or `NLLSsolver.optimize!`) | Core solve call |
 
-## Ceres vs NLLSModels Code Comparison
+## Ceres vs NLLSModel Code Comparison
 
 ### Ceres Solver (C++):
 ```cpp
@@ -41,23 +41,23 @@ ceres::Solver::Summary summary;
 ceres::Solve(options, &problem, &summary);
 ```
 
-### NLLSModels.jl (Julia):
+### NLLSModel.jl (Julia):
 ```julia
-using NLLSModels
+using NLLSModel
 using Static, StaticArrays
 
 struct CostResidual <: AbstractResidual
     varind::Int
 end
-NLLSModels.ndeps(::CostResidual) = static(1)
-NLLSModels.nres(::CostResidual) = static(1)
-NLLSModels.varindices(r::CostResidual) = SVector(r.varind)
-NLLSModels.getvars(r::CostResidual, vars::Vector) = (vars[r.varind]::Float64,)
-NLLSModels.computeresidual(::CostResidual, x) = SVector(10.0 - x)
-NLLSModels.robustkernel(::CostResidual) = Huber2oKernel(1.0)
+NLLSModel.ndeps(::CostResidual) = static(1)
+NLLSModel.nres(::CostResidual) = static(1)
+NLLSModel.varindices(r::CostResidual) = SVector(r.varind)
+NLLSModel.getvars(r::CostResidual, vars::Vector) = (vars[r.varind]::Float64,)
+NLLSModel.computeresidual(::CostResidual, x) = SVector(10.0 - x)
+NLLSModel.robustkernel(::CostResidual) = Huber2oKernel(1.0)
 Base.eltype(::CostResidual) = Float64
 
-problem = NLLSProblem(Float64, CostResidual)
+problem = NLLSModel(Float64, CostResidual)
 idx = addvariable!(problem, 0.5)
 addcost!(problem, CostResidual(idx))
 

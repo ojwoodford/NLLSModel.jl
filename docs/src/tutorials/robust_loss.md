@@ -2,7 +2,7 @@
 
 Real-world sensor measurements and feature correspondences frequently contain outliers. Standard squared loss ($\frac{1}{2}\|r\|^2$) allows large outliers to pull estimated parameters far away from ground truth.
 
-`NLLSModels.jl` provides robust M-estimator kernels that transform the squared residual norm $s = \|r(x)\|^2$ into $\frac{1}{2} \rho(s)$.
+`NLLSModel.jl` provides robust M-estimator kernels that transform the squared residual norm $s = \|r(x)\|^2$ into $\frac{1}{2} \rho(s)$.
 
 ## Available Robustifiers
 
@@ -18,10 +18,10 @@ Real-world sensor measurements and feature correspondences frequently contain ou
 
 ## Attaching a Robustifier to a Residual
 
-To use a robust kernel with a residual type, store or return the kernel from [`NLLSModels.robustkernel`](@ref):
+To use a robust kernel with a residual type, store or return the kernel from [`NLLSModel.robustkernel`](@ref):
 
 ```julia
-using NLLSModels
+using NLLSModel
 using Static, StaticArrays
 
 struct RobustPointResidual{K <: AbstractRobustifier} <: AbstractResidual
@@ -30,15 +30,15 @@ struct RobustPointResidual{K <: AbstractRobustifier} <: AbstractResidual
     kernel::K
 end
 
-NLLSModels.ndeps(::RobustPointResidual) = static(1)
-NLLSModels.nres(::RobustPointResidual) = static(2)
-NLLSModels.varindices(r::RobustPointResidual) = SVector(r.varind)
-NLLSModels.getvars(r::RobustPointResidual, vars::Vector) = (vars[r.varind]::SVector{2, Float64},)
-NLLSModels.computeresidual(r::RobustPointResidual, x) = x - r.target
-NLLSModels.robustkernel(r::RobustPointResidual) = r.kernel
+NLLSModel.ndeps(::RobustPointResidual) = static(1)
+NLLSModel.nres(::RobustPointResidual) = static(2)
+NLLSModel.varindices(r::RobustPointResidual) = SVector(r.varind)
+NLLSModel.getvars(r::RobustPointResidual, vars::Vector) = (vars[r.varind]::SVector{2, Float64},)
+NLLSModel.computeresidual(r::RobustPointResidual, x) = x - r.target
+NLLSModel.robustkernel(r::RobustPointResidual) = r.kernel
 Base.eltype(::RobustPointResidual) = Float64
 
-problem = NLLSProblem(SVector{2, Float64}, RobustPointResidual{Huber2oKernel{Float64}})
+problem = NLLSModel(SVector{2, Float64}, RobustPointResidual{Huber2oKernel{Float64}})
 idx = addvariable!(problem, SVector(0.0, 0.0))
 addcost!(problem, RobustPointResidual(SVector(1.0, 1.0), idx, Huber2oKernel(1.5)))
 addcost!(problem, RobustPointResidual(SVector(1.1, 0.9), idx, Huber2oKernel(1.5)))
