@@ -3,7 +3,7 @@ module NLLSModel
 using BlockMatrices
 using FastNorm
 using OptimizationVariableInterface
-using ValueDispatch
+using SIRBSDispatch
 using Static, StaticArrays, SparseArrays, LinearAlgebra
 
 import BlockMatrices:
@@ -17,7 +17,7 @@ import OptimizationVariableInterface:
     ZeroToInfScalar, ZeroToOneScalar
 
 import FastNorm: sqnorm
-import ValueDispatch: valuedispatch
+import SIRBSDispatch: sirbsdispatch
 
 # Export NLLSModel public interface
 # Problem construction & evaluation

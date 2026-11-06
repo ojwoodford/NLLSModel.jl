@@ -48,7 +48,7 @@ function gradhesshelper!(linsystem, cost::AbstractCost, vars, blockind, varflags
 
     if nvars <= 5
         # Value dispatch gradient computation based on the varflags
-        return valuedispatch(static(0), maxflags-static(1), varflags, bindleadingargs(gradhesshelper!, linsystem, cost, vars, blockind))
+        return sirbsdispatch(static(0), maxflags-static(1), varflags, bindleadingargs(gradhesshelper!, linsystem, cost, vars, blockind))
     else
         # Fall back on dynamic dispatch
         return gradhesshelper!(linsystem, cost, vars, blockind, static(varflags))
