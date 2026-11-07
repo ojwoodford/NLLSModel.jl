@@ -1,38 +1,42 @@
-module NLLSModels
+module NLLSModel
 
 using BlockMatrices
-using FastLinAlg
+using FastNorm
 using OptimizationVariableInterface
-using ValueDispatch
+using SIRBSDispatch
 using Static, StaticArrays, SparseArrays, LinearAlgebra
 
 import BlockMatrices:
     BlockSparseMatrix, BlockDenseMatrix,
-    block, validblock, zero!, copy_structure, uniformscaling!,
-    symmetrifyfull, symmetrifyfull!, symmetrifysparse,
-    makesparseindices, cacheindices, clearindicescache, updatelastrowsym!,
-    sparse_dense_decision, block_sparse_nnz, computestartindices, find_diag_inds
+    block, zero!, copy_structure,
+    symmetrifyfull, makesparseindices,
+    sparse_dense_decision, computestartindices, find_diag_inds
 
 import OptimizationVariableInterface:
-    nvars, update, update!, copyvars, syncvars!, isbitsvartype,
+    nvars, update, update!, syncvars!,
     ZeroToInfScalar, ZeroToOneScalar
 
-import FastLinAlg: sqnorm, fast_dot, fast_norm, fast_bAb
-import ValueDispatch: valuedispatch
+import FastNorm: sqnorm
+import SIRBSDispatch: sirbsdispatch
 
-# Export NLLSModels types and functions
-export NLLSProblem
-export AbstractCost, AbstractResidual, AbstractAdaptiveResidual, AbstractRobustifier, AbstractAdaptiveRobustifier
+# Export NLLSModel public interface
+# Problem construction & evaluation
+export Model, NLPLSModel
+export addvariable!, addcost!, addresidual!, subproblem, subproblem!
+export cost, optimvars, syncvars!
+
+# Cost and residual types & definition interface
+export AbstractCost, AbstractResidual, AbstractAdaptiveResidual
+export ndeps, nres, varindices, getvars
+export computeresidual, computeresjac, computecost, computecostgradhess
+
+# Built-in error residuals
+export SimpleError2, SimpleError3, SimpleError4, generatemeasurement
+
+# Robust cost functions & interface
+export AbstractRobustifier, AbstractAdaptiveRobustifier
 export NoRobust, Scaled, HuberKernel, Huber2oKernel, GemanMcclureKernel, GemanMcclure2oKernel, ContaminatedGaussian
-export ZeroToInfScalar, ZeroToOneScalar
-export SimpleError2, SimpleError3, SimpleError4
-export BlockSparseMatrix, BlockDenseMatrix, VectorRepo
-export addvariable!, addcost!, addresidual!, updatevarcostmap!, subproblem, subproblem!
-export cost, costgradhess!, computeresidual, computeresjac, computecost, computecostgradhess
-export optimvars
-export getvars, varindices, generatemeasurement, ndeps, nres
 export robustkernel, robustify, robustifydcost, robustifydkernel
-export nvars, update, update!, copyvars, syncvars!, isbitsvartype, zero!
 
 # Exported abstract types
 abstract type AbstractCost end  # Standard (non-squared) cost
@@ -48,7 +52,7 @@ const MAX_STATIC_VAR = 64 # Maximum static variable size for static sized autodi
 
 # Includes
 include("utils.jl")
-include("VectorRepo.jl")
+include("CostStruct.jl")
 include("problem.jl")
 const addresidual! = addcost!
 include("unroll.jl")
@@ -62,4 +66,4 @@ include("multithreading.jl")
 include("optimize.jl")
 include("docstrings.jl")
 
-end # module NLLSModels
+end # module NLLSModel

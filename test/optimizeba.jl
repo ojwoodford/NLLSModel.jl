@@ -1,10 +1,11 @@
-using NLLSModels, Test, Static, StaticArrays, SparseArrays, Random, LinearAlgebra
+using NLLSModel, Test, Static, StaticArrays, SparseArrays, Random, LinearAlgebra
+using OptimizationVariableInterface: nvars
 
 # Simple affine projection transform
-NLLSModels.generatemeasurement(pose::SVector{6, T}, X::SVector{3, U}) where {T, U} = SVector(dot(@inbounds(view(pose, NLLSModels.SR(1, 3))), X), dot(@inbounds(view(pose, NLLSModels.SR(4, 6))), X))
+NLLSModel.generatemeasurement(pose::SVector{6, T}, X::SVector{3, U}) where {T, U} = SVector(dot(@inbounds(view(pose, NLLSModel.SR(1, 3))), X), dot(@inbounds(view(pose, NLLSModel.SR(4, 6))), X))
 
 function create_ba_problem(ncameras, nlandmarks, propvisible)
-    problem = NLLSProblem(Union{SVector{6, Float64}, SVector{3, Float64}}, SimpleError2{2, Float64, SVector{6, Float64}, SVector{3, Float64}})
+    problem = Model(Union{SVector{6, Float64}, SVector{3, Float64}}, SimpleError2{2, Float64, SVector{6, Float64}, SVector{3, Float64}})
 
     # Generate the cameras on a unit sphere, pointing to the origin
     camoffset = SVector(1.0, 0.0, 0.0, 0.0, 1.0, 0.0)
@@ -31,7 +32,7 @@ function create_ba_problem(ncameras, nlandmarks, propvisible)
         end
     end
 
-    # Return the NLLSProblem
+    # Return the NLLSModel
     return problem
 end
 
@@ -47,7 +48,7 @@ function perturb_ba_problem(problem, pointnoise, posenoise)
 end
 
 function compute_cost(problem)
-    allocd = @allocated c = NLLSModels.cost(problem, static(1))
+    allocd = @allocated c = NLLSModel.cost(problem, static(1))
     return (c, allocd)
 end
 
@@ -60,7 +61,7 @@ end
     problem = perturb_ba_problem(problem, 0.003, 0.0)
     costbefore = cost(problem)
     landmarks = isa.(problem.variables, SVector{3, Float64})
-    NLLSModels.reordercostsforschur!(problem, landmarks)
+    NLLSModel.reordercostsforschur!(problem, landmarks)
     @test cost(problem) ≈ costbefore
 
     # Zero-allocation cost evaluation

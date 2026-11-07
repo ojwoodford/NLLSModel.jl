@@ -1,21 +1,17 @@
 using Static
 import ForwardDiff
 
-cost(problem::NLLSProblem) = cost(problem.variables, problem.costs, StaticInt(Threads.nthreads()))
-cost(problem::NLLSProblem, numthreads::Integer) = cost(problem.variables, problem.costs, static(numthreads))
-cost(problem::NLLSProblem, numthreads::StaticInt) = cost(problem.variables, problem.costs, numthreads)
-cost(problem::NLLSProblem, options) = cost(problem.variables, problem.costs, options.numthreads)
+cost(problem::Model) = cost(problem.variables, problem.costs)
+cost(problem::Model, numthreads::Integer) = cost(problem.variables, problem.costs, static(numthreads))
+cost(problem::Model, numthreads::StaticInt) = cost(problem.variables, problem.costs, numthreads)
+cost(problem::Model, options) = cost(problem.variables, problem.costs, options.numthreads)
 cost(vars::AbstractVector, costs::CostStruct)::Float64 = cost(vars, costs, static(1))
-cost(vars::AbstractVector, costs::CostStruct, ::StaticInt{1})::Float64 = cost_repo(vars, costs, static(1))
+cost(vars::AbstractVector, costs::CostStruct, ::StaticInt{1})::Float64 = cost_struct(vars, costs, static(1))
 cost(vars::AbstractVector, costs::CostStruct, numthreads::Integer)::Float64 = cost(vars, costs, static(numthreads))
-cost(vars::AbstractVector, costs::CostStruct, numthreads::StaticInt)::Float64 = cost_repo(vars, costs, numthreads)
+cost(vars::AbstractVector, costs::CostStruct, numthreads::StaticInt)::Float64 = cost_struct(vars, costs, numthreads)
 
-cost_repo(vars, costs::CostStruct{T}, numthreads::StaticInt) where T = cost_repo_type(vars, costs, T, numthreads)
-cost_repo_type(vars, costs, T::Union, numthreads) = cost_repo_type(vars, costs, T.a, numthreads) + cost_repo_type(vars, costs, T.b, numthreads)
-cost_repo_type(vars, costs, T::DataType, numthreads) = cost_vec(vars, get(costs, T), numthreads)
-cost_repo(vars, costs::CostStruct{Any}, numthreads::StaticInt) = sum(c -> cost_vec(vars, c, numthreads), values(costs.data))
-
-cost_vec(vars, costlist::Vector, ::StaticInt{1})::Float64 = cost_range(vars, costlist, eachindex(costlist))
+cost_struct(vars, costs::CostStruct, ::StaticInt{1}) = sum(bindleadingargs(computecost, vars), costs; init=0.0)
+cost_struct(vars, costs::CostStruct, numthreads::StaticInt) = cost_multithreaded(vars, costs, numthreads)
 
 function cost_range(vars, costlist::AbstractVector, rng::AbstractUnitRange)::Float64
     tot = 0.0
@@ -52,7 +48,7 @@ function gradhesshelper!(linsystem, cost::AbstractCost, vars, blockind, varflags
 
     if nvars <= 5
         # Value dispatch gradient computation based on the varflags
-        return valuedispatch(static(0), maxflags-static(1), varflags, bindleadingargs(gradhesshelper!, linsystem, cost, vars, blockind))
+        return sirbsdispatch(static(0), maxflags-static(1), varflags, bindleadingargs(gradhesshelper!, linsystem, cost, vars, blockind))
     else
         # Fall back on dynamic dispatch
         return gradhesshelper!(linsystem, cost, vars, blockind, static(varflags))

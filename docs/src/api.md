@@ -3,24 +3,14 @@
 ## Problem Representation
 
 ```@docs
-NLLSProblem
+Model
 addvariable!
 addcost!
-cost
-costgradhess!
-updatevarcostmap!
+addresidual!
 subproblem
 subproblem!
-VectorRepo
-```
-
-## Variables & Built-In Variable Types
-
-```@docs
-ZeroToInfScalar
-ZeroToOneScalar
-copyvars
-isbitsvartype
+cost
+optimvars
 ```
 
 ## Cost & Residual Interface
@@ -43,12 +33,6 @@ SimpleError4
 generatemeasurement
 ```
 
-## Optimization Interface
-
-```@docs
-optimvars
-```
-
 ## Robust Cost Functions
 
 ```@docs
@@ -67,9 +51,9 @@ GemanMcclure2oKernel
 ContaminatedGaussian
 ```
 
-## Block Matrix Data Structures
+## NLPModels Integration
 
 ```@docs
-BlockDenseMatrix
-BlockSparseMatrix
+NLPLSModel
+syncvars!
 ```
