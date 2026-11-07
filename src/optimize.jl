@@ -169,3 +169,8 @@ function NLPLSModel end
 
 NLPLSModel(problem::Model, args...; kwargs...) =
     error("NLPLSModel requires the NLPModels package. Run `using NLPModels` first.")
+
+function NLLSNLSModel end
+
+NLLSNLSModel(problem::Model, args...; kwargs...) =
+    error("NLLSNLSModel requires the NLPModels package. Run `using NLPModels` first.")

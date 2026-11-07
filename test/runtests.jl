@@ -10,4 +10,5 @@ using OptimizationVariableInterface: nvars, update, update!
     include("multithreading.jl")
     include("optimizeba.jl")
     include("NLPModel.jl")
+    include("nls_interface.jl")
 end

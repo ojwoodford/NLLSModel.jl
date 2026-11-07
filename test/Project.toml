@@ -1,4 +1,6 @@
 [deps]
+JSOSolvers = "10dff2fc-5484-5881-a0e0-c90441020f8a"
+LeastSquaresOptim = "0fc2ff8b-aaa3-5acd-a817-1944a5e08891"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 NLLSModel = "b7e28c5a-4e6f-4d8b-9a1c-5d3e2f1a0b9c"
 NLPModels = "a4795742-8479-5a88-8948-cc11e1c8c1a6"
@@ -8,3 +10,7 @@ SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 Static = "aedffcd0-7271-4cad-89d0-dc628f76c6d3"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[sources]
+NLLSModel = {path = "/Users/olly/.julia/dev/NLLSModel.jl"}
+OptimizationVariableInterface = {path = "/Users/olly/.julia/dev/OptimizationVariableInterface.jl"}

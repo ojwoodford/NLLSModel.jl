@@ -21,9 +21,10 @@ import SIRBSDispatch: sirbsdispatch
 
 # Export NLLSModel public interface
 # Problem construction & evaluation
-export Model, NLPLSModel
+export Model, NLPLSModel, NLLSNLSModel
 export addvariable!, addcost!, addresidual!, subproblem, subproblem!
-export cost, optimvars, syncvars!
+export cost, optimvars, optimvars_nls, flat_optimvars_nls, nls_callbacks, syncvars!, nresiduals
+export isadditive, islinearkernel, clamped_count, reset_clamped_count!
 
 # Cost and residual types & definition interface
 export AbstractCost, AbstractResidual, AbstractAdaptiveResidual
@@ -63,7 +64,9 @@ include("residual.jl")
 include("autodiff.jl")
 include("cost.jl")
 include("multithreading.jl")
+include("flatvars.jl")
 include("optimize.jl")
+include("tall_system.jl")
 include("docstrings.jl")
 
 end # module NLLSModel

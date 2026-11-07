@@ -220,3 +220,4 @@ costnum(vec::Vector)  = length(vec)
 costdeps(vec::Vector) = length(vec) != 0 ? length(vec) * ndeps(vec[1]) : 0
 resnum(vec::Vector)   = length(vec) != 0 ? (dynamic(is_static(nres(vec[1]))) ? length(vec) * nres(vec[1]) : sum(nres, vec; init=0)) : 0
 countcosts(fun, costs::CostStruct) = sum(fun, values(costs); init=0)
+nresiduals(problem::Model) = Int(countcosts(resnum, problem.costs))

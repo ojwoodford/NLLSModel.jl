@@ -20,6 +20,23 @@ function robustifydcost(kernel::Scaled, cost)
     return c * kernel.height, d1 * kernel.height, d2 * kernel.height
 end
 
+islinearkernel(::NoRobust) = true
+function islinearkernel(k::Scaled)
+    h = Float64(dynamic(k.height))
+    return islinearkernel(k.robust) && isfinite(h) && (h >= 0.0)
+end
+islinearkernel(::AbstractRobustifier) = false
+
+linearweight(::NoRobust) = 1.0
+linearweight(k::Scaled) = Float64(dynamic(k.height)) * linearweight(k.robust)
+
+const DEFAULT_DC_TOL = 1e-12
+@inline function kernel_dc_tol(kernel::AbstractRobustifier)::Float64
+    _, dc0_raw, _ = robustifydcost(kernel, 0.0)
+    dc0 = Float64(dynamic(dc0_raw))
+    return (isfinite(dc0) && dc0 > 0.0) ? (DEFAULT_DC_TOL * dc0) : DEFAULT_DC_TOL
+end
+
 struct HuberKernel{T<:Real, B} <: AbstractRobustifier
     width::T
     width_squared::T
