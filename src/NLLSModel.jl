@@ -9,7 +9,7 @@ using Static, StaticArrays, SparseArrays, LinearAlgebra
 import BlockMatrices:
     BlockSparseMatrix, BlockDenseMatrix,
     block, zero!, copy_structure,
-    symmetrifyfull, makesparseindices,
+    symmetrifyfull, symmetrifyfull!, makesparseindices,
     block_sparse_nnz, computestartindices, find_diag_inds
 
 import OptimizationVariableInterface:

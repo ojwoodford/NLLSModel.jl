@@ -88,7 +88,7 @@ end
         zero!(target_ls)
         c = costgradhess_nozero!(target_ls, full_vars, f.problem.costs)
     end
-    symmetrifyfull(bdm)
+    symmetrifyfull!(bdm)
     return c
 end
 
