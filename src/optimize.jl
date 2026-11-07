@@ -78,7 +78,7 @@ struct MultiVarDenseFDF{LS, P, U}
 end
 @inline function (f::MultiVarDenseFDF)(g, H_mat::Matrix{Float64}, vars)
     full_vars = sync_unfixed_vars!(f.problem, f.unfixed_inds, vars)
-    bdm = DenseBlockLinearSystem{Float64}(H_mat, f.linsystem.x.boffsets)
+    bdm = DenseBlockLinearSystem{Float64}(H_mat, BlockOffsets(f.linsystem.x.boffsets))
     if f.linsystem isa LinearSystemShared
         ls1 = MultiVariateLSdense_ls(bdm, g)
         target = replace_first_ls(f.linsystem, ls1)
@@ -152,7 +152,7 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
 
     sparsity = block_sparsity(problem, unfixed)
     if len >= 40 && sparse_dense_decision(len, sparsity, blocksizes)
-        bsm = SparseBlockLinearSystem{Float64}(sparsity, blocksizes, blocksizes)
+        bsm = SparseBlockLinearSystem{Float64}(TransposedPattern(sparsity), blocksizes, blocksizes)
         lssparse = MultiVariateLSsparse(bsm, blockindices, true)
         ls_shared = sharedlinearsystem(lssparse, problem, numthreads)
         fdf! = MultiVarSparseFDF(ls_shared, problem, unfixed_inds)

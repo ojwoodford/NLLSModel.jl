@@ -7,7 +7,7 @@ using SIRBSDispatch
 using Static, StaticArrays, SparseArrays, LinearAlgebra
 
 import BlockLinearSystems:
-    SparseBlockLinearSystem, DenseBlockLinearSystem,
+    SparseBlockLinearSystem, DenseBlockLinearSystem, TransposedPattern, BlockOffsets,
     block, zero!, copy_structure,
     symmetrifyfull, symmetrifyfull!, makesparseindices,
     block_sparse_nnz, computestartindices, find_diag_inds

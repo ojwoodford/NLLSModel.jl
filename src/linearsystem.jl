@@ -158,7 +158,7 @@ function MultiVariateLSdense(blocksizes, blockindices)
     blen -= 1
     return LinearSystem(
         MultiVariateLSdense_x(Vector{Float64}(undef, blen), blockindices, boffsets),
-        MultiVariateLSdense_ls(DenseBlockLinearSystem{Float64}(boffsets), zeros(Float64, blen))
+        MultiVariateLSdense_ls(DenseBlockLinearSystem{Float64}(blocksizes), zeros(Float64, blen))
     )
 end
 
