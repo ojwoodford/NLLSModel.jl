@@ -40,7 +40,7 @@ Because individual 3D landmarks do not interact directly with each other, you ca
 
 ```julia
 using SecondOrderOptimization
-options = OptimizationOptions(iterator = :levenbergmarquardt_dtd, numthreads = static(1))
+options = OptimizationOptions(iterator = :levenbergmarquardt_dtd)
 
 # Optimize a single 3D landmark (3x3 static system)
 f_pt, fdf_pt!, x0_pt, H_pt = optimvars(problem, pt1, static(1))
