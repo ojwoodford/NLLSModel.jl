@@ -108,10 +108,7 @@ end
         zero!(target_ls)
         c = costgradhess_nozero!(target_ls, full_vars, f.problem.costs)
     end
-    bsm_data = getA(f.linsystem).data
-    @inbounds for (i, si) in enumerate(f.linsystem.x.sparseindices)
-        H_csc.nzval[i] = bsm_data[si]
-    end
+    copyto!(H_csc, getA(f.linsystem), f.linsystem.x.sparseindices)
     return c
 end
 

@@ -125,9 +125,7 @@ function MultiVariateLSsparse(A::SparseBlockLinearSystem, blockindices, storehes
     blen = boffsets[end] + A.rowblocksizes[end] - 1
     if storehessian
         x = Vector{Float64}(undef, blen)
-        sparseindices = makesparseindices(A, true)
-        hessian = SparseMatrixCSC{Float64, Int}(sparseindices.m, sparseindices.n, sparseindices.colptr, sparseindices.rowval, Vector{Float64}(undef, length(sparseindices.nzval)))
-        sparseindices = sparseindices.nzval
+        hessian, sparseindices = sparse_with_map(A; symmetric=true)
         diag_inds = find_diag_inds(hessian)
     else
         x = Vector{Float64}(undef, 1)
@@ -258,10 +256,7 @@ gethessian(::UniVariateLSdynamic_x, ls::UniVariateLSdynamic_ls) = ls.A
 gethessian(::UniVariateLSstatic_x, ls::UniVariateLSstatic_ls) = ls.A
 gethessian(::MultiVariateLSdense_x, ls::MultiVariateLSdense_ls) = symmetrifyfull(ls.A)
 function gethessian(x::MultiVariateLSsparse_x, ls::MultiVariateLSsparse_ls)
-    # Fill sparse hessian
-    @inbounds for (i, si) in enumerate(x.sparseindices)
-        x.hessian.nzval[i] = ls.A.data[si]
-    end
+    copyto!(x.hessian, ls.A, x.sparseindices)
     return x.hessian
 end
 gethessian(linsystem) = getA(linsystem)
