@@ -10,7 +10,7 @@ import BlockMatrices:
     BlockSparseMatrix, BlockDenseMatrix,
     block, zero!, copy_structure,
     symmetrifyfull, makesparseindices,
-    sparse_dense_decision, computestartindices, find_diag_inds
+    block_sparse_nnz, computestartindices, find_diag_inds
 
 import OptimizationVariableInterface:
     nvars, update, update!, syncvars!,

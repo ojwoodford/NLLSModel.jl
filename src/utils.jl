@@ -54,3 +54,16 @@ function block_sizes_indices(variables, unfixed, nblocks)
     end
     return blocksizes, blockindices
 end
+
+"""
+    sparse_dense_decision(ndims, sparsity, blocksizes) -> Bool
+    sparse_dense_decision(ndims, nnz) -> Bool
+
+Heuristic returning `true` when a symmetric linear system of dimension `ndims` with lower-triangular non-zero count `nnz`
+(computed from a block `sparsity` pattern and `blocksizes` via `BlockMatrices.block_sparse_nnz`) is faster to factorize
+as a sparse matrix than as a dense matrix: `64 * nnz < 25 * ndims * (ndims - 40)`.
+
+Used by `optimvars_dispatch` to choose between a `BlockSparseMatrix` (sparse LDLᵀ) and a `BlockDenseMatrix` (dense Cholesky) linear system.
+"""
+sparse_dense_decision(ndims, sparsity, blocksizes) = sparse_dense_decision(ndims, block_sparse_nnz(sparsity, blocksizes))
+sparse_dense_decision(ndims, nnz) = (nnz * 64) < (25 * ndims * (ndims - 40)) # Threshold nnz (for lower triangle) = 25/64 * (d^2 - 40d)
