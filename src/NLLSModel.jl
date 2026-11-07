@@ -1,13 +1,13 @@
 module NLLSModel
 
-using BlockMatrices
+using BlockLinearSystems
 using FastNorm
 using OptimizationVariableInterface
 using SIRBSDispatch
 using Static, StaticArrays, SparseArrays, LinearAlgebra
 
-import BlockMatrices:
-    BlockSparseMatrix, BlockDenseMatrix,
+import BlockLinearSystems:
+    SparseBlockLinearSystem, DenseBlockLinearSystem,
     block, zero!, copy_structure,
     symmetrifyfull, symmetrifyfull!, makesparseindices,
     block_sparse_nnz, computestartindices, find_diag_inds

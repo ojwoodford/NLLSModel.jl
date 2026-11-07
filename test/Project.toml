@@ -1,4 +1,5 @@
 [deps]
+BlockLinearSystems = "a7d4e89f-9c3b-4d0e-8f5a-5b8c7d1e4f28"
 JSOSolvers = "10dff2fc-5484-5881-a0e0-c90441020f8a"
 LeastSquaresOptim = "0fc2ff8b-aaa3-5acd-a817-1944a5e08891"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
@@ -12,5 +13,6 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [sources]
+BlockLinearSystems = {path = "/Users/olly/.julia/dev/BlockMatrices.jl"}
 NLLSModel = {path = "/Users/olly/.julia/dev/NLLSModel.jl"}
 OptimizationVariableInterface = {path = "/Users/olly/.julia/dev/OptimizationVariableInterface.jl"}

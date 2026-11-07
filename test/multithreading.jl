@@ -209,7 +209,7 @@ alloc_ephemeral(ls, ind) = @allocated NLLSModel.LinearSystem(ls, ind)
     end
     b_sizes, b_indices = NLLSModel.block_sizes_indices(prob_sparse.variables, trues(nvars), nvars)
     sparsity = NLLSModel.block_sparsity(prob_sparse, trues(nvars))
-    bsm = NLLSModel.BlockSparseMatrix{Float64}(sparsity, b_sizes, b_sizes)
+    bsm = NLLSModel.SparseBlockLinearSystem{Float64}(sparsity, b_sizes, b_sizes)
     ls_sparse_single = NLLSModel.MultiVariateLSsparse(bsm, b_indices, true)
     ls_sparse_shared = NLLSModel.sharedlinearsystem(ls_sparse_single, static(4))
     c_sp_s = NLLSModel.costgradhess!(ls_sparse_single, prob_sparse.variables, prob_sparse.costs)

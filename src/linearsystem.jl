@@ -99,7 +99,7 @@ struct MultiVariateLSsparse_x
 end
 
 struct MultiVariateLSsparse_ls
-    A::BlockSparseMatrix{Float64}
+    A::SparseBlockLinearSystem{Float64}
     b::Vector{Float64}
 end
 
@@ -110,7 +110,7 @@ struct MultiVariateLSdense_x
 end
 
 struct MultiVariateLSdense_ls
-    A::BlockDenseMatrix{Float64}
+    A::DenseBlockLinearSystem{Float64}
     b::Vector{Float64}
 end
 
@@ -119,7 +119,7 @@ const MultiVariateLSdense = Union{LinearSystem{MultiVariateLSdense_x, MultiVaria
 const MultiVariateLSsingle = Union{LinearSystem{MultiVariateLSsparse_x, MultiVariateLSsparse_ls}, LinearSystem{MultiVariateLSdense_x, MultiVariateLSdense_ls}}
 const MultiVariateLS = Union{MultiVariateLSsparse, MultiVariateLSdense}
 
-function MultiVariateLSsparse(A::BlockSparseMatrix, blockindices, storehessian=true)
+function MultiVariateLSsparse(A::SparseBlockLinearSystem, blockindices, storehessian=true)
     @assert A.rowblocksizes == A.columnblocksizes
     boffsets = computestartindices(A.rowblocksizes)
     blen = boffsets[end] + A.rowblocksizes[end] - 1
@@ -141,13 +141,13 @@ function MultiVariateLSsparse(A::BlockSparseMatrix, blockindices, storehessian=t
     )
 end
 
-function MultiVariateLSsparse(A::BlockSparseMatrix, b, x, blockindices, boffsets, hessian, sparseindices, diag_inds::Vector{Int}=find_diag_inds(hessian))
+function MultiVariateLSsparse(A::SparseBlockLinearSystem, b, x, blockindices, boffsets, hessian, sparseindices, diag_inds::Vector{Int}=find_diag_inds(hessian))
     return LinearSystem(
         MultiVariateLSsparse_x(x, blockindices, boffsets, hessian, sparseindices, diag_inds),
         MultiVariateLSsparse_ls(A, b)
     )
 end
-MultiVariateLSsparse(A::BlockSparseMatrix, b, x, blockindices, boffsets, hessian, sparseindices, ::Nothing, diag_inds::Vector{Int}=find_diag_inds(hessian)) =
+MultiVariateLSsparse(A::SparseBlockLinearSystem, b, x, blockindices, boffsets, hessian, sparseindices, ::Nothing, diag_inds::Vector{Int}=find_diag_inds(hessian)) =
     MultiVariateLSsparse(A, b, x, blockindices, boffsets, hessian, sparseindices, diag_inds)
 Base.getproperty(x::MultiVariateLSsparse_x, s::Symbol) = s === :ldlfac ? nothing : getfield(x, s)
 
@@ -158,23 +158,23 @@ function MultiVariateLSdense(blocksizes, blockindices)
     blen -= 1
     return LinearSystem(
         MultiVariateLSdense_x(Vector{Float64}(undef, blen), blockindices, boffsets),
-        MultiVariateLSdense_ls(BlockDenseMatrix{Float64}(boffsets), zeros(Float64, blen))
+        MultiVariateLSdense_ls(DenseBlockLinearSystem{Float64}(boffsets), zeros(Float64, blen))
     )
 end
 
-function MultiVariateLSdense(A::BlockDenseMatrix, b, x, blockindices, boffsets)
+function MultiVariateLSdense(A::DenseBlockLinearSystem, b, x, blockindices, boffsets)
     return LinearSystem(
         MultiVariateLSdense_x(x, blockindices, boffsets),
         MultiVariateLSdense_ls(A, b)
     )
 end
 
-BlockMatrices.copy_structure(ls::UniVariateLSdynamic_ls) = UniVariateLSdynamic_ls(size(ls.A, 1))
-BlockMatrices.copy_structure(::UniVariateLSstatic_ls{N, N2}) where {N, N2} = UniVariateLSstatic_ls{N, N2}()
-BlockMatrices.copy_structure(ls::MultiVariateLSdense_ls) = MultiVariateLSdense_ls(copy_structure(ls.A), zeros(Float64, length(ls.b)))
-BlockMatrices.copy_structure(ls::MultiVariateLSsparse_ls) = MultiVariateLSsparse_ls(copy_structure(ls.A), zeros(Float64, length(ls.b)))
-BlockMatrices.copy_structure(ls::LinearSystem{F, V}) where {F, V} = LinearSystem{F, V}(ls.x, copy_structure(ls.ls))
-BlockMatrices.copy_structure(ls::LinearSystemShared{F, V, N}) where {F, V, N} = LinearSystemShared{F, V, N}(ls.x, SVector{N, V}(ntuple(i -> copy_structure(ls.ls[i]), Val(N))), MVector{N, Float64}(undef))
+BlockLinearSystems.copy_structure(ls::UniVariateLSdynamic_ls) = UniVariateLSdynamic_ls(size(ls.A, 1))
+BlockLinearSystems.copy_structure(::UniVariateLSstatic_ls{N, N2}) where {N, N2} = UniVariateLSstatic_ls{N, N2}()
+BlockLinearSystems.copy_structure(ls::MultiVariateLSdense_ls) = MultiVariateLSdense_ls(copy_structure(ls.A), zeros(Float64, length(ls.b)))
+BlockLinearSystems.copy_structure(ls::MultiVariateLSsparse_ls) = MultiVariateLSsparse_ls(copy_structure(ls.A), zeros(Float64, length(ls.b)))
+BlockLinearSystems.copy_structure(ls::LinearSystem{F, V}) where {F, V} = LinearSystem{F, V}(ls.x, copy_structure(ls.ls))
+BlockLinearSystems.copy_structure(ls::LinearSystemShared{F, V, N}) where {F, V, N} = LinearSystemShared{F, V, N}(ls.x, SVector{N, V}(ntuple(i -> copy_structure(ls.ls[i]), Val(N))), MVector{N, Float64}(undef))
 
 # The blocks of one linear system with the unknowns (and solver state) of another
 sharex(ls::LinearSystem{F, V}, from) where {F, V} = LinearSystem{F, V}(from.x, ls.ls)
@@ -267,7 +267,7 @@ end
 gethessian(linsystem) = getA(linsystem)
 gethessgrad(linsystem) = gethessian(linsystem), getgrad(linsystem)
 
-function BlockMatrices.zero!(linsystem::Union{LinearSystem, LinearSystemShared})
+function BlockLinearSystems.zero!(linsystem::Union{LinearSystem, LinearSystemShared})
     fill!(getb(linsystem), 0)
     zero!(getA(linsystem))
 end
