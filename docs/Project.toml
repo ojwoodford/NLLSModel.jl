@@ -11,5 +11,5 @@ SIRBSDispatch = "c8e4d12a-5f3b-4a9c-8d2e-1f6b3a7c9e04"
 NLLSModel = {path = "/Users/olly/.julia/dev/NLLSModel.jl"}
 OptimizationVariableInterface = {path = "/Users/olly/.julia/dev/OptimizationVariableInterface.jl"}
 FastNorm = {path = "/Users/olly/.julia/dev/FastNorm.jl"}
-BlockLinearSystems = {path = "/Users/olly/.julia/dev/BlockMatrices.jl"}
+BlockLinearSystems = {path = "/Users/olly/.julia/dev/BlockLinearSystems.jl"}
 SIRBSDispatch = {path = "/Users/olly/.julia/dev/SIRBSDispatch.jl"}

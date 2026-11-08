@@ -13,7 +13,7 @@ Nonlinear Least Squares (NLLS) and factor-graph modeling in Julia.
 - **Heterogeneous Variables & Manifolds**: Mix Euclidean `Float64`, `SVector`, `Vector`, and custom, non-Euclidean manifold types (via `OptimizationVariableInterface.jl`) in a single problem.
 - **Automatic & Analytic Derivatives**: Uses `ForwardDiff.jl` automatically on `computeresidual`, or user-defined analytic Jacobians via `computeresjac`.
 - **Robust M-Estimators**: Built-in `HuberKernel`, `GemanMcclureKernel`, `Scaled`, and adaptive `ContaminatedGaussian`.
-- **Block-Dense & Block-Sparse Linear Algebra**: Uses `BlockDenseMatrix` and `BlockSparseMatrix` from `BlockMatrices.jl` for fast, zero-allocation Hessian assembly.
+- **Block-Dense & Block-Sparse Linear Systems**: Uses `DenseBlockLinearSystem` and `SparseBlockLinearSystem` from `BlockLinearSystems.jl` for fast, zero-allocation Hessian assembly.
 - **Optimizer-Agnostic Problem Interface**: Extract `(f, fdf!, x0, H) = optimvars(problem, unfixed, numthreads)` for seamless integration with many second order optimizers, such as `SecondOrderOptimization.jl` or `Optim.jl`.
 - **NLPModels.jl Ecosystem**: Load `NLPModels` to wrap any `Model` as an `AbstractNLPModel` via `NLPLSModel(problem)` and solve with `JSOSolvers.jl` (`trunk`, `tron`), `Ipopt.jl`, or `Optim.jl`.
 
