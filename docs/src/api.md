@@ -11,6 +11,9 @@ subproblem
 subproblem!
 cost
 optimvars
+optimvars_nls
+nls_callbacks
+flat_optimvars_nls
 ```
 
 ## Cost & Residual Interface
