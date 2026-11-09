@@ -3,7 +3,7 @@ import OptimizationVariableInterface: nvars
 
 mutable struct Model{VarTypes, CostTypes, CostVecs}
     # User provided
-    costs::CostStruct{CostTypes, CostVecs} # Set of cost and residual blocks that define the problem
+    costs::CostStruct{<:Tuple, CostVecs} # Set of cost and residual blocks that define the problem
     variables::Vector{VarTypes}  # Current state of variables in use by optimizer
 
     # Used internally
@@ -19,11 +19,11 @@ mutable struct Model{VarTypes, CostTypes, CostVecs}
     ) where {VarTypes, CostTypes}
         TCT = tupelize(CostTypes)
         costs isa CostStruct{TCT} || throw(ArgumentError("Expected costs of type CostStruct{$TCT}, got $(typeof(costs))"))
-        return new{VarTypes, TCT, typeof(costs.data)}(costs, vars, varcostmap, varcostmapvalid)
+        return new{VarTypes, CostTypes, typeof(costs.data)}(costs, vars, varcostmap, varcostmapvalid)
     end
     function Model{VarTypes, CostTypes, CostVecs}(
         vars::Vector{VarTypes},
-        costs::CostStruct{CostTypes, CostVecs},
+        costs::CostStruct{<:Tuple, CostVecs},
         varcostmap = spzeros(Bool, 0, 0),
         varcostmapvalid = false
     ) where {VarTypes, CostTypes, CostVecs}
@@ -67,7 +67,7 @@ function Base.getproperty(p::Model, s::Symbol)
 end
 
 function Base.show(io::IO, x::Model)
-    print(io, "Model with ", length(x.variables), " variable blocks of total dimension ", UInt(sum(nvars, x.variables)), 
+    print(io, "Model with ", length(x.variables), " variable blocks of total dimension ", UInt(sum(nvars, x.variables; init=0)), 
            ",\n             and ", countcosts(costnum, x.costs), " residual blocks of total dimension ", countcosts(resnum, x.costs), ".")
 end
 

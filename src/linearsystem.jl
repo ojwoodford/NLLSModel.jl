@@ -109,14 +109,14 @@ struct MultiVariateLSdense_x
     boffsets::Vector{Int} # One per block in b
 end
 
-struct MultiVariateLSdense_ls
-    A::DenseBlockLinearSystem{Float64}
+struct MultiVariateLSdense_ls{M<:AbstractMatrix{Float64}}
+    A::DenseBlockLinearSystem{Float64, M}
     b::Vector{Float64}
 end
 
 const MultiVariateLSsparse = Union{LinearSystem{MultiVariateLSsparse_x, MultiVariateLSsparse_ls}, LinearSystemShared{MultiVariateLSsparse_x, MultiVariateLSsparse_ls, M} where M}
-const MultiVariateLSdense = Union{LinearSystem{MultiVariateLSdense_x, MultiVariateLSdense_ls}, LinearSystemShared{MultiVariateLSdense_x, MultiVariateLSdense_ls, M} where M}
-const MultiVariateLSsingle = Union{LinearSystem{MultiVariateLSsparse_x, MultiVariateLSsparse_ls}, LinearSystem{MultiVariateLSdense_x, MultiVariateLSdense_ls}}
+const MultiVariateLSdense = Union{LinearSystem{MultiVariateLSdense_x, <:MultiVariateLSdense_ls}, LinearSystemShared{MultiVariateLSdense_x, <:MultiVariateLSdense_ls, M} where M}
+const MultiVariateLSsingle = Union{LinearSystem{MultiVariateLSsparse_x, MultiVariateLSsparse_ls}, LinearSystem{MultiVariateLSdense_x, <:MultiVariateLSdense_ls}}
 const MultiVariateLS = Union{MultiVariateLSsparse, MultiVariateLSdense}
 
 function MultiVariateLSsparse(A::SparseBlockLinearSystem, blockindices, storehessian=true)

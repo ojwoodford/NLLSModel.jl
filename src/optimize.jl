@@ -78,7 +78,8 @@ struct MultiVarDenseFDF{LS, P, U}
 end
 @inline function (f::MultiVarDenseFDF)(g, H_mat::Matrix{Float64}, vars)
     full_vars = sync_unfixed_vars!(f.problem, f.unfixed_inds, vars)
-    bdm = DenseBlockLinearSystem{Float64}(H_mat, BlockOffsets(f.linsystem.x.boffsets))
+    orig_A = getA(f.linsystem)
+    bdm = DenseBlockLinearSystem{Float64, Matrix{Float64}}(H_mat, orig_A.rowblockoffsets, orig_A.columnblockoffsets, orig_A.rowblocksizes, orig_A.columnblocksizes)
     if f.linsystem isa LinearSystemShared
         ls1 = MultiVariateLSdense_ls(bdm, g)
         target = replace_first_ls(f.linsystem, ls1)
@@ -136,28 +137,28 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
     if nblocks == 1
         return optimvars_dispatch(problem, findfirst(unfixed), numthreads)
     end
-    blocksizes, blockindices = block_sizes_indices(problem.variables, unfixed, nblocks)
+    blocksizes, blockindices, unfixed_inds, is_natural = block_sizes_indices(problem.variables, unfixed, nblocks)
     len = Int(sum(blocksizes))
-    if all(unfixed)
-        unfixed_inds = nothing
+    if all(unfixed) && is_natural
+        unfixed_sync = nothing
         x0 = problem.variables
     else
-        unfixed_inds = findall(unfixed)
+        unfixed_sync = unfixed_inds
         x0 = problem.variables[unfixed_inds]
     end
-    f = MultiVarCostFunc(problem, unfixed_inds, numthreads)
+    f = MultiVarCostFunc(problem, unfixed_sync, numthreads)
 
-    sparsity = block_sparsity(problem, unfixed)
+    sparsity = block_sparsity(problem, unfixed_inds)
     if len >= 40 && sparse_dense_decision(len, sparsity, blocksizes)
         bsm = SparseBlockLinearSystem{Float64}(TransposedPattern(sparsity), blocksizes, blocksizes)
         lssparse = MultiVariateLSsparse(bsm, blockindices, true)
         ls_shared = sharedlinearsystem(lssparse, problem, numthreads)
-        fdf! = MultiVarSparseFDF(ls_shared, problem, unfixed_inds)
+        fdf! = MultiVarSparseFDF(ls_shared, problem, unfixed_sync)
         return (f, fdf!, x0, lssparse.x.hessian)
     else
         lsdense = MultiVariateLSdense(blocksizes, blockindices)
         ls_shared = sharedlinearsystem(lsdense, problem, numthreads)
-        fdf! = MultiVarDenseFDF(ls_shared, problem, unfixed_inds)
+        fdf! = MultiVarDenseFDF(ls_shared, problem, unfixed_sync)
         return (f, fdf!, x0, nothing)
     end
 end

@@ -32,27 +32,55 @@ function runlengthencodesortedints(sortedints)
     return runindices
 end
 
-function block_sparsity(problem, unfixed)
-    # Compute the block sparsity
-    n = sum(unfixed)
-    sparsity = getvarcostmap(problem)
-    sparsity = sparsity[unfixed,:]
+function block_sparsity(problem, unfixed_inds::AbstractVector{<:Integer})
+    # Compute the block sparsity for the given unfixed variable ordering
+    n = length(unfixed_inds)
+    sparsity = getvarcostmap(problem)[unfixed_inds, :]
     sparsity = triu(sparse(sparsity * sparsity' .> 0) + sparse(1:n, 1:n, true, n, n) .> 0)
     return sparsity
 end
+block_sparsity(problem, unfixed::AbstractVector{Bool}) = block_sparsity(problem, findall(unfixed))
+block_sparsity(problem, unfixed) = block_sparsity(problem, convert(Vector{Int}, findall(unfixed)))
 
 function block_sizes_indices(variables, unfixed, nblocks)
-    blockindices = zeros(UInt, length(variables))
-    blocksizes = zeros(UInt, nblocks)
-    nblocks = 0
-    for (index, unfixed_) in enumerate(unfixed)
-        if unfixed_
-            nblocks += 1
-            blockindices[index] = nblocks
-            blocksizes[nblocks] = nvars(variables[index])
+    unfixed_raw = findall(unfixed)
+    dims = [UInt8(dynamic(nvars(variables[i]))) for i in unfixed_raw]
+
+    # Check if dimensions are already grouped into contiguous runs
+    is_grouped = true
+    seen = Set{UInt8}()
+    prev = UInt8(0)
+    for d in dims
+        if d != prev
+            if d in seen
+                is_grouped = false
+                break
+            end
+            push!(seen, d)
+            prev = d
         end
     end
-    return blocksizes, blockindices
+
+    if is_grouped
+        unfixed_inds = unfixed_raw
+        rle = BlockRLE(dims)
+        blockindices = zeros(UInt, length(variables))
+        for (b, var_idx) in enumerate(unfixed_raw)
+            blockindices[var_idx] = b
+        end
+        return rle, blockindices, unfixed_inds, true
+    else
+        # Stable sort by dimension (descending: 6, then 3, etc.) to group identical dimensions into RLE runs
+        perm = sortperm(dims; rev=true, alg=Base.Sort.MergeSort)
+        unfixed_inds = unfixed_raw[perm]
+        sorted_dims = dims[perm]
+        rle = BlockRLE(sorted_dims)
+        blockindices = zeros(UInt, length(variables))
+        for (b, var_idx) in enumerate(unfixed_inds)
+            blockindices[var_idx] = b
+        end
+        return rle, blockindices, unfixed_inds, false
+    end
 end
 
 """
