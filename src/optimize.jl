@@ -132,6 +132,15 @@ end
     return c
 end
 
+function cholmod_symbolic_nnz(fac::SparseArrays.CHOLMOD.Factor)
+    s = unsafe_load(fac.ptr)
+    if s.ColCount != C_NULL
+        colcount = unsafe_wrap(Array, Ptr{Int64}(s.ColCount), s.n)
+        return sum(colcount)
+    end
+    return 0
+end
+
 function optimvars(problem::Model, unfixed=nothing, numthreads=StaticInt(Threads.nthreads()); linsolver=nothing)
     return optimvars_dispatch(problem, convertunfixed(unfixed, problem), static(numthreads), linsolver)
 end
@@ -161,7 +170,7 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
     schur_requested = linsolver_sym in (:schur, :dense_schur, :sparse_schur)
     has_elims = any(v -> dynamic(OptimizationVariableInterface.iseliminable(typeof(v))), problem.variables)
 
-    if schur_requested || (isnothing(linsolver_sym) && has_elims)
+    if schur_requested || ((isnothing(linsolver_sym) || linsolver_sym === :auto) && has_elims)
         partition = partition_schur_problem(problem, unfixed, linsolver_sym)
         if !isnothing(partition)
             structure = SchurStructure(partition.c_dims, partition.p_dims, partition.observations; nchunks=dynamic(numthreads))
@@ -175,7 +184,7 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
                 if structure.nc <= 2000
                     covis = build_schur_covisibility(structure)
                     chol_fac = SparseArrays.CHOLMOD.analyze(SparseArrays.CHOLMOD.Sparse(Symmetric(covis.S_sparse, :U)))
-                    chol_fac.nnz >= 0.40 * 0.5 * structure.nc^2
+                    cholmod_symbolic_nnz(chol_fac) >= 0.40 * 0.5 * structure.nc^2
                 else
                     false
                 end
