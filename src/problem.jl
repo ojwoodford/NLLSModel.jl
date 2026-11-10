@@ -221,3 +221,113 @@ costdeps(vec::Vector) = length(vec) != 0 ? length(vec) * ndeps(vec[1]) : 0
 resnum(vec::Vector)   = length(vec) != 0 ? (dynamic(is_static(nres(vec[1]))) ? length(vec) * nres(vec[1]) : sum(nres, vec; init=0)) : 0
 countcosts(fun, costs::CostStruct) = sum(fun, values(costs); init=0)
 nresiduals(problem::Model) = Int(countcosts(resnum, problem.costs))
+
+"""
+    partition_schur_problem(problem::Model, unfixed::AbstractVector, linsolver_req=nothing)
+
+Validate bipartite structure, check static eliminable variable dimensions (Dp in {1, 2, 3}),
+and perform two-pass variable ordering for Schur complement reduction.
+Returns named tuple `(unfixed_inds, c_dims, p_dims, observations, ncblocks, npblocks)`
+or `nothing` if the problem does not have both retained and eliminable variables.
+"""
+function partition_schur_problem(problem::Model, unfixed::AbstractVector, linsolver_req=nothing)
+    unfixed_raw = findall(unfixed)
+    nblocks = length(unfixed_raw)
+    nblocks > 1 || return nothing
+
+    # 1. Identify eliminable variables using iseliminable trait
+    is_elim = [dynamic(OptimizationVariableInterface.iseliminable(typeof(problem.variables[i]))) for i in unfixed_raw]
+    nelim = count(is_elim)
+    nret = nblocks - nelim
+
+    if nelim == 0 || nret == 0
+        if linsolver_req in (:schur, :dense_schur, :sparse_schur)
+            throw(ArgumentError("Schur complement solver requires at least one retained and one eliminable variable (got $nret retained, $nelim eliminable)."))
+        end
+        return nothing
+    end
+
+    # 2. Structural Bipartite Validation
+    elim_set = Set(unfixed_raw[findall(is_elim)])
+    camera_set = Set(unfixed_raw[findall(!, is_elim)])
+
+    # Validate eliminable variable static dimension in {1, 2, 3}
+    block_sizes = [Int(dynamic(nvars(problem.variables[i]))) for i in unfixed_raw]
+    for (idx, e) in enumerate(is_elim)
+        if e
+            d = block_sizes[idx]
+            if d < 1 || d > 3
+                throw(ArgumentError("Eliminable variables must have static dimension in {1, 2, 3}, got $d for variable $(unfixed_raw[idx])."))
+            end
+        end
+    end
+
+    # Map from original variable index to camera block index (1:nret)
+    cam_raw_list = unfixed_raw[findall(!, is_elim)]
+    cam_map = Dict{Int, Int}(var_idx => i for (i, var_idx) in enumerate(cam_raw_list))
+
+    observations_dict = Dict{Int, Vector{Int}}()
+    for var_idx in elim_set
+        observations_dict[var_idx] = Int[]
+    end
+
+    # Block-Diagonality Check: No residual connects > 1 unfixed eliminable variable
+    for costvec in values(problem.costs)
+        for cost in costvec
+            vinds = varindices(cost)
+            elims_in_cost = [v for v in vinds if v in elim_set]
+            if length(elims_in_cost) > 1
+                throw(ArgumentError("Bipartite structure violation: cost block of type $(typeof(cost)) connects multiple eliminable variables $(elims_in_cost). Eliminable variables cannot couple to each other."))
+            elseif length(elims_in_cost) == 1
+                lm = elims_in_cost[1]
+                for v in vinds
+                    if v in camera_set
+                        push!(observations_dict[lm], cam_map[v])
+                    end
+                end
+            end
+        end
+    end
+
+    # Deduplicate observations per landmark
+    observations = Vector{Vector{Int}}(undef, nblocks)
+    for (i, var_idx) in enumerate(unfixed_raw)
+        if is_elim[i]
+            observations[i] = unique(observations_dict[var_idx])
+        else
+            observations[i] = Int[]
+        end
+    end
+
+    # 3. Two-pass variable ordering using sort_schur_blocks from BlockLinearSystems
+    perm = sort_schur_blocks(is_elim, block_sizes, observations)
+    unfixed_inds = unfixed_raw[perm]
+    sorted_sizes = block_sizes[perm]
+
+    c_dims = UInt8.(sorted_sizes[1:nret])
+    p_dims = UInt8.(sorted_sizes[nret+1:nblocks])
+
+    # Re-map camera indices in observations to new camera ordering
+    old_to_new_cam = Dict{Int, Int}()
+    for new_c in 1:nret
+        orig_var = unfixed_inds[new_c]
+        old_c = cam_map[orig_var]
+        old_to_new_cam[old_c] = new_c
+    end
+
+    obs_remapped = Vector{Vector{Int}}(undef, nelim)
+    for l in 1:nelim
+        orig_idx = perm[nret + l]
+        orig_obs = observations[orig_idx]
+        obs_remapped[l] = sort([old_to_new_cam[c] for c in orig_obs if haskey(old_to_new_cam, c)])
+    end
+
+    return (
+        unfixed_inds = unfixed_inds,
+        c_dims = c_dims,
+        p_dims = p_dims,
+        observations = obs_remapped,
+        ncblocks = nret,
+        npblocks = nelim
+    )
+end

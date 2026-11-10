@@ -114,10 +114,117 @@ struct MultiVariateLSdense_ls{M<:AbstractMatrix{Float64}}
     b::Vector{Float64}
 end
 
+# Schur linear system
+struct CostSlotMap
+    b_ptr::Vector{Int32}
+    b_offsets::Vector{Int32}
+    b_uplo::Vector{UInt8}
+    e_ptr::Vector{Int32}
+    e_offsets::Vector{Int32}
+    c_offsets::Vector{Int32}
+end
+
+function CostSlotMap(problem::Model, structure::SchurStructure, blockindices::Vector{UInt}, B)
+    nres = countcosts(costnum, problem.costs)
+    b_ptr = Vector{Int32}(undef, nres + 1)
+    e_ptr = Vector{Int32}(undef, nres + 1)
+    c_offsets = Vector{Int32}(undef, nres)
+
+    b_offsets_list = Int32[]
+    b_uplo_list = UInt8[]
+    e_offsets_list = Int32[]
+
+    b_ptr[1] = 1
+    e_ptr[1] = 1
+
+    ncblocks = structure.ncblocks
+    cpptr = structure.cpptr
+    cpblock = structure.cpblock
+    cpoffsets = structure.cpoffsets
+    ppoffsets = structure.ppoffsets
+    boffsets_c = structure.boffsets_c
+
+    res_idx = 1
+    for costvec in values(problem.costs)
+        for cost in costvec
+            vinds = varindices(cost)
+            b_inds = [blockindices[v] for v in vinds if v <= length(blockindices) && blockindices[v] != 0]
+
+            lm_block = 0
+            for b in b_inds
+                if b > ncblocks
+                    lm_block = b - ncblocks
+                    break
+                end
+            end
+
+            if lm_block > 0
+                c_offsets[res_idx] = Int32(ppoffsets[lm_block])
+            else
+                c_offsets[res_idx] = Int32(0)
+            end
+
+            if lm_block > 0
+                for b in b_inds
+                    if b <= ncblocks
+                        e_idx = searchsortedfirst(view(cpblock, cpptr[lm_block]:(cpptr[lm_block+1]-1)), Int(b)) + cpptr[lm_block] - 1
+                        push!(e_offsets_list, Int32(cpoffsets[e_idx]))
+                    end
+                end
+            end
+            e_ptr[res_idx + 1] = Int32(length(e_offsets_list) + 1)
+
+            for i in 1:length(b_inds)
+                bi = b_inds[i]
+                if bi <= ncblocks
+                    for j in 1:i
+                        bj = b_inds[j]
+                        if bj <= ncblocks
+                            if B isa Matrix
+                                co_i = boffsets_c[bi]
+                                co_j = boffsets_c[bj]
+                                uplo = bi <= bj ? UInt8(1) : UInt8(2)
+                                push!(b_offsets_list, Int32(co_i + (co_j - 1) * structure.nc))
+                                push!(b_uplo_list, uplo)
+                            elseif B isa SparseBlockLinearSystem
+                                uplo = bi >= bj ? UInt8(2) : UInt8(1)
+                                r = max(bi, bj)
+                                c = min(bi, bj)
+                                b_off = B.indicestransposed[c, r]
+                                push!(b_offsets_list, Int32(b_off))
+                                push!(b_uplo_list, uplo)
+                            end
+                        end
+                    end
+                end
+            end
+            b_ptr[res_idx + 1] = Int32(length(b_offsets_list) + 1)
+
+            res_idx += 1
+        end
+    end
+
+    return CostSlotMap(b_ptr, b_offsets_list, b_uplo_list, e_ptr, e_offsets_list, c_offsets)
+end
+
+struct MultiVariateLSSchur_x
+    x::Vector{Float64}
+    blockindices::Vector{UInt}
+    boffsets::Vector{Int}
+    structure::SchurStructure
+    unfixed_inds::Vector{Int}
+end
+
+struct MultiVariateLSSchur_ls{BType}
+    A::SchurBlockMatrix{Float64, BType}
+    b::Vector{Float64}
+end
+
 const MultiVariateLSsparse = Union{LinearSystem{MultiVariateLSsparse_x, MultiVariateLSsparse_ls}, LinearSystemShared{MultiVariateLSsparse_x, MultiVariateLSsparse_ls, M} where M}
 const MultiVariateLSdense = Union{LinearSystem{MultiVariateLSdense_x, <:MultiVariateLSdense_ls}, LinearSystemShared{MultiVariateLSdense_x, <:MultiVariateLSdense_ls, M} where M}
-const MultiVariateLSsingle = Union{LinearSystem{MultiVariateLSsparse_x, MultiVariateLSsparse_ls}, LinearSystem{MultiVariateLSdense_x, <:MultiVariateLSdense_ls}}
-const MultiVariateLS = Union{MultiVariateLSsparse, MultiVariateLSdense}
+const MultiVariateLSSchur{BType} = Union{LinearSystem{MultiVariateLSSchur_x, MultiVariateLSSchur_ls{BType}}, LinearSystemShared{MultiVariateLSSchur_x, MultiVariateLSSchur_ls{BType}, M} where M}
+const MultiVariateLSsingle = Union{LinearSystem{MultiVariateLSsparse_x, MultiVariateLSsparse_ls}, LinearSystem{MultiVariateLSdense_x, <:MultiVariateLSdense_ls}, LinearSystem{MultiVariateLSSchur_x, <:MultiVariateLSSchur_ls}}
+const MultiVariateLS = Union{MultiVariateLSsparse, MultiVariateLSdense, MultiVariateLSSchur}
 
 function MultiVariateLSsparse(A::SparseBlockLinearSystem, blockindices, storehessian=true)
     @assert A.rowblocksizes == A.columnblocksizes
@@ -171,6 +278,16 @@ BlockLinearSystems.copy_structure(ls::UniVariateLSdynamic_ls) = UniVariateLSdyna
 BlockLinearSystems.copy_structure(::UniVariateLSstatic_ls{N, N2}) where {N, N2} = UniVariateLSstatic_ls{N, N2}()
 BlockLinearSystems.copy_structure(ls::MultiVariateLSdense_ls) = MultiVariateLSdense_ls(copy_structure(ls.A), zeros(Float64, length(ls.b)))
 BlockLinearSystems.copy_structure(ls::MultiVariateLSsparse_ls) = MultiVariateLSsparse_ls(copy_structure(ls.A), zeros(Float64, length(ls.b)))
+function BlockLinearSystems.copy_structure(ls::MultiVariateLSSchur_ls)
+    A = ls.A
+    B_copy = if A.B isa Matrix
+        similar(A.B)
+    else
+        copy_structure(A.B)
+    end
+    A_new = SchurBlockMatrix(A.structure, B_copy, similar(A.C_data), similar(A.E_data))
+    return MultiVariateLSSchur_ls(A_new, zeros(Float64, length(ls.b)))
+end
 BlockLinearSystems.copy_structure(ls::LinearSystem{F, V}) where {F, V} = LinearSystem{F, V}(ls.x, copy_structure(ls.ls))
 BlockLinearSystems.copy_structure(ls::LinearSystemShared{F, V, N}) where {F, V, N} = LinearSystemShared{F, V, N}(ls.x, SVector{N, V}(ntuple(i -> copy_structure(ls.ls[i]), Val(N))), MVector{N, Float64}(undef))
 
@@ -193,6 +310,17 @@ add!(dest::UniVariateLSdynamic_ls, src::UniVariateLSdynamic_ls) = (dest.A .+= sr
 add!(dest::UniVariateLSstatic_ls, src::UniVariateLSstatic_ls) = (dest.A .+= src.A; dest.b .+= src.b; nothing)
 add!(dest::MultiVariateLSdense_ls, src::MultiVariateLSdense_ls) = (dest.A.data .+= src.A.data; dest.b .+= src.b; nothing)
 add!(dest::MultiVariateLSsparse_ls, src::MultiVariateLSsparse_ls) = (dest.A.data .+= src.A.data; dest.b .+= src.b; nothing)
+function add!(dest::MultiVariateLSSchur_ls, src::MultiVariateLSSchur_ls)
+    dest.b .+= src.b
+    if dest.A.B isa Matrix
+        dest.A.B .+= src.A.B
+    else
+        dest.A.B.data .+= src.A.B.data
+    end
+    dest.A.C_data .+= src.A.C_data
+    dest.A.E_data .+= src.A.E_data
+    return nothing
+end
 add!(dest::LinearSystem, src::LinearSystem) = add!(dest.ls, src.ls)
 
 function updatesymlinearsystem!(linsystem::UniVariateLS, g, H, unusedargs...)
@@ -246,6 +374,97 @@ function updatesymlinearsystem!(linsystem::MultiVariateLS, g::AbstractVector, H:
     updatesymA!(getA(linsystem), H, vars, varflags, blockindices)
 end
 
+function updatesymschur!(H_schur::SchurBlockMatrix{Float64}, g_full::Vector{Float64}, g::AbstractVector, H::AbstractArray, vars, varflags, boffsets, blockindices)
+    updateb!(g_full, g, vars, varflags, boffsets, blockindices)
+
+    structure = H_schur.structure
+    ncblocks = structure.ncblocks
+    cpptr = structure.cpptr
+    cpblock = structure.cpblock
+    cpoffsets = structure.cpoffsets
+    ppoffsets = structure.ppoffsets
+    boffsets_c = structure.boffsets_c
+
+    loffseti = static(0)
+    @unroll for i in 1:MAX_ARGS
+        if i <= length(vars) && bitiset(varflags, i)
+            bi = Int(blockindices[i])
+            nvi = dynamic(nvars(vars[i]))
+            rangei = SR(1, nvi) .+ loffseti
+            loffseti += nvi
+
+            if bi <= ncblocks
+                if H_schur.B isa Matrix{Float64}
+                    co = boffsets_c[bi]
+                    @inbounds for col in 1:nvi, row in 1:nvi
+                        H_schur.B[co + row - 1, co + col - 1] += H[rangei[row], rangei[col]]
+                    end
+                else
+                    @inbounds block(H_schur.B, bi, bi, nvi, nvi) .+= view(H, rangei, rangei)
+                end
+            else
+                l = bi - ncblocks
+                po = ppoffsets[l]
+                idx = po
+                @inbounds for col in 1:nvi, row in 1:nvi
+                    H_schur.C_data[idx] += H[rangei[row], rangei[col]]
+                    idx += 1
+                end
+            end
+
+            loffsetj = static(0)
+            @unroll for j in 1:i-1
+                if bitiset(varflags, j)
+                    bj = Int(blockindices[j])
+                    nvj = dynamic(nvars(vars[j]))
+                    rangej = SR(1, nvj) .+ loffsetj
+                    loffsetj += nvj
+
+                    if bi <= ncblocks && bj <= ncblocks
+                        if H_schur.B isa Matrix{Float64}
+                            co_i = boffsets_c[bi]
+                            co_j = boffsets_c[bj]
+                            if bi <= bj
+                                @inbounds for col in 1:nvj, row in 1:nvi
+                                    H_schur.B[co_i + row - 1, co_j + col - 1] += H[rangei[row], rangej[col]]
+                                end
+                            else
+                                @inbounds for col in 1:nvi, row in 1:nvj
+                                    H_schur.B[co_j + row - 1, co_i + col - 1] += H[rangej[row], rangei[col]]
+                                end
+                            end
+                        else
+                            if bi >= bj
+                                @inbounds block(H_schur.B, bi, bj, nvi, nvj) .+= view(H, rangei, rangej)
+                            else
+                                @inbounds block(H_schur.B, bj, bi, nvj, nvi) .+= view(H, rangej, rangei)
+                            end
+                        end
+                    elseif bi <= ncblocks && bj > ncblocks
+                        l = bj - ncblocks
+                        e_idx = searchsortedfirst(@inbounds(view(cpblock, cpptr[l]:(cpptr[l+1]-1))), bi) + cpptr[l] - 1
+                        eo = cpoffsets[e_idx]
+                        @inbounds for col in 1:nvj, row in 1:nvi
+                            H_schur.E_data[eo + (row - 1)*nvj + col - 1] += H[rangei[row], rangej[col]]
+                        end
+                    elseif bi > ncblocks && bj <= ncblocks
+                        l = bi - ncblocks
+                        e_idx = searchsortedfirst(@inbounds(view(cpblock, cpptr[l]:(cpptr[l+1]-1))), bj) + cpptr[l] - 1
+                        eo = cpoffsets[e_idx]
+                        @inbounds for col in 1:nvi, row in 1:nvj
+                            H_schur.E_data[eo + (row - 1)*nvi + col - 1] += H[rangej[row], rangei[col]]
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+function updatesymlinearsystem!(linsystem::MultiVariateLSSchur, g::AbstractVector, H::AbstractArray, vars, varflags, blockindices)
+    updatesymschur!(getA(linsystem), getb(linsystem), g, H, vars, varflags, linsystem.x.boffsets, blockindices)
+end
+
 getgrad(ls::LinearSystem) = ls.ls.b
 getgrad(ls::LinearSystemShared) = ls.ls[1].b
 getgrad(linsystem) = getb(linsystem)
@@ -259,6 +478,7 @@ function gethessian(x::MultiVariateLSsparse_x, ls::MultiVariateLSsparse_ls)
     copyto!(x.hessian, ls.A, x.sparseindices)
     return x.hessian
 end
+gethessian(::MultiVariateLSSchur_x, ls::MultiVariateLSSchur_ls) = ls.A
 gethessian(linsystem) = getA(linsystem)
 gethessgrad(linsystem) = gethessian(linsystem), getgrad(linsystem)
 

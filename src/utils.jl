@@ -95,3 +95,4 @@ Used by `optimvars_dispatch` to choose between a `SparseBlockLinearSystem` (spar
 """
 sparse_dense_decision(ndims, sparsity, blocksizes) = sparse_dense_decision(ndims, block_sparse_nnz(sparsity, blocksizes))
 sparse_dense_decision(ndims, nnz) = (nnz * 64) < (25 * ndims * (ndims - 40)) # Threshold nnz (for lower triangle) = 25/64 * (d^2 - 40d)
+

@@ -10,10 +10,11 @@ import BlockLinearSystems:
     SparseBlockLinearSystem, DenseBlockLinearSystem, TransposedPattern, BlockOffsets,
     block, zero!, copy_structure,
     symmetrifyfull, symmetrifyfull!, makesparseindices, sparse_with_map, copyto!,
-    block_sparse_nnz, computestartindices, find_diag_inds
+    block_sparse_nnz, computestartindices, find_diag_inds,
+    SchurStructure, SchurBlockMatrix, build_schur_covisibility, sort_schur_blocks, fast_bAb
 
 import OptimizationVariableInterface:
-    nvars, update, update!, syncvars!,
+    nvars, update, update!, syncvars!, iseliminable,
     ZeroToInfScalar, ZeroToOneScalar
 
 import FastNorm: sqnorm
@@ -25,6 +26,7 @@ export Model, NLPLSModel, NLLSNLSModel
 export addvariable!, addcost!, addresidual!, subproblem, subproblem!
 export cost, optimvars, optimvars_nls, flat_optimvars_nls, nls_callbacks, syncvars!, nresiduals
 export isadditive, islinearkernel, clamped_count, reset_clamped_count!
+export CostSlotMap, partition_schur_problem
 
 # Cost and residual types & definition interface
 export AbstractCost, AbstractResidual, AbstractAdaptiveResidual

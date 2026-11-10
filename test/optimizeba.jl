@@ -1,4 +1,5 @@
 using NLLSModel, Test, Static, StaticArrays, SparseArrays, Random, LinearAlgebra
+using OptimizationVariableInterface, BlockLinearSystems
 using OptimizationVariableInterface: nvars
 
 # Simple affine projection transform
@@ -123,4 +124,88 @@ end
     H_int = zeros(dim_int, dim_int)
     @test isapprox(fdf_int!(g_int, H_int, x0_int), cost_int; atol=1e-12)
     @test isapprox(H_int, H_int'; atol=1e-14)
+
+    # --------------------------------------------------------------------------
+    # Schur Complement Solver Integration Tests
+    # --------------------------------------------------------------------------
+    # 1. Custom Eliminable Landmark Type
+    struct Landmark3D{T}
+        p::SVector{3, T}
+    end
+    OptimizationVariableInterface.nvars(::Landmark3D) = static(3)
+    OptimizationVariableInterface.update(p::Landmark3D, step, offset=1) = Landmark3D(p.p + SVector(step[offset], step[offset+1], step[offset+2]))
+    OptimizationVariableInterface.iseliminable(::Type{<:Landmark3D}) = static(true)
+    NLLSModel.generatemeasurement(camera, pt::Landmark3D) = NLLSModel.generatemeasurement(camera, pt.p)
+
+    # 2. Build BA problem with Landmark3D
+    ncams = 4
+    nlms = 8
+    prob_schur = Model(Union{SVector{6, Float64}, Landmark3D{Float64}}, SimpleError2{2, Float64, SVector{6, Float64}, Landmark3D{Float64}})
+    camoffset = SVector(1.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+    for i in 1:ncams
+        addvariable!(prob_schur, randn(SVector{6, Float64}) .+ camoffset)
+    end
+    lmoffset = SVector(-0.5, -0.5, 10.0)
+    for i in 1:nlms
+        addvariable!(prob_schur, Landmark3D(rand(SVector{3, Float64}) .+ lmoffset))
+    end
+    for c in 1:ncams
+        camera = prob_schur.variables[c]::SVector{6, Float64}
+        for l in 1:nlms
+            if (c + l) % 2 == 0 || c == 1
+                l_idx = ncams + l
+                addcost!(prob_schur, SimpleError2{SVector{6, Float64}, Landmark3D{Float64}}(NLLSModel.generatemeasurement(camera, prob_schur.variables[l_idx]), c, l_idx))
+            end
+        end
+    end
+
+    # 3. Test Bipartite Validation
+    # A) Connecting 2 eliminable variables throws ArgumentError
+    NLLSModel.generatemeasurement(pt1::Landmark3D, pt2::Landmark3D) = SVector(pt1.p[1] - pt2.p[1], pt1.p[2] - pt2.p[2])
+    prob_bad = Model(Union{SVector{6, Float64}, Landmark3D{Float64}}, Union{SimpleError2{2, Float64, SVector{6, Float64}, Landmark3D{Float64}}, SimpleError2{2, Float64, Landmark3D{Float64}, Landmark3D{Float64}}})
+    addvariable!(prob_bad, randn(SVector{6, Float64}))
+    addvariable!(prob_bad, Landmark3D(SVector(1.0, 2.0, 3.0)))
+    addvariable!(prob_bad, Landmark3D(SVector(4.0, 5.0, 6.0)))
+    addcost!(prob_bad, SimpleError2{SVector{6, Float64}, Landmark3D{Float64}}(SVector(0.0, 0.0), 1, 2))
+    addcost!(prob_bad, SimpleError2{Landmark3D{Float64}, Landmark3D{Float64}}(SVector(0.0, 0.0), 2, 3))
+    @test_throws ArgumentError partition_schur_problem(prob_bad, trues(length(prob_bad.variables)), :schur)
+
+    # B) Calling with no eliminable variables when linsolver=:schur throws ArgumentError
+    prob_no_elim = create_ba_problem(2, 2, 1.0)
+    @test_throws ArgumentError partition_schur_problem(prob_no_elim, trues(length(prob_no_elim.variables)), :schur)
+
+    # 4. Dense Schur Solver (optimvars)
+    f_ds, fdf_ds!, x0_ds, H_ds = optimvars(prob_schur, nothing, static(1); linsolver=:dense_schur)
+    @test H_ds isa BlockLinearSystems.SchurBlockMatrix
+    @test H_ds.B isa Matrix{Float64}
+    tot_dim_ds = H_ds.structure.nc + sum(H_ds.structure.p_dims)
+    g_ds = zeros(tot_dim_ds)
+    c_ds = fdf_ds!(g_ds, H_ds, x0_ds)
+    @test isapprox(c_ds, f_ds(x0_ds); atol=1e-12)
+    @test (@allocated fdf_ds!(g_ds, H_ds, x0_ds)) == 0
+
+    # 5. Sparse Schur Solver (optimvars)
+    f_ss, fdf_ss!, x0_ss, H_ss = optimvars(prob_schur, nothing, static(1); linsolver=:sparse_schur)
+    @test H_ss isa BlockLinearSystems.SchurBlockMatrix
+    @test H_ss.B isa BlockLinearSystems.SparseBlockLinearSystem
+    g_ss = zeros(tot_dim_ds)
+    c_ss = fdf_ss!(g_ss, H_ss, x0_ss)
+    @test isapprox(c_ss, f_ss(x0_ss); atol=1e-12)
+    @test (@allocated fdf_ss!(g_ss, H_ss, x0_ss)) == 0
+
+    # Verify dense and sparse Schur Hessians match on quadratic form
+    dx_rand = randn(tot_dim_ds)
+    val_dense = fast_bAb(H_ds, dx_rand)
+    val_sparse = fast_bAb(H_ss, dx_rand)
+    @test isapprox(val_dense, val_sparse; rtol=1e-12, atol=1e-12)
+
+    # 6. Test CostSlotMap Construction
+    num_costs = NLLSModel.countcosts(NLLSModel.costnum, prob_schur.costs)
+    slot_map_dense = CostSlotMap(prob_schur, H_ds.structure, fdf_ds!.linsystem.x.blockindices, H_ds.B)
+    @test length(slot_map_dense.c_offsets) == num_costs
+    @test length(slot_map_dense.b_ptr) == num_costs + 1
+    @test length(slot_map_dense.e_ptr) == num_costs + 1
+
+    slot_map_sparse = CostSlotMap(prob_schur, H_ss.structure, fdf_ss!.linsystem.x.blockindices, H_ss.B)
+    @test length(slot_map_sparse.c_offsets) == num_costs
 end

@@ -113,11 +113,30 @@ end
     return c
 end
 
-function optimvars(problem::Model, unfixed=nothing, numthreads=StaticInt(Threads.nthreads()))
-    return optimvars_dispatch(problem, convertunfixed(unfixed, problem), static(numthreads))
+struct MultiVarSchurFDF{LS, P, U}
+    linsystem::LS
+    problem::P
+    unfixed_inds::U
+end
+@inline function (f::MultiVarSchurFDF)(g, H_schur::SchurBlockMatrix, vars)
+    full_vars = sync_unfixed_vars!(f.problem, f.unfixed_inds, vars)
+    if f.linsystem isa LinearSystemShared
+        ls1 = MultiVariateLSSchur_ls(H_schur, g)
+        target = replace_first_ls(f.linsystem, ls1)
+        c = costgradhess!(target, full_vars, f.problem.costs)
+    else
+        target_ls = LinearSystem(f.linsystem.x, MultiVariateLSSchur_ls(H_schur, g))
+        zero!(target_ls)
+        c = costgradhess_nozero!(target_ls, full_vars, f.problem.costs)
+    end
+    return c
 end
 
-function optimvars_dispatch(problem::Model, unfixed::Integer, numthreads::StaticInt)
+function optimvars(problem::Model, unfixed=nothing, numthreads=StaticInt(Threads.nthreads()); linsolver=nothing)
+    return optimvars_dispatch(problem, convertunfixed(unfixed, problem), static(numthreads), linsolver)
+end
+
+function optimvars_dispatch(problem::Model, unfixed::Integer, numthreads::StaticInt, linsolver=nothing)
     x0 = problem.variables[unfixed]
     varlen = nvars(x0)
     if dynamic(is_static(varlen)) && varlen <= 16
@@ -131,12 +150,82 @@ function optimvars_dispatch(problem::Model, unfixed::Integer, numthreads::Static
     return (f, fdf!, x0, nothing)
 end
 
-function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads::StaticInt)
+function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads::StaticInt, linsolver=nothing)
     @assert length(problem.variables) > 0
     nblocks = sum(unfixed)
     if nblocks == 1
-        return optimvars_dispatch(problem, findfirst(unfixed), numthreads)
+        return optimvars_dispatch(problem, findfirst(unfixed), numthreads, linsolver)
     end
+
+    linsolver_sym = isnothing(linsolver) ? nothing : Symbol(linsolver)
+    schur_requested = linsolver_sym in (:schur, :dense_schur, :sparse_schur)
+    has_elims = any(v -> dynamic(OptimizationVariableInterface.iseliminable(typeof(v))), problem.variables)
+
+    if schur_requested || (isnothing(linsolver_sym) && has_elims)
+        partition = partition_schur_problem(problem, unfixed, linsolver_sym)
+        if !isnothing(partition)
+            structure = SchurStructure(partition.c_dims, partition.p_dims, partition.observations; nchunks=dynamic(numthreads))
+            
+            # Decision Matrix: Dense vs. Sparse
+            is_dense = if linsolver_sym === :dense_schur
+                true
+            elseif linsolver_sym === :sparse_schur
+                false
+            else
+                if structure.nc <= 2000
+                    covis = build_schur_covisibility(structure)
+                    chol_fac = SparseArrays.CHOLMOD.analyze(SparseArrays.CHOLMOD.Sparse(Symmetric(covis.S_sparse, :U)))
+                    chol_fac.nnz >= 0.40 * 0.5 * structure.nc^2
+                else
+                    false
+                end
+            end
+
+            total_c_size = sum(Int(d)^2 for d in structure.p_dims; init=0)
+            total_e_size = isempty(structure.cpoffsets) ? 0 : (structure.cpoffsets[end] + Int(structure.c_dims[structure.cpblock[end]]) * Int(structure.p_dims[end]) - 1)
+            C_data = zeros(Float64, total_c_size)
+            E_data = zeros(Float64, total_e_size)
+
+            H = if is_dense
+                B_dense = zeros(Float64, structure.nc, structure.nc)
+                SchurBlockMatrix(structure, B_dense, C_data, E_data)
+            else
+                covis = build_schur_covisibility(structure)
+                B_sys = SparseBlockLinearSystem{Float64}(TransposedPattern(covis.block_covis), structure.c_dims, structure.c_dims)
+                SchurBlockMatrix(structure, B_sys, C_data, E_data)
+            end
+
+            nblocks_tot = partition.ncblocks + partition.npblocks
+            blockindices = zeros(UInt, length(problem.variables))
+            for (b, var_idx) in enumerate(partition.unfixed_inds)
+                blockindices[var_idx] = b
+            end
+
+            boffsets = Vector{Int}(undef, nblocks_tot + 1)
+            for b in 1:partition.ncblocks
+                boffsets[b] = structure.boffsets_c[b]
+            end
+            for l in 1:partition.npblocks
+                boffsets[partition.ncblocks + l] = structure.nc + structure.boffsets_p[l]
+            end
+            boffsets[end] = structure.nc + sum(Int, structure.p_dims; init=0) + 1
+
+            tot_len = structure.nc + sum(Int, structure.p_dims; init=0)
+            x_vec = zeros(Float64, tot_len)
+            b_vec = zeros(Float64, tot_len)
+
+            ls_x = MultiVariateLSSchur_x(x_vec, blockindices, boffsets, structure, partition.unfixed_inds)
+            ls_val = MultiVariateLSSchur_ls(H, b_vec)
+            lsschur = LinearSystem(ls_x, ls_val)
+            ls_shared = sharedlinearsystem(lsschur, problem, numthreads)
+
+            f = MultiVarCostFunc(problem, partition.unfixed_inds, numthreads)
+            fdf! = MultiVarSchurFDF(ls_shared, problem, partition.unfixed_inds)
+            x0 = problem.variables[partition.unfixed_inds]
+            return (f, fdf!, x0, H)
+        end
+    end
+
     blocksizes, blockindices, unfixed_inds, is_natural = block_sizes_indices(problem.variables, unfixed, nblocks)
     len = Int(sum(blocksizes))
     if all(unfixed) && is_natural
