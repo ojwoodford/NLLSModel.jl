@@ -14,7 +14,7 @@ struct Scaled{T<:Real,Robustifier<:AbstractRobustifier} <: AbstractRobustifier
     height::T
 end
 robustify(kernel::Scaled, cost) = robustify(kernel.robust, cost) * kernel.height
-robustifydcost(kernel::Scaled{Real, NoRobust}, cost) = cost * kernel.height, kernel.height, zero(cost)
+robustifydcost(kernel::Scaled{<:Real, NoRobust}, cost) = cost * kernel.height, kernel.height, zero(cost)
 function robustifydcost(kernel::Scaled, cost)
     c, d1, d2 = robustifydcost(kernel.robust, cost)
     return c * kernel.height, d1 * kernel.height, d2 * kernel.height
