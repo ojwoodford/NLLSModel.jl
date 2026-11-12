@@ -33,7 +33,7 @@ function gradhesshelper!(linsystem, cost::AbstractCost, vars, blockind, varflags
     return c
 end
 function gradhesshelper!(linsystem, cost::AbstractCost, vars, blockind, varflags::StaticInt{0})::Float64
-    @warn "A cost for which all variables are fixed is being optimized. Remove such cost functions from the cost to avoid redundant computation, using the subproblem() method."
+    @warn "A cost for which all variables are fixed is being optimized. Remove such cost functions from the cost to avoid redundant computation, using the subproblem() method." maxlog=1
     return computecost(cost, vars...)
 end
 
