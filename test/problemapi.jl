@@ -1,4 +1,4 @@
-using NLLSModel, Test, Static, StaticArrays
+using NLLSModel, Test, Static, StaticArrays, SparseArrays
 
 struct DiffResidual <: NLLSModel.AbstractResidual
     i::Int
@@ -31,4 +31,11 @@ Base.eltype(::DiffResidual) = Float64
     k = NLLSModel.Scaled(NLLSModel.NoRobust(), 2.0)
     @test NLLSModel.robustifydcost(k, 3.0) == (6.0, 2.0, 0.0)
     @test which(NLLSModel.robustifydcost, Tuple{typeof(k), Float64}).sig.parameters[2] <: NLLSModel.Scaled{<:Real, NLLSModel.NoRobust}
+end
+
+@testset "block sparse nnz with large blocks" begin
+    # B9: products of UInt8 block sizes must not wrap
+    pattern = sparse([true true; false true])
+    sizes = NLLSModel.BlockRLE(UInt8[32, 32])
+    @test NLLSModel.block_sparse_nnz(pattern, sizes) == 3 * 32 * 32
 end
