@@ -16,22 +16,6 @@ end
 bitiset(flags::StaticInt, bit) = (static(1 << (bit - 1)) & flags) != static(0)
 bitiset(flags, bit) = (1 << (bit - 1)) & flags != 0
 
-function runlengthencodesortedints(sortedints)
-    runindices = Vector{Int}(undef, sortedints[end]+2)
-    ind = 1
-    currval = 1
-    runindices[currval] = ind
-    for val in sortedints
-        while val >= currval
-            currval += 1
-            runindices[currval] = ind
-        end
-        ind += 1
-    end
-    runindices[currval+1] = ind
-    return runindices
-end
-
 function block_sparsity(problem, unfixed_inds::AbstractVector{<:Integer})
     # Compute the block sparsity for the given unfixed variable ordering
     n = length(unfixed_inds)
