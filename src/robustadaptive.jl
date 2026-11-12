@@ -49,7 +49,7 @@ end
 #            zeros(SMatrix{4, 4})
 # end
 
-function optimize(kernel::ContaminatedGaussian{T}, squarederrors::Vector{T}, maxiters=10)::ContaminatedGaussian{T} where T
+function optimizekernel(kernel::ContaminatedGaussian{T}, squarederrors::Vector{T}, maxiters=10)::ContaminatedGaussian{T} where T
     # Optimize the parameters of the kernel using Expectation-Maximization algorithm
     totalsquarederror = sum(squarederrors)
     oldparams = params(kernel)
@@ -64,6 +64,10 @@ function optimize(kernel::ContaminatedGaussian{T}, squarederrors::Vector{T}, max
             # Compute running totals for the Maximization step
             sigma1 += w * err
             totalweight += w
+        end
+        # Degenerate responsibilities (all in one component) leave the other component's scale undefined
+        if !(totalweight > 0 && totalweight < length(squarederrors))
+            break
         end
         # Complete the Maximization step (computing the optimal distribution parameters) by normalizing by the total weights
         newparams = SVector(sqrt(sigma1 / totalweight), sqrt((totalsquarederror - sigma1) / (length(squarederrors) - totalweight)), totalweight / length(squarederrors))

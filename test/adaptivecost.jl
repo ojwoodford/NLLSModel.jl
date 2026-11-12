@@ -17,7 +17,7 @@ function optimisekernel!(problem, vars=problem.variables)
     # Compute the squared errors
     squarederrors = [NLLSModel.computeresidual(res, vars[res.varind]) ^ 2 for res in get(problem.costs, SimpleResidual)]
     # Optimize the kernel parameters
-    vars[1] = NLLSModel.optimize(vars[1], squarederrors)
+    vars[1] = NLLSModel.optimizekernel(vars[1], squarederrors)
     return nothing
 end
 
@@ -83,4 +83,12 @@ end
     c, g, H = NLLSModel.computecostgradhess(static(1), res, kernel, mean)
     @test g ≈ gfd[1:3] rtol=1e-5
     @test H ≈ Hfd[1:3, 1:3] rtol=1e-3 atol=1e-5
+end
+
+@testset "ContaminatedGaussian EM degenerate input" begin
+    k = ContaminatedGaussian(0.5, 5.0, 0.4)
+    # Identical zero errors put all the weight in the narrow component; this must not produce NaN parameters
+    k2 = NLLSModel.optimizekernel(k, zeros(10))
+    @test all(isfinite, NLLSModel.params(k2))
+    @test all(isfinite, NLLSModel.params(NLLSModel.optimizekernel(k, Float64[])))
 end
