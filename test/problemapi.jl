@@ -72,3 +72,12 @@ end
     @test UnrollCheck.count_unrolled((1, 2)) == 2
     @test UnrollCheck.count_unrolled((1, 2, 3)) == 3
 end
+
+@testset "per-thread linear system copies are memory capped" begin
+    A = NLLSModel.MultiVariateLSdense(UInt8[3, 3, 3], UInt[1, 2, 3])
+    ls = NLLSModel.LinearSystem(NLLSModel.MultiVariateLSdense_x(zeros(9), UInt[1, 2, 3], [1, 4, 7, 10]), A)
+    one_copy = Base.summarysize(ls.ls)
+    @test NLLSModel.threadcopylimit(ls, 8) == 8
+    @test NLLSModel.threadcopylimit(ls, 8, 2 * one_copy) == 3  # the original plus two copies
+    @test NLLSModel.threadcopylimit(ls, 8, 0) == 1
+end
