@@ -145,6 +145,7 @@ end
 function addvariable!(problem::Model, variable)
     N = nvars(variable)
     @assert (isa(N, Integer) || isa(N, StaticInt)) && N > 0 "Problem with nvars()"
+    @assert N <= typemax(UInt8) "Variables with more than $(Int(typemax(UInt8))) dimensions are not supported (got $(Int(dynamic(N))))"
     push!(problem.variables, variable)
     problem.varcostmapvalid = false
     return length(problem.variables)
