@@ -16,7 +16,7 @@ In `NLLSModel.jl`, [`Model`](@ref) stores only the model data, using a zero-over
 - `varcostmap::SparseMatrixCSC{Bool, Int}`
 - `varcostmapvalid::Bool`
 
-All optimization scratch buffers (`variables`, `varnext`, `varbest`) live inside `SecondOrderOptimization.OptimizationInternal` and `OptimizeCache` (`OptimizationWorkspace`). For backward compatibility with existing callbacks in `NLLSsolver.jl`, accessing `problem.varnext` or `problem.varbest` inside an `optimize!` callback continues to work transparently.
+All optimization scratch buffers (`variables`, `varnext`, `varbest`) live inside `SecondOrderOptimization.OptimizationInternal` and `OptimizeCache` (`OptimizationWorkspace`). `problem.varnext` and `problem.varbest` no longer exist on `Model`; callbacks receive the trial point from the optimizer instead.
 
 ### 2. Decoupled Architecture & `optimvars`
 `NLLSModel.jl` and `SecondOrderOptimization.jl` do not depend on each other:
