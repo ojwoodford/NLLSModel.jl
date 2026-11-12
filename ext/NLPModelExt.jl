@@ -94,7 +94,8 @@ mutable struct NLLSModelNLP{P, F, FDF, X0, H, VarsBuf, BSZ, HIdx, UInd} <: Abstr
 end
 
 function NLLSModel.NLPLSModel(problem::Model; unfixed=nothing, numthreads=static(1), name="NLPLSModel")
-    f, fdf!, x0, H_temp = optimvars(problem, unfixed, numthreads)
+    # Never use the Schur path here: the model works on the full (non-reduced) system
+    f, fdf!, x0, H_temp = optimvars(problem, unfixed, numthreads; linsolver=:cholesky)
     conv_unfixed = NLLSModel.convertunfixed(unfixed, problem)
 
     if conv_unfixed isa Integer
@@ -105,7 +106,9 @@ function NLLSModel.NLPLSModel(problem::Model; unfixed=nothing, numthreads=static
         unfixed_inds = findfirst(conv_unfixed)
     else
         is_single = false
-        unfixed_inds = all(conv_unfixed) ? nothing : findall(conv_unfixed)
+        # Use the block ordering optimvars used for x0 (variables are sorted by dimension when not already grouped)
+        _, _, ordered_inds, is_natural = NLLSModel.block_sizes_indices(problem.variables, conv_unfixed)
+        unfixed_inds = (all(conv_unfixed) && is_natural) ? nothing : ordered_inds
     end
 
     if is_single

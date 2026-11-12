@@ -242,7 +242,7 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
         end
     end
 
-    blocksizes, blockindices, unfixed_inds, is_natural = block_sizes_indices(problem.variables, unfixed, nblocks)
+    blocksizes, blockindices, unfixed_inds, is_natural = block_sizes_indices(problem.variables, unfixed)
     len = Int(sum(blocksizes))
     if all(unfixed) && is_natural
         unfixed_sync = nothing

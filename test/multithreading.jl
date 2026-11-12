@@ -187,7 +187,7 @@ alloc_ephemeral(ls, ind) = @allocated NLLSModel.LinearSystem(ls, ind)
         addcost!(prob_dense, MTTestPairRes(0.5, 1, 2))
         addcost!(prob_dense, MTTestScalarRes(1.0, 1))
     end
-    blocksizes, blockindices = NLLSModel.block_sizes_indices(prob_dense.variables, trues(2), 2)
+    blocksizes, blockindices = NLLSModel.block_sizes_indices(prob_dense.variables, trues(2))
     ls_dense_single = NLLSModel.MultiVariateLSdense(blocksizes, blockindices)
     ls_dense_shared = NLLSModel.sharedlinearsystem(ls_dense_single, static(4))
     c_dens_s = NLLSModel.costgradhess!(ls_dense_single, prob_dense.variables, prob_dense.costs)
@@ -207,7 +207,7 @@ alloc_ephemeral(ls, ind) = @allocated NLLSModel.LinearSystem(ls, ind)
     for i in 1:nvars-1
         addcost!(prob_sparse, MTTestPairRes(1.0, i, i+1))
     end
-    b_sizes, b_indices = NLLSModel.block_sizes_indices(prob_sparse.variables, trues(nvars), nvars)
+    b_sizes, b_indices = NLLSModel.block_sizes_indices(prob_sparse.variables, trues(nvars))
     sparsity = NLLSModel.block_sparsity(prob_sparse, trues(nvars))
     bsm = NLLSModel.SparseBlockLinearSystem{Float64}(NLLSModel.TransposedPattern(sparsity), b_sizes, b_sizes)
     ls_sparse_single = NLLSModel.MultiVariateLSsparse(bsm, b_indices, true)

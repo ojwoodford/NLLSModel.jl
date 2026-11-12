@@ -26,7 +26,7 @@ end
 block_sparsity(problem, unfixed::AbstractVector{Bool}) = block_sparsity(problem, findall(unfixed))
 block_sparsity(problem, unfixed) = block_sparsity(problem, convert(Vector{Int}, findall(unfixed)))
 
-function block_sizes_indices(variables, unfixed, nblocks)
+function block_sizes_indices(variables, unfixed)
     unfixed_raw = findall(unfixed)
     dims = [UInt8(dynamic(nvars(variables[i]))) for i in unfixed_raw]
 

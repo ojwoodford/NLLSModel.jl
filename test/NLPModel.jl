@@ -244,3 +244,47 @@ end
     nlp2 = convert(AbstractNLPModel, prob)
     @test nlp2 isa AbstractNLPModel
 end
+
+# Mark 2-vectors as eliminable (test-only; nothing else in the tests uses a 2-vector as a variable)
+OptimizationVariableInterface.iseliminable(::Type{<:SVector{2, Float64}}) = static(true)
+NLLSModel.generatemeasurement(camera::SVector{6, T}, pt::SVector{2, U}) where {T, U} = SVector(camera[1] * pt[1] + camera[2] * pt[2], camera[5] * pt[1] + camera[6] * pt[2])
+
+@testset "NLPLSModel: variable ordering and eliminable variables" begin
+    # Variables [6, 3, 6, 3] are sorted by dimension into [6, 6, 3, 3] blocks; results must be written back to the right variables
+    prob = Model(Union{SVector{6, Float64}, SVector{3, Float64}}, SimpleError2{2, Float64, SVector{6, Float64}, SVector{3, Float64}})
+    addvariable!(prob, SVector(1.0, 0.0, 0.0, 0.0, 1.0, 0.0))
+    addvariable!(prob, SVector(0.1, 0.2, 5.0))
+    addvariable!(prob, SVector(1.1, 0.1, 0.0, 0.0, 1.0, 0.1))
+    addvariable!(prob, SVector(0.2, 0.3, 5.5))
+    addcost!(prob, SimpleError2{SVector{6, Float64}, SVector{3, Float64}}(SVector(0.1, 0.2), 1, 2))
+    addcost!(prob, SimpleError2{SVector{6, Float64}, SVector{3, Float64}}(SVector(0.1, 0.2), 3, 4))
+    orig = copy(prob.variables)
+    nlp = NLPLSModel(prob)
+    x = copy(nlp.meta.x0)
+    @test x == [orig[1]; orig[3]; orig[2]; orig[4]]
+    x .+= 1.0
+    syncvars!(nlp, x)
+    @test prob.variables[1] ≈ orig[1] .+ 1
+    @test prob.variables[2] ≈ orig[2] .+ 1
+    @test prob.variables[3] ≈ orig[3] .+ 1
+    @test prob.variables[4] ≈ orig[4] .+ 1
+    x[1:6] .= 0.0   # only the first 6-dimensional block (variable 1) is changed
+    syncvars!(nlp, x)
+    @test prob.variables[1] == zeros(6)
+    @test prob.variables[3] ≈ orig[3] .+ 1
+
+    # Models with eliminable variables use a non-Schur system
+    pe = Model(Union{SVector{6, Float64}, SVector{2, Float64}}, SimpleError2{2, Float64, SVector{6, Float64}, SVector{2, Float64}})
+    addvariable!(pe, SVector(1.0, 0.0, 0.0, 0.0, 1.0, 0.0))
+    addvariable!(pe, SVector(1.1, 0.1, 0.0, 0.0, 1.0, 0.1))
+    for p in (SVector(0.1, 0.2), SVector(0.2, 0.3), SVector(0.3, 0.1))
+        addvariable!(pe, p)
+    end
+    for c in 1:2, l in 3:5
+        addcost!(pe, SimpleError2{SVector{6, Float64}, SVector{2, Float64}}(SVector(0.1, 0.2), c, l))
+    end
+    nlp_e = NLPLSModel(pe)
+    @test nlp_e isa AbstractNLPModel
+    @test nlp_e.meta.nvar == 12 + 6
+    @test isfinite(obj(nlp_e, nlp_e.meta.x0))
+end
