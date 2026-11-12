@@ -506,8 +506,7 @@ end
 
 function NLPModels.grad!(nls::NLLSModelNLS, x::AbstractVector, g::AbstractVector)
     NLPModels.increment!(nls, :neval_grad)
-    ensure_res!(nls, x)
-    ensure_jac!(nls, x)
+    ensure_jac!(nls, x) # also fills the residual buffer
     mul!(g, transpose(nls.J_buf), nls.r_buf)
     return g
 end
