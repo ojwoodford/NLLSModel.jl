@@ -14,23 +14,23 @@ function ContaminatedGaussian(s1::ZeroToInfScalar{T}, s2::ZeroToInfScalar{T}, w:
         if s1.val < s2.val
             # Ensure the the first Gaussian is the narrowest (so largest inverse sigma)
             s1, s2 =  s2, s1
-            w = ZeroToOneScalar(1 - w.val)
+            w = ZeroToOneScalar(-w.logit, Val(:logit))
         end
     end
     s1sq = s1.val * s1.val
     s2sq = s2.val * s2.val
     ContaminatedGaussian{T}(s1, s2, w, s1sq, s2sq, 0.5 * (s2sq - s1sq), 0.5 * s2sq)
 end
-ContaminatedGaussian(s1::T, s2::T, w::T) where T <: Real = ContaminatedGaussian(ZeroToInfScalar{T}(1.0/s1), ZeroToInfScalar{T}(1.0/s2), ZeroToOneScalar{T}(w))
+ContaminatedGaussian(s1::T, s2::T, w::T) where T <: Real = ContaminatedGaussian(ZeroToInfScalar{T}(inv(s1)), ZeroToInfScalar{T}(inv(s2)), ZeroToOneScalar{T}(w))
 nvars(::ContaminatedGaussian) = static(3)
 update(var::ContaminatedGaussian, updatevec, start=1) = ContaminatedGaussian(update(var.invsigma1, updatevec, start), update(var.invsigma2, updatevec, start+1), update(var.w, updatevec, start+2))
 params(var::ContaminatedGaussian) = SVector(1.0 / var.invsigma1.val, 1.0 / var.invsigma2.val, var.w.val)
 
-robustify(kernel::ContaminatedGaussian, cost) = cost * kernel.halfs2sq - log(kernel.w.val * kernel.invsigma1.val * exp(cost * kernel.halfs2sqminuss1sq) + (1 - kernel.w.val) * kernel.invsigma2.val)
+robustify(kernel::ContaminatedGaussian, cost) = cost * kernel.halfs2sq - log(kernel.w.val * kernel.invsigma1.val * exp(cost * kernel.halfs2sqminuss1sq) + kernel.w.comp * kernel.invsigma2.val)
 function robustifydcost(kernel::ContaminatedGaussian, cost)
     c = cost * kernel.halfs2sq
     s = kernel.w.val * kernel.invsigma1.val * exp(cost * kernel.halfs2sqminuss1sq)
-    t = (1 - kernel.w.val) * kernel.invsigma2.val
+    t = kernel.w.comp * kernel.invsigma2.val
     den = 1 / (s + t)
     s *= kernel.halfs2sqminuss1sq
     return c + log(den), kernel.halfs2sq - s * den, -s * kernel.halfs2sqminuss1sq * t * den * den
@@ -54,7 +54,7 @@ function optimize(kernel::ContaminatedGaussian{T}, squarederrors::Vector{T}, max
     totalsquarederror = sum(squarederrors)
     oldparams = params(kernel)
     for iter = 1:maxiters
-        wratio = ((1 - kernel.w.val) * kernel.invsigma2.val) / (kernel.invsigma1.val * kernel.w.val)
+        wratio = (kernel.w.comp * kernel.invsigma2.val) / (kernel.invsigma1.val * kernel.w.val)
         halfs1sqminuss2sq = -kernel.halfs2sqminuss1sq
         sigma1 = T(0)
         totalweight = T(0)

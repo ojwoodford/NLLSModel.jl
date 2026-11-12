@@ -56,3 +56,9 @@ end
     @test isapprox(problem.variables[2], -1.0; rtol=0.1)
     @test isapprox(problem.variables[3], 1.0; rtol=0.1)
 end
+
+@testset "ContaminatedGaussian construction" begin
+    @test NLLSModel.params(ContaminatedGaussian(2.0, 5.0, 0.9)) ≈ SVector(2.0, 5.0, 0.9)
+    # Parameters are reordered so the first Gaussian is the narrowest
+    @test NLLSModel.params(ContaminatedGaussian(5.0, 2.0, 0.1)) ≈ SVector(2.0, 5.0, 0.9)
+end
