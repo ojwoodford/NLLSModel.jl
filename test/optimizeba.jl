@@ -234,14 +234,4 @@ end
     @test g_rd ≈ g_rs
     dx_rr = randn(tot_rr)
     @test fast_bAb(H_rd, dx_rr) ≈ fast_bAb(H_rs, dx_rr)
-
-    # 6. Test CostSlotMap Construction
-    num_costs = NLLSModel.countcosts(NLLSModel.costnum, prob_schur.costs)
-    slot_map_dense = CostSlotMap(prob_schur, H_ds.structure, fdf_ds!.linsystem.x.blockindices, H_ds.B)
-    @test length(slot_map_dense.c_offsets) == num_costs
-    @test length(slot_map_dense.b_ptr) == num_costs + 1
-    @test length(slot_map_dense.e_ptr) == num_costs + 1
-
-    slot_map_sparse = CostSlotMap(prob_schur, H_ss.structure, fdf_ss!.linsystem.x.blockindices, H_ss.B)
-    @test length(slot_map_sparse.c_offsets) == num_costs
 end

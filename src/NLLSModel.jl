@@ -26,7 +26,7 @@ export Model, NLPLSModel, NLLSNLSModel
 export addvariable!, addcost!, addresidual!, subproblem, subproblem!
 export cost, optimvars, optimvars_nls, flat_optimvars_nls, nls_callbacks, syncvars!, nresiduals
 export isadditive, islinearkernel, clamped_count, reset_clamped_count!
-export CostSlotMap, partition_schur_problem
+export partition_schur_problem
 
 # Cost and residual types & definition interface
 export AbstractCost, AbstractResidual, AbstractAdaptiveResidual
