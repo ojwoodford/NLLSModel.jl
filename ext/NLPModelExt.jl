@@ -10,59 +10,8 @@ using OptimizationVariableInterface
 import OptimizationVariableInterface: nvars, syncvars!
 import NLLSModel: islinearkernel, flat_optimvars_nls, sync_flat_vars!
 
-# Packing helpers
-@inline function pack_single_var!(x_flat::Vector{Float64}, x0::StaticVector{N}) where N
-    @inbounds for k in 1:N
-        x_flat[k] = Float64(x0[k])
-    end
-end
-@inline pack_single_var!(x_flat::Vector{Float64}, x0::Number) = (@inbounds x_flat[1] = Float64(x0); nothing)
-@inline function pack_single_var!(x_flat::Vector{Float64}, x0::AbstractVector)
-    @inbounds for k in eachindex(x0)
-        x_flat[k] = Float64(x0[k])
-    end
-end
-
-@inline function pack_var!(x::Vector{Float64}, idx::Int, v::StaticVector{N}) where N
-    @inbounds for k in 1:N
-        x[idx + k - 1] = Float64(v[k])
-    end
-end
-@inline pack_var!(x::Vector{Float64}, idx::Int, v::Number) = (@inbounds x[idx] = Float64(v); nothing)
-@inline function pack_var!(x::Vector{Float64}, idx::Int, v::AbstractVector)
-    @inbounds for k in eachindex(v)
-        x[idx + k - 1] = Float64(v[k])
-    end
-end
-
-# Copy helpers
-copy_var(x::StaticVector) = x
-copy_var(x::Number) = x
-copy_var(x::Vector{T}) where T = copy(x)
-copy_var(x) = deepcopy(x)
-
-copy_vars_list(vars::Vector{T}) where T<:StaticVector = copy(vars)
-copy_vars_list(vars::Vector{T}) where T<:Number = copy(vars)
-copy_vars_list(vars::Vector) = deepcopy(vars)
-
-# Unpacking helpers
-@inline unpack_single_var(::StaticVector{N, T}, x) where {N, T} = SVector{N, T}(ntuple(k -> @inbounds(x[k]), Val(N)))
-@inline unpack_single_var(::Number, x) = @inbounds x[1]
-@inline function unpack_single_var(v::Vector{T}, x) where T
-    copyto!(v, x)
-    return v
-end
-@inline unpack_single_var(v, x) = typeof(v)(x)
-
-@inline unpack_var_elem(::StaticVector{N, T}, x, idx, _) where {N, T} = SVector{N, T}(ntuple(k -> @inbounds(x[idx + k - 1]), Val(N)))
-@inline unpack_var_elem(::Number, x, idx, _) = @inbounds x[idx]
-@inline function unpack_var_elem(v::Vector{T}, x, idx, bsz) where T
-    @inbounds for k in 1:bsz
-        v[k] = x[idx + k - 1]
-    end
-    return v
-end
-@inline unpack_var_elem(v, x, idx, bsz) = typeof(v)(view(x, idx:idx+bsz-1))
+# Packing, copying and unpacking helpers are shared with the flat-variable code in NLLSModel (src/flatvars.jl)
+import NLLSModel: pack_single_var!, pack_var!, copy_var, copy_vars_list, unpack_single_var, unpack_var_elem
 
 """
     NLLSModelNLP <: AbstractNLPModel{Float64, Vector{Float64}}
