@@ -57,6 +57,7 @@ const MAX_STATIC_VAR = 64 # Maximum static variable size for static sized autodi
 include("utils.jl")
 include("CostStruct.jl")
 include("problem.jl")
+include("compat_nllssolver.jl")
 const addresidual! = addcost!
 include("unroll.jl")
 include("linearsystem.jl")

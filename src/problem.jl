@@ -35,37 +35,6 @@ Model(::Type{VT}, ::Type{CT}) where {VT, CT} = Model{VT, CT}()
 Model(v::Vector{VT}, ::Type{CT}) where {VT, CT} = Model{VT, CT}(v)
 Model(v::Vector{VT}, r::CostStruct{CT}) where {VT, CT} = Model{VT, CT}(v, r)
 
-function Base.getproperty(p::Model, s::Symbol)
-    if s === :varnext
-        if haskey(task_local_storage(), :nlls_varnext)
-            val = task_local_storage(:nlls_varnext)
-            if val isa Vector
-                return val
-            else
-                v = copy(getfield(p, :variables))
-                unfixed = get(task_local_storage(), :nlls_unfixed, 1)
-                v[unfixed] = val
-                return v
-            end
-        end
-        return getfield(p, :variables)
-    elseif s === :varbest
-        if haskey(task_local_storage(), :nlls_varbest)
-            val = task_local_storage(:nlls_varbest)
-            if val isa Vector
-                return val
-            else
-                v = copy(getfield(p, :variables))
-                unfixed = get(task_local_storage(), :nlls_unfixed, 1)
-                v[unfixed] = val
-                return v
-            end
-        end
-        return getfield(p, :variables)
-    end
-    return getfield(p, s)
-end
-
 function Base.show(io::IO, x::Model)
     print(io, "Model with ", length(x.variables), " variable blocks of total dimension ", UInt(sum(nvars, x.variables; init=0)), 
            ",\n             and ", countcosts(costnum, x.costs), " residual blocks of total dimension ", countcosts(resnum, x.costs), ".")
