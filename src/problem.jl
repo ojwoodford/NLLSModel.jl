@@ -1,9 +1,9 @@
 using Static, SparseArrays
 import OptimizationVariableInterface: nvars
 
-mutable struct Model{VarTypes, CostTypes, CostVecs}
+mutable struct Model{VarTypes, CostTypes, CostVecs, TCT<:Tuple}
     # User provided
-    costs::CostStruct{<:Tuple, CostVecs} # Set of cost and residual blocks that define the problem
+    costs::CostStruct{TCT, CostVecs} # Set of cost and residual blocks that define the problem
     variables::Vector{VarTypes}  # Current state of variables in use by optimizer
 
     # Used internally
@@ -19,15 +19,15 @@ mutable struct Model{VarTypes, CostTypes, CostVecs}
     ) where {VarTypes, CostTypes}
         TCT = tupelize(CostTypes)
         costs isa CostStruct{TCT} || throw(ArgumentError("Expected costs of type CostStruct{$TCT}, got $(typeof(costs))"))
-        return new{VarTypes, CostTypes, typeof(costs.data)}(costs, vars, varcostmap, varcostmapvalid)
+        return new{VarTypes, CostTypes, typeof(costs.data), TCT}(costs, vars, varcostmap, varcostmapvalid)
     end
-    function Model{VarTypes, CostTypes, CostVecs}(
+    function Model{VarTypes, CostTypes, CostVecs, TCT}(
         vars::Vector{VarTypes},
-        costs::CostStruct{<:Tuple, CostVecs},
+        costs::CostStruct{TCT, CostVecs},
         varcostmap = spzeros(Bool, 0, 0),
         varcostmapvalid = false
-    ) where {VarTypes, CostTypes, CostVecs}
-        return new{VarTypes, CostTypes, CostVecs}(costs, vars, varcostmap, varcostmapvalid)
+    ) where {VarTypes, CostTypes, CostVecs, TCT}
+        return new{VarTypes, CostTypes, CostVecs, TCT}(costs, vars, varcostmap, varcostmapvalid)
     end
 end
 

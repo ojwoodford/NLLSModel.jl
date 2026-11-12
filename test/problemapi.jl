@@ -18,6 +18,8 @@ Base.eltype(::DiffResidual) = Float64
     end
     NLLSModel.addcost!(problem, DiffResidual(1, 2))
     NLLSModel.addcost!(problem, DiffResidual(3, 4))
+    # M4: the cost container has a concrete type
+    @test isconcretetype(fieldtype(typeof(problem), :costs))
     # B8: duplicated variable indices are rejected
     @test_throws AssertionError NLLSModel.addcost!(problem, DiffResidual(2, 2))
     # B11: Boolean (non-Bit) vectors are masks of unfixed variables
