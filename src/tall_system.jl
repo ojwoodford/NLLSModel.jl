@@ -40,14 +40,14 @@ end
 @inline function cost_varflags(blockindices, c)
     vinds = varindices(c)
     if vinds isa Integer
-        return (blockindices[vinds] != 0) ? static(1) : static(0)
+        return (blockindices[vinds] != 0) ? 1 : 0
     else
-        flags = static(0)
+        flags = 0 # An Int (not a StaticInt): the value is only known at run time
         @unroll for i in 1:MAX_ARGS
             if i <= length(vinds)
                 b = @inbounds blockindices[vinds[i]]
                 if b != 0
-                    flags |= static(1 << (i - 1))
+                    flags |= 1 << (i - 1)
                 end
             end
         end
@@ -551,7 +551,7 @@ function eval_single_resjac!(r, J, vars, cost, k::Int, layout::NLSTallLayout, ro
     if cost isa AbstractAdaptiveResidual
         kernel = vars_k[1]
         vars_for_res = vars_k[2:end]
-        varflags_res = varflags >> static(1)
+        varflags_res = varflags >> 1
         nvars_deps = ndeps(cost) - static(1)
     else
         kernel = robustkernel(cost)
