@@ -1,4 +1,4 @@
-using NLLSModel, Test, Static, StaticArrays, SparseArrays
+using NLLSModel, Test, Static, StaticArrays, SparseArrays, LinearAlgebra
 
 struct DiffResidual <: NLLSModel.AbstractResidual
     i::Int
@@ -44,4 +44,13 @@ end
     pattern = sparse([true true; false true])
     sizes = NLLSModel.BlockRLE(UInt8[32, 32])
     @test NLLSModel.block_sparse_nnz(pattern, sizes) == 3 * 32 * 32
+end
+
+@testset "cholmod_symbolic_nnz" begin
+    n = 20
+    A = sparse(SymTridiagonal(fill(2.0, n), fill(-1.0, n - 1)))
+    fac = SparseArrays.CHOLMOD.analyze(SparseArrays.CHOLMOD.Sparse(Symmetric(A, :U)))
+    nz = NLLSModel.cholmod_symbolic_nnz(fac, n)
+    @test nz isa Int && n <= nz <= n * (n + 1) ÷ 2
+    @test isnothing(NLLSModel.cholmod_symbolic_nnz(fac, n + 1)) # mismatched size is rejected
 end

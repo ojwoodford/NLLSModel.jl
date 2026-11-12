@@ -138,13 +138,40 @@ end
     return c
 end
 
-function cholmod_symbolic_nnz(fac::SparseArrays.CHOLMOD.Factor)
-    s = unsafe_load(fac.ptr)
-    if s.ColCount != C_NULL
-        colcount = unsafe_wrap(Array, Ptr{Int64}(s.ColCount), s.n)
-        return sum(colcount)
+"""
+    syncvars!(problem::Model, fdf!, x_opt) -> Model
+
+Write the solution `x_opt` found for the functors returned by [`optimvars`](@ref) back into `problem.variables`.
+`fdf!` (or `f`) knows which problem variables `x_opt` holds, and in what order (variables are sorted by dimension
+into blocks when they are not already grouped), so this is the supported way to set the final solution. After
+`optimize` the problem otherwise holds the last point *evaluated*, which may be a rejected step.
+"""
+function OptimizationVariableInterface.syncvars!(problem::Model, f::Union{SingleVarCostFunc, SingleVarCostGradHess}, x)
+    @inbounds problem.variables[f.unfixed] = x
+    return problem
+end
+function OptimizationVariableInterface.syncvars!(problem::Model, f::Union{MultiVarCostFunc, MultiVarDenseFDF, MultiVarSparseFDF, MultiVarSchurFDF}, x)
+    if isnothing(f.unfixed_inds)
+        problem.variables === x || copyto!(problem.variables, x)
+    else
+        sync_unfixed_vars!(problem, f.unfixed_inds, x)
     end
-    return 0
+    return problem
+end
+
+# Number of non-zeros in the Cholesky factor predicted by CHOLMOD's symbolic analysis of an `n`-by-`n` matrix.
+# Reads CHOLMOD's internal struct, so it validates what it finds and returns `nothing` if anything looks wrong.
+function cholmod_symbolic_nnz(fac::SparseArrays.CHOLMOD.Factor, n::Integer)
+    try
+        fac.ptr == C_NULL && return nothing
+        s = unsafe_load(fac.ptr)
+        (s.ColCount == C_NULL || Int(s.n) != n) && return nothing
+        colcount = unsafe_wrap(Array, Ptr{Int64}(s.ColCount), n)
+        all(c -> 1 <= c <= n, colcount) || return nothing
+        return Int(sum(colcount))
+    catch
+        return nothing
+    end
 end
 
 function optimvars(problem::Model, unfixed=nothing, numthreads=StaticInt(Threads.nthreads()); linsolver=nothing)
@@ -192,7 +219,9 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
             else
                 if structure.nc <= 2000
                     chol_fac = SparseArrays.CHOLMOD.analyze(SparseArrays.CHOLMOD.Sparse(Symmetric(pattern.S_sparse, :U)))
-                    cholmod_symbolic_nnz(chol_fac) >= 0.40 * 0.5 * structure.nc^2
+                    # Fall back to the pattern's own size if CHOLMOD's prediction is unavailable
+                    factor_nnz = something(cholmod_symbolic_nnz(chol_fac, structure.nc), nnz(pattern.S_sparse))
+                    factor_nnz >= 0.40 * 0.5 * structure.nc^2
                 else
                     false
                 end

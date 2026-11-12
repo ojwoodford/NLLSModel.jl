@@ -111,6 +111,17 @@ end
     @test orig_A_int.rowblocksizes.runlengths == [2, 2]
     @test orig_A_int.rowblocksizes.blocksizes == [6, 3]
 
+    # M9: syncvars! writes a solution back in the block order optimvars used
+    orig_int = copy(problem_interleaved.variables)
+    x_new = [v .+ 1.0 for v in x0_int]
+    NLLSModel.syncvars!(problem_interleaved, fdf_int!, x_new)
+    @test problem_interleaved.variables[c1] ≈ orig_int[c1] .+ 1
+    @test problem_interleaved.variables[c2] ≈ orig_int[c2] .+ 1
+    @test problem_interleaved.variables[p1] ≈ orig_int[p1] .+ 1
+    @test problem_interleaved.variables[p2] ≈ orig_int[p2] .+ 1
+    NLLSModel.syncvars!(problem_interleaved, f_int, x0_int)
+    @test problem_interleaved.variables == orig_int
+
     # Evaluate cost and derivatives on interleaved problem
     cost_int = f_int(x0_int)
     @test cost_int >= 0
