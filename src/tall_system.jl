@@ -760,6 +760,72 @@ else
     reset_clamped_count!(flat.resjac!)
 end; flat)
 
+# Evaluate costs `rng` of one cost vector. Returns (cost, clamped count, first error code, its value)
+@inline function eval_costvec_range(evalone, costvec, k_start::Int, rng)
+    total = 0.0
+    clamped = 0
+    err_code = 0
+    err_val = 0.0
+    for i in rng
+        c_k, cl, err, val = evalone(costvec[i], k_start + i - 1)
+        total += c_k
+        clamped += cl
+        if err != 0 && err_code == 0
+            err_code = err
+            err_val = val
+        end
+    end
+    return total, clamped, err_code, err_val
+end
+
+@inline combine_eval(a, b) = (a[1] + b[1], a[2] + b[2], a[3] != 0 ? a[3] : b[3], a[3] != 0 ? a[4] : b[4])
+
+# Recurse over the tuple of cost vectors so each is processed with its concrete type (type stable for any number of cost types)
+@inline eval_costvecs(evalone, ::Tuple{}, start_idx, nchunks, taskid, ind) = (0.0, 0, 0, 0.0)
+@inline function eval_costvecs(evalone, costvecs::Tuple, start_idx, nchunks, taskid, ind)
+    costvec = first(costvecs)
+    head = eval_costvec_range(evalone, costvec, start_idx[ind], chunk_indices(length(costvec), nchunks, taskid))
+    return combine_eval(head, eval_costvecs(evalone, Base.tail(costvecs), start_idx, nchunks, taskid, ind + 1))
+end
+
+function check_tall_status!(status, clamped_tot, err_code, err_val, fname)
+    if err_code != 0
+        throw(DomainError(err_val, "Tall least-squares reweighting requires non-negative kernel derivative dc >= 0"))
+    end
+    if clamped_tot > 0
+        status.clamped_count += clamped_tot
+        if !status.warned_clamp
+            status.warned_clamp = true
+            @warn "Slightly negative kernel derivative(s) were clamped to zero in tall least-squares evaluation (total clamped: $(status.clamped_count)). Query clamped_count($fname) to inspect."
+        end
+    end
+    return nothing
+end
+
+# Serial or threaded evaluation of all costs with `evalone(cost, k)`, shared by the residual and residual+Jacobian evaluators
+function tall_eval!(evalone::F, costvecs, layout, status, task_results, N_req::Int, min_costs::Int, fname) where F
+    if N_req <= 1 || layout.K < 2 * min_costs
+        tot_cost, clamped_tot, err_code, err_val = eval_costvecs(evalone, costvecs, layout.costvec_start_idx, 1, 1, 1)
+        check_tall_status!(status, clamped_tot, err_code, err_val, fname)
+        return tot_cost
+    end
+    N_chunks = min(N_req, layout.K ÷ min_costs)
+    for t in 1:N_chunks
+        task_results[t] = TaskResult(0.0, 0, 0, 0.0)
+    end
+    Polyester.@batch for taskid in 1:N_chunks
+        local_cost, local_clamped, local_err, local_val = eval_costvecs(evalone, costvecs, layout.costvec_start_idx, N_chunks, taskid, 1)
+        task_results[taskid] = TaskResult(local_cost, local_clamped, local_err, local_val)
+    end
+    for t in 1:N_chunks
+        if task_results[t].err_code != 0
+            throw(DomainError(task_results[t].err_val, "Tall least-squares reweighting requires non-negative kernel derivative dc >= 0"))
+        end
+    end
+    check_tall_status!(status, sum(t -> task_results[t].clamped, 1:N_chunks), 0, 0.0, fname)
+    return sum(t -> task_results[t].cost, 1:N_chunks)
+end
+
 function (res!::NLSResidual)(r::AbstractVector{Float64}, vars)
     if length(r) != res!.layout.M
         throw(DimensionMismatch("Residual vector length $(length(r)) does not match expected $(res!.layout.M)"))
@@ -774,82 +840,9 @@ function (res!::NLSResidual)(r::AbstractVector{Float64}, vars)
 
     full_vars = sync_tall_vars!(problem, res!.unfixed_inds, vars)
 
-    N_req = Int(dynamic(numthreads))
-    costvecs = values(problem.costs)
-    if N_req <= 1 || layout.K < 2 * min_costs
-        tot_cost = 0.0
-        clamped_tot = 0
-        err_code = 0
-        err_val = 0.0
-        for c_idx in 1:length(costvecs)
-            costvec = costvecs[c_idx]
-            k_start = layout.costvec_start_idx[c_idx]
-            for (i, c) in enumerate(costvec)
-                k = k_start + i - 1
-                c_k, cl, err, val = eval_single_res!(r, full_vars, c, k, layout, robust, status)
-                tot_cost += c_k
-                clamped_tot += cl
-                if err != 0 && err_code == 0
-                    err_code = err
-                    err_val = val
-                end
-            end
-        end
-        if err_code != 0
-            throw(DomainError(err_val, "Tall least-squares reweighting requires non-negative kernel derivative dc >= 0"))
-        end
-        if clamped_tot > 0
-            status.clamped_count += clamped_tot
-            if !status.warned_clamp
-                status.warned_clamp = true
-                @warn "Slightly negative kernel derivative(s) were clamped to zero in tall least-squares evaluation (total clamped: $(status.clamped_count)). Query clamped_count(res!) to inspect."
-            end
-        end
-        return tot_cost
-    else
-        N_chunks = min(N_req, layout.K ÷ min_costs)
-        for t in 1:N_chunks
-            res!.task_results[t] = TaskResult(0.0, 0, 0, 0.0)
-        end
-        Polyester.@batch for taskid in 1:N_chunks
-            local_cost = 0.0
-            local_clamped = 0
-            local_err = 0
-            local_val = 0.0
-            for c_idx in 1:length(costvecs)
-                costvec = costvecs[c_idx]
-                k_start = layout.costvec_start_idx[c_idx]
-                n_costvec = length(costvec)
-                rng = chunk_indices(n_costvec, N_chunks, taskid)
-                for i in rng
-                    k = k_start + i - 1
-                    c_k, cl, err, val = eval_single_res!(r, full_vars, costvec[i], k, layout, robust, status)
-                    local_cost += c_k
-                    local_clamped += cl
-                    if err != 0 && local_err == 0
-                        local_err = err
-                        local_val = val
-                    end
-                end
-            end
-            res!.task_results[taskid] = TaskResult(local_cost, local_clamped, local_err, local_val)
-        end
-        for t in 1:N_chunks
-            if res!.task_results[t].err_code != 0
-                throw(DomainError(res!.task_results[t].err_val, "Tall least-squares reweighting requires non-negative kernel derivative dc >= 0"))
-            end
-        end
-        clamped_tot = sum(t -> res!.task_results[t].clamped, 1:N_chunks)
-        if clamped_tot > 0
-            status.clamped_count += clamped_tot
-            if !status.warned_clamp
-                status.warned_clamp = true
-                @warn "Slightly negative kernel derivative(s) were clamped to zero in tall least-squares evaluation (total clamped: $(status.clamped_count)). Query clamped_count(res!) to inspect."
-            end
-        end
-        tot_cost = sum(t -> res!.task_results[t].cost, 1:N_chunks)
-        return tot_cost
-    end
+    return tall_eval!(
+        (c, k) -> eval_single_res!(r, full_vars, c, k, layout, robust, status),
+        values(problem.costs), layout, status, res!.task_results, Int(dynamic(numthreads)), min_costs, "res!")
 end
 
 function (resjac!::NLSResJac)(r::AbstractVector{Float64}, J, vars; prezeroed::Bool=false)
@@ -867,82 +860,9 @@ function (resjac!::NLSResJac)(r::AbstractVector{Float64}, J, vars; prezeroed::Bo
 
     full_vars = sync_tall_vars!(problem, resjac!.unfixed_inds, vars)
 
-    N_req = Int(dynamic(numthreads))
-    costvecs = values(problem.costs)
-    if N_req <= 1 || layout.K < 2 * min_costs
-        tot_cost = 0.0
-        clamped_tot = 0
-        err_code = 0
-        err_val = 0.0
-        for c_idx in 1:length(costvecs)
-            costvec = costvecs[c_idx]
-            k_start = layout.costvec_start_idx[c_idx]
-            for (i, c) in enumerate(costvec)
-                k = k_start + i - 1
-                c_k, cl, err, val = eval_single_resjac!(r, J, full_vars, c, k, layout, robust, status)
-                tot_cost += c_k
-                clamped_tot += cl
-                if err != 0 && err_code == 0
-                    err_code = err
-                    err_val = val
-                end
-            end
-        end
-        if err_code != 0
-            throw(DomainError(err_val, "Tall least-squares reweighting requires non-negative kernel derivative dc >= 0"))
-        end
-        if clamped_tot > 0
-            status.clamped_count += clamped_tot
-            if !status.warned_clamp
-                status.warned_clamp = true
-                @warn "Slightly negative kernel derivative(s) were clamped to zero in tall least-squares evaluation (total clamped: $(status.clamped_count)). Query clamped_count(resjac!) to inspect."
-            end
-        end
-        return tot_cost
-    else
-        N_chunks = min(N_req, layout.K ÷ min_costs)
-        for t in 1:N_chunks
-            resjac!.task_results[t] = TaskResult(0.0, 0, 0, 0.0)
-        end
-        Polyester.@batch for taskid in 1:N_chunks
-            local_cost = 0.0
-            local_clamped = 0
-            local_err = 0
-            local_val = 0.0
-            for c_idx in 1:length(costvecs)
-                costvec = costvecs[c_idx]
-                k_start = layout.costvec_start_idx[c_idx]
-                n_costvec = length(costvec)
-                rng = chunk_indices(n_costvec, N_chunks, taskid)
-                for i in rng
-                    k = k_start + i - 1
-                    c_k, cl, err, val = eval_single_resjac!(r, J, full_vars, costvec[i], k, layout, robust, status)
-                    local_cost += c_k
-                    local_clamped += cl
-                    if err != 0 && local_err == 0
-                        local_err = err
-                        local_val = val
-                    end
-                end
-            end
-            resjac!.task_results[taskid] = TaskResult(local_cost, local_clamped, local_err, local_val)
-        end
-        for t in 1:N_chunks
-            if resjac!.task_results[t].err_code != 0
-                throw(DomainError(resjac!.task_results[t].err_val, "Tall least-squares reweighting requires non-negative kernel derivative dc >= 0"))
-            end
-        end
-        clamped_tot = sum(t -> resjac!.task_results[t].clamped, 1:N_chunks)
-        if clamped_tot > 0
-            status.clamped_count += clamped_tot
-            if !status.warned_clamp
-                status.warned_clamp = true
-                @warn "Slightly negative kernel derivative(s) were clamped to zero in tall least-squares evaluation (total clamped: $(status.clamped_count)). Query clamped_count(resjac!) to inspect."
-            end
-        end
-        tot_cost = sum(t -> resjac!.task_results[t].cost, 1:N_chunks)
-        return tot_cost
-    end
+    return tall_eval!(
+        (c, k) -> eval_single_resjac!(r, J, full_vars, c, k, layout, robust, status),
+        values(problem.costs), layout, status, resjac!.task_results, Int(dynamic(numthreads)), min_costs, "resjac!")
 end
 
 """
