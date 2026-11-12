@@ -119,17 +119,16 @@ end
     return c
 end
 
-struct MultiVarSchurFDF{LS, P, U}
+struct MultiVarSchurFDF{LS, P, U, PL}
     linsystem::LS
     problem::P
     unfixed_inds::U
+    plan::PL # SchurThreadPlan when linearizing on several threads, otherwise nothing
 end
 @inline function (f::MultiVarSchurFDF)(g, H_schur::SchurBlockMatrix, vars)
     full_vars = sync_unfixed_vars!(f.problem, f.unfixed_inds, vars)
     if f.linsystem isa LinearSystemShared
-        ls1 = MultiVariateLSSchur_ls(H_schur, g)
-        target = replace_first_ls(f.linsystem, ls1)
-        c = costgradhess!(target, full_vars, f.problem.costs)
+        c = schur_threaded!(f.linsystem, f.plan, H_schur, g, full_vars, f.problem.costs)
     else
         target_ls = LinearSystem(f.linsystem.x, MultiVariateLSSchur_ls(H_schur, g))
         zero!(target_ls)
@@ -262,10 +261,11 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
             ls_x = MultiVariateLSSchur_x(x_vec, blockindices, boffsets, structure, partition.unfixed_inds)
             ls_val = MultiVariateLSSchur_ls(H, b_vec)
             lsschur = LinearSystem(ls_x, ls_val)
-            ls_shared = sharedlinearsystem(lsschur, problem, numthreads)
+            ls_shared = sharedschurlinearsystem(lsschur, problem, numthreads)
+            plan = ls_shared isa LinearSystemShared ? build_schur_thread_plan!(problem, blockindices, partition.ncblocks, partition.npblocks, dynamic(numthreads)) : nothing
 
             f = MultiVarCostFunc(problem, partition.unfixed_inds, numthreads)
-            fdf! = MultiVarSchurFDF(ls_shared, problem, partition.unfixed_inds)
+            fdf! = MultiVarSchurFDF(ls_shared, problem, partition.unfixed_inds, plan)
             x0 = problem.variables[partition.unfixed_inds]
             return (f, fdf!, x0, H)
         end

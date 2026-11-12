@@ -1,5 +1,6 @@
 using NLLSModel, Test, Static, StaticArrays, SparseArrays, Random, LinearAlgebra
 using SecondOrderOptimization
+import BlockLinearSystems
 import OptimizationVariableInterface
 
 # Eliminable landmark (for the Schur solvers); needs create_ba_problem-style helpers from optimizeba.jl
@@ -65,4 +66,25 @@ end
     _, c_dense, _ = solve(p1; linsolver=:dense_schur)
     _, c_sparse, _ = solve(p2; linsolver=:sparse_schur)
     @test c_dense ≈ c_sparse atol=1e-8
+
+    # Threaded Schur linearization (disjoint landmark ownership, shared C and E) matches the serial result
+    @testset "threaded Schur, $linsolver" for linsolver in (:dense_schur, :sparse_schur)
+        Random.seed!(5)
+        p_serial = optlandmark_problem(30, 120)
+        p_threads = deepcopy(p_serial)
+        @test NLLSModel.countcosts(NLLSModel.costwork, p_serial.costs) >= NLLSModel.MIN_WORK_FOR_THREADED_LINEARIZATION
+        f1, fdf1!, x1, H1 = optimvars(p_serial, nothing, static(1); linsolver=linsolver)
+        f4, fdf4!, x4, H4 = optimvars(p_threads, nothing, static(4); linsolver=linsolver)
+        @test fdf4!.linsystem isa NLLSModel.LinearSystemShared
+        @test fdf4!.plan isa NLLSModel.SchurThreadPlan
+        n = H1.structure.nc + sum(H1.structure.p_dims)
+        g1 = zeros(n); g4 = zeros(n)
+        for _ in 1:2 # Evaluate twice: buffers must be re-zeroed
+            @test fdf1!(g1, H1, x1) ≈ fdf4!(g4, H4, x4)
+            @test g1 ≈ g4
+            dx = randn(n)
+            @test BlockLinearSystems.fast_bAb(H1, dx) ≈ BlockLinearSystems.fast_bAb(H4, dx)
+        end
+        @test f1(x1) ≈ f4(x4)
+    end
 end
