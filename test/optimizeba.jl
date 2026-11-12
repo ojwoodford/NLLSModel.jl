@@ -58,12 +58,7 @@ end
     Random.seed!(1)
     problem = create_ba_problem(3, 5, 1.0)
 
-    # Test reordering the costs
     problem = perturb_ba_problem(problem, 0.003, 0.0)
-    costbefore = cost(problem)
-    landmarks = isa.(problem.variables, SVector{3, Float64})
-    NLLSModel.reordercostsforschur!(problem, landmarks)
-    @test cost(problem) ≈ costbefore
 
     # Zero-allocation cost evaluation
     costbefore, allocd = compute_cost(problem)

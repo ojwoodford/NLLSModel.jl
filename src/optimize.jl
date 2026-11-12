@@ -2,8 +2,14 @@ using Static, StaticArrays, SparseArrays, LinearAlgebra
 
 # Conversions for unfixed
 convertunfixed(::Nothing, problem) = trues(length(problem.variables))
-convertunfixed(unfixed::DataType, problem) = isa.(problem.variables, unfixed)
+convertunfixed(unfixed::Type, problem) = BitVector(isa(v, unfixed) for v in problem.variables)
 convertunfixed(unfixed::Integer, problem) = unfixed
+convertunfixed(unfixed::AbstractVector{Bool}, problem) = BitVector(unfixed)
+function convertunfixed(unfixed::AbstractVector{<:Integer}, problem)
+    mask = falses(length(problem.variables))
+    mask[unfixed] .= true
+    return mask
+end
 convertunfixed(unfixed, problem) = unfixed
 
 # Single-variable objective and gradient/Hessian functors
@@ -191,7 +197,7 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
             end
 
             total_c_size = sum(Int(d)^2 for d in structure.p_dims; init=0)
-            total_e_size = isempty(structure.cpoffsets) ? 0 : (structure.cpoffsets[end] + Int(structure.c_dims[structure.cpblock[end]]) * Int(structure.p_dims[end]) - 1)
+            total_e_size = sum(Int(structure.p_dims[l]) * Int(structure.c_dims[structure.cpblock[e]]) for l in eachindex(structure.p_dims) for e in structure.cpptr[l]:(structure.cpptr[l+1]-1); init=0)
             C_data = zeros(Float64, total_c_size)
             E_data = zeros(Float64, total_e_size)
 

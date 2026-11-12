@@ -79,6 +79,10 @@ function selectcosts!(outcosts::CostStruct, incosts::Vector, unfixed::BitVector)
     selectcosts!(outcosts, incosts, [i for (i, r) in enumerate(incosts) if any(j -> unfixed[j], varindices(r))])
 end
 
+function selectcosts!(outcosts::CostStruct, incosts::Vector{T}, unfixed::Union{Vector{Bool}, SubArray{Bool}}) where T
+    selectcosts!(outcosts, incosts, BitVector(unfixed))
+end
+
 function selectcosts!(outcosts::CostStruct, incosts::Vector{T}, vec::Vector) where T
     outvec = empty!(get(outcosts, T))
     if !isempty(vec)
@@ -125,6 +129,7 @@ function addcost!(problem::Model, cost::Cost) where Cost <: AbstractCost
     N = ndeps(cost)
     @assert isa(N, StaticInt) && N > 0 && N <= MAX_ARGS "Problem with ndeps()"
     @assert length(varindices(cost)) == N "Problem with varindices()"
+    @assert allunique(varindices(cost)) "A cost cannot depend on the same variable more than once"
     vars = getvars(cost, problem.variables)
     @assert isa(vars, Tuple) && isconcretetype(typeof(vars)) && length(vars) == N "getvars(::$(typeof(cost)), vars) should return a concretely typed tuple of length $(dynamic(N)), but returned $(typeof(vars))."
     @assert (!(Cost <: AbstractAdaptiveResidual) || isa(vars[1], AbstractAdaptiveRobustifier)) "Adaptive residual without adaptive robustifier"
@@ -193,27 +198,6 @@ function getvarcostmap(problem::Model)
         updatevarcostmap!(problem)
     end
     return problem.varcostmap
-end
-
-function reordercostsforschur!(problem::Model, schurvars)
-    schurruns = Dict{DataType, Vector{Int}}()
-    costvarmap = sparse(getvarcostmap(problem)')[:,schurvars]
-    schurvarpercost = sum(costvarmap; dims=2)
-    @assert all(x->(x<=1), schurvarpercost) "Each cost block can only depend on one schur variable at most"
-    schurvarpercost[schurvarpercost .> 0] = costvarmap.rowval
-    startind = 0
-    for costs in values(problem.costs)
-        if !isempty(costs)
-            schurvarpercostsubset = view(schurvarpercost, startind+1:startind+length(costs))
-            startind += length(costs)
-            sortedorder = sortperm(schurvarpercostsubset)
-            permute!(schurvarpercostsubset, sortedorder)
-            schurruns[typeof(costs[1])] = runlengthencodesortedints(schurvarpercostsubset)
-            permute!(costs, sortedorder)
-        end
-    end
-    problem.varcostmapvalid = false
-    return schurruns
 end
 
 costnum(vec::Vector)  = length(vec)
