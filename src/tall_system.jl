@@ -1053,31 +1053,16 @@ function flat_optimvars_nls(
     r_scratch = Vector{Float64}(undef, M)
 
     @inline function flat_f(x::AbstractVector{Float64})
-        if eltype(x) !== Float64
-            throw(ArgumentError("x must have eltype Float64, got $(eltype(x))"))
-        end
         unpacked = unpack_vars!(layout, x)
         return f_orig(unpacked)
     end
 
     @inline function flat_res!(r::AbstractVector{Float64}, x::AbstractVector{Float64})
-        if eltype(x) !== Float64
-            throw(ArgumentError("x must have eltype Float64, got $(eltype(x))"))
-        end
-        if eltype(r) !== Float64
-            throw(ArgumentError("r must have eltype Float64, got $(eltype(r))"))
-        end
         unpacked = unpack_vars!(layout, x)
         return res!_orig(r, unpacked)
     end
 
     @inline function flat_resjac!(r::AbstractVector{Float64}, J, x::AbstractVector{Float64}; prezeroed::Bool=false)
-        if eltype(x) !== Float64
-            throw(ArgumentError("x must have eltype Float64, got $(eltype(x))"))
-        end
-        if eltype(r) !== Float64
-            throw(ArgumentError("r must have eltype Float64, got $(eltype(r))"))
-        end
         if eltype(J) !== Float64
             throw(ArgumentError("J must have eltype Float64, got $(eltype(J))"))
         end
@@ -1150,9 +1135,6 @@ function nls_callbacks(
     J0 = copy(flat.J_proto)
 
     function cb_res!(r::AbstractVector{Float64}, x::AbstractVector{Float64})
-        if eltype(x) !== Float64 || eltype(r) !== Float64
-            throw(ArgumentError("x and r must have eltype Float64"))
-        end
         if x != x_cached || !res_valid[]
             copyto!(x_cached, x)
             last_cost[] = flat.res!(r_buf, x)
@@ -1163,8 +1145,8 @@ function nls_callbacks(
     end
 
     function cb_jac!(J, x::AbstractVector{Float64})
-        if eltype(x) !== Float64 || eltype(J) !== Float64
-            throw(ArgumentError("x and J must have eltype Float64"))
+        if eltype(J) !== Float64
+            throw(ArgumentError("J must have eltype Float64"))
         end
         last_cost[] = flat.resjac!(r_buf, J, x)
         copyto!(x_cached, x)
@@ -1173,9 +1155,6 @@ function nls_callbacks(
     end
 
     function cb_f(x::AbstractVector{Float64})
-        if eltype(x) !== Float64
-            throw(ArgumentError("x must have eltype Float64"))
-        end
         if x == x_cached && res_valid[]
             return last_cost[]
         end
