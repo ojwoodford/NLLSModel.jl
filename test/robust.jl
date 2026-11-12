@@ -50,6 +50,6 @@ end
     s1 = 0.6
     s2 = 9.0
     w = 0.7
-    out = -log.((w / s1) * exp.(costs / (-2 * s1^2)) .+ ((1 - w) / s2) * exp.(costs / (-2 * s2^2)))
+    out = -2 .* log.((w / s1) * exp.(costs / (-2 * s1^2)) .+ ((1 - w) / s2) * exp.(costs / (-2 * s2^2)))
     testrobustifier(ContaminatedGaussian(s1, s2, w), costs, out)
 end
