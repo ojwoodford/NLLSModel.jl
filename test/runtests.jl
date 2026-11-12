@@ -11,6 +11,7 @@ using OptimizationVariableInterface: nvars, update, update!
     include("problemapi.jl")
     include("runtimeblocks.jl")
     include("optimizeba.jl")
+    include("optimization.jl")
     include("NLPModel.jl")
     include("nls_interface.jl")
 end
