@@ -190,6 +190,12 @@ function build_tall_layout(problem::Model, unfixed, matrix_type::Symbol, max_den
     total_deps = dep_start_idx[K + 1] - 1
     sparse_p = zeros(Int, total_deps)
     current_col_offset = zeros(Int, nblocks)
+    # Row indices of each block's columns, stored contiguously: block b occupies block_rows[block_row_start[b] + 1 : block_row_start[b] + col_heights[b]]
+    block_row_start = zeros(Int, nblocks + 1)
+    for b in 1:nblocks
+        block_row_start[b + 1] = block_row_start[b] + col_heights[b]
+    end
+    block_rows = Vector{Int}(undef, block_row_start[nblocks + 1])
     k = 1
     for costvec in values(problem.costs)
         for c in costvec
@@ -202,6 +208,11 @@ function build_tall_layout(problem::Model, unfixed, matrix_type::Symbol, max_den
                 b = blockindices[v]
                 if b > 0
                     sparse_p[base_dep + d - 1] = current_col_offset[b]
+                    dest = block_row_start[b] + current_col_offset[b]
+                    r_start = resoffsets[k]
+                    for r in 0:m-1
+                        block_rows[dest + r + 1] = r_start + r
+                    end
                     current_col_offset[b] += m
                 end
             end
@@ -224,39 +235,10 @@ function build_tall_layout(problem::Model, unfixed, matrix_type::Symbol, max_den
 
     rowval = Vector{Int}(undef, nnz_total)
     for b in 1:nblocks
-        nb = varblocksizes[b]
         hb = col_heights[b]
         if hb > 0
-            b_rows = Vector{Int}(undef, hb)
-            idx = 1
-            k = 1
-            for costvec in values(problem.costs)
-                for c in costvec
-                    vinds = varindices(c)
-                    nd = Int(dynamic(ndeps(c)))
-                    uses_b = false
-                    for d in 1:nd
-                        v = vinds isa Integer ? vinds : vinds[d]
-                        if blockindices[v] == b
-                            uses_b = true
-                            break
-                        end
-                    end
-                    if uses_b
-                        r_start = resoffsets[k]
-                        m = resblocksizes[k]
-                        for r in 0:m-1
-                            b_rows[idx] = r_start + r
-                            idx += 1
-                        end
-                    end
-                    k += 1
-                end
-            end
-            for c in 0:nb-1
-                col = varoffsets[b] + c
-                dest_start = colptr[col]
-                copyto!(rowval, dest_start, b_rows, 1, hb)
+            for c in 0:varblocksizes[b]-1
+                copyto!(rowval, colptr[varoffsets[b] + c], block_rows, block_row_start[b] + 1, hb)
             end
         end
     end
