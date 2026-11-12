@@ -327,6 +327,62 @@ end
 end
 
 # Single residual evaluation returning (cost, clamped, err_code, err_val)
+# How a non-linear robust kernel reweights a residual (shared by the residual and the residual+Jacobian evaluators)
+const WEIGHT_ZERO = 0       # zero the residual (and Jacobian) rows
+const WEIGHT_SCALE = 1      # scale rows by `scale` (sqrt of the kernel derivative)
+const WEIGHT_CORRECTOR = 2  # second-order corrector: residual scale `scale / sqrt(1 + eps)`, plus a Jacobian projection
+const WEIGHT_NAN = 3        # non-finite values: fill with NaN
+
+# Returns (mode, cost, scale, eps, clamped count, error code, error value)
+function robust_weights(kernel, s, robust::Symbol)
+    if robust === :irls
+        c_cost, dc, _ = robustifydcost(kernel, s)
+        c_val = Float64(c_cost)
+        dc_val = Float64(dc)
+        if is_nonfinite(s) || is_nonfinite(c_val) || is_nonfinite(dc_val)
+            return WEIGHT_NAN, (is_finite(c_val) ? NaN : 0.5 * c_val), 0.0, 0.0, 0, 0, 0.0
+        end
+        if dc_val > 0.0
+            return WEIGHT_SCALE, 0.5 * c_val, sqrt(dc_val), 0.0, 0, 0, 0.0
+        elseif dc_val == 0.0
+            return WEIGHT_ZERO, 0.5 * c_val, 0.0, 0.0, 0, 0, 0.0
+        end
+        dc_tol = kernel_dc_tol(kernel)
+        if dc_val < -dc_tol
+            return WEIGHT_ZERO, 0.5 * c_val, 0.0, 0.0, 0, 1, dc_val
+        end
+        return WEIGHT_ZERO, 0.5 * c_val, 0.0, 0.0, 1, 0, 0.0
+    elseif robust === :corrector
+        c_cost, dc, d2c = robustifydcost(kernel, s)
+        c_val = Float64(c_cost)
+        dc_val = Float64(dc)
+        d2c_val = Float64(d2c)
+        if is_nonfinite(s) || is_nonfinite(c_val) || is_nonfinite(dc_val) || is_nonfinite(d2c_val)
+            return WEIGHT_NAN, (is_finite(c_val) ? NaN : 0.5 * c_val), 0.0, 0.0, 0, 0, 0.0
+        end
+        if dc_val <= 0.0
+            if dc_val == 0.0 && (s == 0.0 || d2c_val <= 0.0)
+                return WEIGHT_ZERO, 0.5 * c_val, 0.0, 0.0, 0, 0, 0.0
+            end
+            dc_tol = kernel_dc_tol(kernel)
+            if dc_val < -dc_tol || (s > 0.0 && d2c_val * s > dc_tol)
+                return WEIGHT_ZERO, 0.5 * c_val, 0.0, 0.0, 0, 1, dc_val
+            end
+            return WEIGHT_ZERO, 0.5 * c_val, 0.0, 0.0, dc_val < 0.0 ? 1 : 0, 0, 0.0
+        end
+        if s == 0.0 || d2c_val == 0.0
+            return WEIGHT_SCALE, 0.5 * c_val, sqrt(dc_val), 0.0, 0, 0, 0.0
+        end
+        raw_eps = (2.0 * d2c_val * s) / dc_val
+        eps_i = raw_eps < -1.0/3.0 ? -1.0/3.0 : raw_eps
+        if is_nonfinite(eps_i)
+            return WEIGHT_NAN, NaN, 0.0, 0.0, 0, 0, 0.0
+        end
+        return WEIGHT_CORRECTOR, 0.5 * c_val, sqrt(dc_val), eps_i, 0, 0, 0.0
+    end
+    throw(ArgumentError("Unknown robust mode: $robust"))
+end
+
 function eval_single_res!(r, vars, cost, k::Int, layout::NLSTallLayout, robust::Symbol, status::NLSRobustStatus)
     vars_k = getvars(cost, vars)
     r_start = layout.resoffsets[k]
@@ -364,69 +420,18 @@ function eval_single_res!(r, vars, cost, k::Int, layout::NLSTallLayout, robust::
         end
     end
 
-    # Non-linear robust path (Stage B)
-    if robust === :irls
-        c_cost, dc, _ = robustifydcost(kernel, s)
-        c_val = Float64(c_cost)
-        dc_val = Float64(dc)
-        if is_nonfinite(s) || is_nonfinite(c_val) || is_nonfinite(dc_val)
-            r[r_range] .= NaN
-            return (is_finite(c_val) ? NaN : 0.5 * c_val), 0, 0, 0.0
-        end
-        if dc_val > 0.0
-            r[r_range] .= r_val .* sqrt(dc_val)
-            return 0.5 * c_val, 0, 0, 0.0
-        elseif dc_val == 0.0
-            r[r_range] .= 0.0
-            return 0.5 * c_val, 0, 0, 0.0
-        else # dc_val < 0.0
-            dc_tol = kernel_dc_tol(kernel)
-            r[r_range] .= 0.0
-            if dc_val < -dc_tol
-                return 0.5 * c_val, 0, 1, dc_val
-            else
-                return 0.5 * c_val, 1, 0, 0.0
-            end
-        end
-    elseif robust === :corrector
-        c_cost, dc, d2c = robustifydcost(kernel, s)
-        c_val = Float64(c_cost)
-        dc_val = Float64(dc)
-        d2c_val = Float64(d2c)
-        if is_nonfinite(s) || is_nonfinite(c_val) || is_nonfinite(dc_val) || is_nonfinite(d2c_val)
-            r[r_range] .= NaN
-            return (is_finite(c_val) ? NaN : 0.5 * c_val), 0, 0, 0.0
-        end
-        if dc_val <= 0.0
-            r[r_range] .= 0.0
-            if dc_val == 0.0 && (s == 0.0 || d2c_val <= 0.0)
-                return 0.5 * c_val, 0, 0, 0.0
-            else
-                dc_tol = kernel_dc_tol(kernel)
-                if dc_val < -dc_tol || (s > 0.0 && d2c_val * s > dc_tol)
-                    return 0.5 * c_val, 0, 1, dc_val
-                else
-                    clamped = dc_val < 0.0 ? 1 : 0
-                    return 0.5 * c_val, clamped, 0, 0.0
-                end
-            end
-        end
-        if s == 0.0 || d2c_val == 0.0
-            r[r_range] .= r_val .* sqrt(dc_val)
-            return 0.5 * c_val, 0, 0, 0.0
-        end
-        raw_eps = (2.0 * d2c_val * s) / dc_val
-        eps_i = raw_eps < -1.0/3.0 ? -1.0/3.0 : raw_eps
-        if is_nonfinite(eps_i)
-            r[r_range] .= NaN
-            return NaN, 0, 0, 0.0
-        end
-        tau = sqrt(1.0 + eps_i)
-        r[r_range] .= r_val .* (sqrt(dc_val) / tau)
-        return 0.5 * c_val, 0, 0, 0.0
-    else
-        throw(ArgumentError("Unknown robust mode: $robust"))
+    # Non-linear robust path
+    mode, c_ret, scale, eps_i, clamped, err, val = robust_weights(kernel, s, robust)
+    if mode == WEIGHT_ZERO
+        r[r_range] .= 0.0
+    elseif mode == WEIGHT_NAN
+        r[r_range] .= NaN
+    elseif mode == WEIGHT_SCALE
+        r[r_range] .= r_val .* scale
+    else # WEIGHT_CORRECTOR
+        r[r_range] .= r_val .* (scale / sqrt(1.0 + eps_i))
     end
+    return c_ret, clamped, err, val
 end
 
 # Write zero into Jacobian columns/nzval for cost k
@@ -592,79 +597,22 @@ function eval_single_resjac!(r, J, vars, cost, k::Int, layout::NLSTallLayout, ro
         end
     end
 
-    # Non-linear robust path (Stage B)
-    if robust === :irls
-        c_cost, dc, _ = robustifydcost(kernel, s)
-        c_val = Float64(c_cost)
-        dc_val = Float64(dc)
-        if is_nonfinite(s) || is_nonfinite(c_val) || is_nonfinite(dc_val)
-            r[r_range] .= NaN
-            nan_cost_jacobian!(J, k, layout, cost)
-            return (is_finite(c_val) ? NaN : 0.5 * c_val), 0, 0, 0.0
-        end
-        if dc_val > 0.0
-            sqrt_dc = sqrt(dc_val)
-            r[r_range] .= res_k .* sqrt_dc
-            jac_scaled = jac_k .* sqrt_dc
-            scatter_cost_jacobian!(J, jac_scaled, k, layout, cost)
-            return 0.5 * c_val, 0, 0, 0.0
-        elseif dc_val == 0.0
-            r[r_range] .= 0.0
-            zero_cost_jacobian!(J, k, layout, cost)
-            return 0.5 * c_val, 0, 0, 0.0
-        else # dc_val < 0.0
-            dc_tol = kernel_dc_tol(kernel)
-            zero_cost_jacobian!(J, k, layout, cost)
-            r[r_range] .= 0.0
-            if dc_val < -dc_tol
-                return 0.5 * c_val, 0, 1, dc_val
-            else
-                return 0.5 * c_val, 1, 0, 0.0
-            end
-        end
-    elseif robust === :corrector
-        c_cost, dc, d2c = robustifydcost(kernel, s)
-        c_val = Float64(c_cost)
-        dc_val = Float64(dc)
-        d2c_val = Float64(d2c)
-        if is_nonfinite(s) || is_nonfinite(c_val) || is_nonfinite(dc_val) || is_nonfinite(d2c_val)
-            r[r_range] .= NaN
-            nan_cost_jacobian!(J, k, layout, cost)
-            return (is_finite(c_val) ? NaN : 0.5 * c_val), 0, 0, 0.0
-        end
-        if dc_val <= 0.0
-            zero_cost_jacobian!(J, k, layout, cost)
-            r[r_range] .= 0.0
-            if dc_val == 0.0 && (s == 0.0 || d2c_val <= 0.0)
-                return 0.5 * c_val, 0, 0, 0.0
-            else
-                dc_tol = kernel_dc_tol(kernel)
-                if dc_val < -dc_tol || (s > 0.0 && d2c_val * s > dc_tol)
-                    return 0.5 * c_val, 0, 1, dc_val
-                else
-                    clamped = dc_val < 0.0 ? 1 : 0
-                    return 0.5 * c_val, clamped, 0, 0.0
-                end
-            end
-        end
-        if s == 0.0 || d2c_val == 0.0
-            sqrt_dc = sqrt(dc_val)
-            r[r_range] .= res_k .* sqrt_dc
-            jac_scaled = jac_k .* sqrt_dc
-            scatter_cost_jacobian!(J, jac_scaled, k, layout, cost)
-            return 0.5 * c_val, 0, 0, 0.0
-        end
-        raw_eps = (2.0 * d2c_val * s) / dc_val
-        eps_i = raw_eps < -1.0/3.0 ? -1.0/3.0 : raw_eps
-        if is_nonfinite(eps_i)
-            r[r_range] .= NaN
-            nan_cost_jacobian!(J, k, layout, cost)
-            return NaN, 0, 0, 0.0
-        end
+    # Non-linear robust path
+    mode, c_ret, scale, eps_i, clamped, err, val = robust_weights(kernel, s, robust)
+    if mode == WEIGHT_ZERO
+        r[r_range] .= 0.0
+        zero_cost_jacobian!(J, k, layout, cost)
+    elseif mode == WEIGHT_NAN
+        r[r_range] .= NaN
+        nan_cost_jacobian!(J, k, layout, cost)
+    elseif mode == WEIGHT_SCALE
+        r[r_range] .= res_k .* scale
+        scatter_cost_jacobian!(J, jac_k .* scale, k, layout, cost)
+    else # WEIGHT_CORRECTOR
         tau = sqrt(1.0 + eps_i)
         alpha = -eps_i / (1.0 + tau)
         inv_norm = inv(sqrt(s))
-        sqrt_dc = sqrt(dc_val)
+        sqrt_dc = scale
         r[r_range] .= res_k .* (sqrt_dc / tau)
 
         # Scale jacobian: jac_scaled = sqrt_dc * (jac_k - alpha * n * (n' * jac_k))
@@ -688,10 +636,8 @@ function eval_single_resjac!(r, J, vars, cost, k::Int, layout::NLSTallLayout, ro
             end
         end
         scatter_cost_jacobian!(J, jac_scaled, k, layout, cost)
-        return 0.5 * c_val, 0, 0, 0.0
-    else
-        throw(ArgumentError("Unknown robust mode: $robust"))
     end
+    return c_ret, clamped, err, val
 end
 
 # Check caller-supplied J matrix
