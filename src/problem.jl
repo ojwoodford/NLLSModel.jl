@@ -213,12 +213,15 @@ Validate bipartite structure, check static eliminable variable dimensions (Dp in
 and perform two-pass variable ordering for Schur complement reduction.
 Returns named tuple `(unfixed_inds, extra_blocks, c_dims, p_dims, observations, ncblocks, npblocks)`,
 where `extra_blocks` lists the pairs of retained blocks that share a cost (in the sorted retained ordering)
-or `nothing` if the problem does not have both retained and eliminable variables.
+or `nothing` if the problem does not have both retained and eliminable variables, or (unless a Schur solver
+was explicitly requested via `linsolver_req`) if its structure does not suit Schur reduction.
 """
 function partition_schur_problem(problem::Model, unfixed::AbstractVector, linsolver_req=nothing)
     unfixed_raw = findall(unfixed)
     nblocks = length(unfixed_raw)
     nblocks > 1 || return nothing
+    # Only throw if a Schur solver was explicitly requested; otherwise the caller falls back to a non-Schur solver
+    explicit_schur = linsolver_req in (:schur, :dense_schur, :sparse_schur)
 
     # 1. Identify eliminable variables using iseliminable trait
     is_elim = [dynamic(OptimizationVariableInterface.iseliminable(typeof(problem.variables[i]))) for i in unfixed_raw]
@@ -242,6 +245,7 @@ function partition_schur_problem(problem::Model, unfixed::AbstractVector, linsol
         if e
             d = block_sizes[idx]
             if d < 1 || d > 3
+                explicit_schur || return nothing
                 throw(ArgumentError("Eliminable variables must have static dimension in {1, 2, 3}, got $d for variable $(unfixed_raw[idx])."))
             end
         end
@@ -265,6 +269,7 @@ function partition_schur_problem(problem::Model, unfixed::AbstractVector, linsol
             vinds = varindices(cost)
             elims_in_cost = [v for v in vinds if v in elim_set]
             if length(elims_in_cost) > 1
+                explicit_schur || return nothing
                 throw(ArgumentError("Bipartite structure violation: cost block of type $(typeof(cost)) connects multiple eliminable variables $(elims_in_cost). Eliminable variables cannot couple to each other."))
             elseif length(elims_in_cost) == 1
                 lm = elims_in_cost[1]

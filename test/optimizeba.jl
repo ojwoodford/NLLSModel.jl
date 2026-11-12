@@ -165,6 +165,12 @@ end
     addcost!(prob_bad, SimpleError2{Landmark3D{Float64}, Landmark3D{Float64}}(SVector(0.0, 0.0), 2, 3))
     @test_throws ArgumentError partition_schur_problem(prob_bad, trues(length(prob_bad.variables)), :schur)
 
+    # A2) With automatic solver selection the same problem falls back to a non-Schur solver (B6)
+    @test isnothing(partition_schur_problem(prob_bad, trues(length(prob_bad.variables)), nothing))
+    @test isnothing(partition_schur_problem(prob_bad, trues(length(prob_bad.variables)), :auto))
+    _, _, _, H_bad = optimvars(prob_bad, nothing, static(1))
+    @test !(H_bad isa BlockLinearSystems.SchurBlockMatrix)
+
     # B) Calling with no eliminable variables when linsolver=:schur throws ArgumentError
     prob_no_elim = create_ba_problem(2, 2, 1.0)
     @test_throws ArgumentError partition_schur_problem(prob_no_elim, trues(length(prob_no_elim.variables)), :schur)
