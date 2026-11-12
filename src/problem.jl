@@ -173,6 +173,14 @@ end
 costnum(vec::Vector)  = length(vec)
 costdeps(vec::Vector) = length(vec) != 0 ? length(vec) * ndeps(vec[1]) : 0
 resnum(vec::Vector)   = length(vec) != 0 ? (dynamic(is_static(nres(vec[1]))) ? length(vec) * nres(vec[1]) : sum(nres, vec; init=0)) : 0
+# Rough estimate of the work of linearizing a cost vector, in units of one scalar residual of one variable:
+# residual length times the square of the number of variables (the Hessian block is quadratic in the variables).
+# It counts cost work rather than cost numbers, so a 12x40 cost weighs much more than a 2x9 one.
+function costwork(vec::Vector{C}) where C
+    isempty(vec) && return 0
+    nresiduals = C <: AbstractResidual ? Int(dynamic(resnum(vec))) : length(vec) # A general cost counts as one residual
+    return nresiduals * Int(dynamic(ndeps(vec[1])))^2
+end
 countcosts(fun, costs::CostStruct) = sum(fun, values(costs); init=0)
 nresiduals(problem::Model) = Int(countcosts(resnum, problem.costs))
 

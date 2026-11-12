@@ -1,8 +1,10 @@
 using Polyester
 
-# Problems with fewer costs than these are evaluated on a single thread. They count costs, not work (a rough proxy).
-const MIN_COSTS_FOR_THREADED_COST = 100_000 # Evaluating the cost alone is cheap, so needs many costs to pay for threading
-const MIN_COSTS_FOR_THREADED_LINEARIZATION = 10_000 # Each thread needs its own copy of the linear system
+# Problems with less work than these are evaluated on a single thread. Work is estimated by `costwork` (a proxy: residual
+# length times variables squared, so one scalar residual of one variable is one unit). The thresholds below are the
+# former cost-count thresholds, so simple costs behave as before and heavier costs start threading sooner.
+const MIN_WORK_FOR_THREADED_COST = 100_000 # Evaluating the cost alone is cheap, so needs a lot of work to pay for threading
+const MIN_WORK_FOR_THREADED_LINEARIZATION = 10_000 # Each thread also needs its own copy of the linear system
 
 @inline function chunk_indices(len::Integer, nchunks::Integer, chunkid::Integer)
     chunkid > nchunks && return 1:0
@@ -17,7 +19,7 @@ end
 end
 
 function cost_multithreaded(vars, costs::CostStruct, ::StaticInt{N})::Float64 where {N}
-    if countcosts(costnum, costs) < MIN_COSTS_FOR_THREADED_COST
+    if countcosts(costwork, costs) < MIN_WORK_FOR_THREADED_COST
         return sum(bindleadingargs(computecost, vars), costs; init=0.0)
     end
     tot = 0.0

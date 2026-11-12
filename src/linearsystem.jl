@@ -212,7 +212,7 @@ function sharedlinearsystem(ls::LinearSystem{F, V}, ::StaticInt{N}) where {F, V,
 end
 sharedlinearsystem(ls, n::Integer) = sharedlinearsystem(ls, static(n))
 sharedlinearsystem(ls, problem, ::StaticInt{1}) = ls
-sharedlinearsystem(ls, problem, numthreads::StaticInt) = sharedlinearsystem(ls, countcosts(costnum, problem.costs) >= MIN_COSTS_FOR_THREADED_LINEARIZATION ? numthreads : static(1))
+sharedlinearsystem(ls, problem, numthreads::StaticInt) = sharedlinearsystem(ls, countcosts(costwork, problem.costs) >= MIN_WORK_FOR_THREADED_LINEARIZATION ? numthreads : static(1))
 
 add!(dest::UniVariateLSdynamic_ls, src::UniVariateLSdynamic_ls) = (dest.A .+= src.A; dest.b .+= src.b; nothing)
 add!(dest::UniVariateLSstatic_ls, src::UniVariateLSstatic_ls) = (dest.A .+= src.A; dest.b .+= src.b; nothing)
