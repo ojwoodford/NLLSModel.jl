@@ -31,7 +31,7 @@ SIRBSDispatch = {path = "/Users/olly/.julia/dev/SIRBSDispatch.jl"}
 [compat]
 BlockLinearSystems = "0.2"
 DiffResults = "1.1"
-FastNorm = "0.2"
+FastNorm = "0.3"
 ForwardDiff = "0.10, 1"
 LinearAlgebra = "1.10"
 NLPModels = "0.20, 0.21"
