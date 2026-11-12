@@ -54,3 +54,21 @@ end
     @test nz isa Int && n <= nz <= n * (n + 1) ÷ 2
     @test isnothing(NLLSModel.cholmod_symbolic_nnz(fac, n + 1)) # mismatched size is rejected
 end
+
+module UnrollCheck
+using NLLSModel
+vars = () # A module-level global with the same name as the local in `count_unrolled`
+function count_unrolled(vars)
+    n = 0
+    NLLSModel.@unroll for i in 1:3
+        if i <= length(vars)
+            n += 1
+        end
+    end
+    return n
+end
+end
+@testset "unroll ignores module globals" begin
+    @test UnrollCheck.count_unrolled((1, 2)) == 2
+    @test UnrollCheck.count_unrolled((1, 2, 3)) == 3
+end
