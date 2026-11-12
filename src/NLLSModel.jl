@@ -11,7 +11,7 @@ import BlockLinearSystems:
     block, zero!, copy_structure,
     symmetrifyfull, symmetrifyfull!, makesparseindices, sparse_with_map, copyto!,
     block_sparse_nnz, computestartindices, find_diag_inds,
-    SchurStructure, SchurBlockMatrix, build_schur_covisibility, sort_schur_blocks, fast_bAb
+    SchurStructure, SchurBlockMatrix, build_schur_pattern, sort_schur_blocks, fast_bAb
 
 import OptimizationVariableInterface:
     nvars, update, update!, syncvars!, iseliminable,

@@ -182,7 +182,7 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
                 false
             else
                 if structure.nc <= 2000
-                    covis = build_schur_covisibility(structure)
+                    covis = build_schur_pattern(structure)
                     chol_fac = SparseArrays.CHOLMOD.analyze(SparseArrays.CHOLMOD.Sparse(Symmetric(covis.S_sparse, :U)))
                     cholmod_symbolic_nnz(chol_fac) >= 0.40 * 0.5 * structure.nc^2
                 else
@@ -199,8 +199,8 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
                 B_dense = zeros(Float64, structure.nc, structure.nc)
                 SchurBlockMatrix(structure, B_dense, C_data, E_data)
             else
-                covis = build_schur_covisibility(structure)
-                B_sys = SparseBlockLinearSystem{Float64}(TransposedPattern(covis.block_covis), structure.c_dims, structure.c_dims)
+                covis = build_schur_pattern(structure)
+                B_sys = SparseBlockLinearSystem{Float64}(TransposedPattern(covis.block_pattern), structure.c_dims, structure.c_dims)
                 SchurBlockMatrix(structure, B_sys, C_data, E_data)
             end
 

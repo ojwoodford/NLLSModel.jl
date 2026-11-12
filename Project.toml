@@ -29,13 +29,13 @@ OptimizationVariableInterface = {path = "/Users/olly/.julia/dev/OptimizationVari
 SIRBSDispatch = {path = "/Users/olly/.julia/dev/SIRBSDispatch.jl"}
 
 [compat]
-BlockLinearSystems = "0.2"
+BlockLinearSystems = "0.1"
 DiffResults = "1.1"
 FastNorm = "0.3"
 ForwardDiff = "0.10, 1"
 LinearAlgebra = "1.10"
-NLPModels = "0.20, 0.21"
-OptimizationVariableInterface = "0.1, 0.2"
+NLPModels = "0.21.6"
+OptimizationVariableInterface = "0.2.1"
 Polyester = "0.7"
 SparseArrays = "1.10"
 Static = "0.8.7, 1"
