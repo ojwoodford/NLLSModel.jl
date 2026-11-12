@@ -35,6 +35,22 @@ struct NLSTallLayout
     all_linear::Bool
 end
 
+# Call `f(cost, k)` for every cost, with `k` its running index across all cost vectors. Recursing over the tuple of cost
+# vectors gives `f` and the inner loop a concrete cost type each, so this stays type stable for any number of cost types.
+@inline eachcost(f::F, costs) where F = _eachcost(f, values(costs), 1)
+@inline _eachcost(f, ::Tuple{}, k) = nothing
+@inline function _eachcost(f::F, vecs::Tuple, k) where F
+    v = first(vecs)
+    _eachcostvec(f, v, k)
+    return _eachcost(f, Base.tail(vecs), k + length(v))
+end
+function _eachcostvec(f::F, v::AbstractVector, k) where F
+    for i in eachindex(v)
+        f(@inbounds(v[i]), k + i - 1)
+    end
+    return nothing
+end
+
 @inline has_unique_varindices(c) = (v = varindices(c); v isa Integer ? true : allunique(v))
 
 @inline function cost_varflags(blockindices, c)
@@ -61,10 +77,10 @@ function build_tall_layout(problem::Model, unfixed, matrix_type::Symbol, max_den
         if !(eltype(costvec) <: AbstractResidual)
             throw(ArgumentError("optimvars_nls only supports AbstractResidual costs; found $(eltype(costvec))"))
         end
-        for c in costvec
-            if !has_unique_varindices(c)
-                throw(ArgumentError("Cost of type $(typeof(c)) has duplicate variable indices in varindices(c); unique variable indices per cost are required"))
-            end
+    end
+    eachcost(problem.costs) do c, k
+        if !has_unique_varindices(c)
+            throw(ArgumentError("Cost of type $(typeof(c)) has duplicate variable indices in varindices(c); unique variable indices per cost are required"))
         end
     end
 
@@ -76,40 +92,43 @@ function build_tall_layout(problem::Model, unfixed, matrix_type::Symbol, max_den
     resoffsets[1] = 1
     dep_start_idx = Vector{Int}(undef, K + 1)
     dep_start_idx[1] = 1
-    costvec_start_idx = Vector{Int}()
-
-    linear_weights = Vector{Float64}(undef, K)
-    all_linear = true
-    warn_zero_weights = Int[]
-
-    k = 1
-    for costvec in values(problem.costs)
-        push!(costvec_start_idx, k)
-        for c in costvec
-            m = Int(dynamic(nres(c)))
-            resblocksizes[k] = m
-            resoffsets[k + 1] = resoffsets[k] + m
-
-            nd = Int(dynamic(ndeps(c)))
-            dep_start_idx[k + 1] = dep_start_idx[k] + nd
-
-            kernel = robustkernel(c)
-            if c isa AbstractAdaptiveResidual
-                all_linear = false
-                linear_weights[k] = 1.0
-            elseif islinearkernel(kernel)
-                w = linearweight(kernel)
-                if w == 0.0
-                    push!(warn_zero_weights, k)
-                end
-                linear_weights[k] = sqrt(w)
-            else
-                all_linear = false
-                linear_weights[k] = 1.0
-            end
-            k += 1
+    costvec_lengths = collect(map(length, values(problem.costs)))
+    costvec_start_idx = Vector{Int}(undef, length(costvec_lengths))
+    let k = 1
+        for (i, n) in enumerate(costvec_lengths)
+            costvec_start_idx[i] = k
+            k += n
         end
     end
+
+    linear_weights = Vector{Float64}(undef, K)
+    warn_zero_weights = Int[]
+
+    all_linear_ref = Ref(true)
+    eachcost(problem.costs) do c, k
+        m = Int(dynamic(nres(c)))
+        resblocksizes[k] = m
+        resoffsets[k + 1] = resoffsets[k] + m
+
+        nd = Int(dynamic(ndeps(c)))
+        dep_start_idx[k + 1] = dep_start_idx[k] + nd
+
+        kernel = robustkernel(c)
+        if c isa AbstractAdaptiveResidual
+            all_linear_ref[] = false
+            linear_weights[k] = 1.0
+        elseif islinearkernel(kernel)
+            w = linearweight(kernel)
+            if w == 0.0
+                push!(warn_zero_weights, k)
+            end
+            linear_weights[k] = sqrt(w)
+        else
+            all_linear_ref[] = false
+            linear_weights[k] = 1.0
+        end
+    end
+    all_linear = all_linear_ref[]
 
     if !isempty(warn_zero_weights)
         @warn "Cost(s) at index $(warn_zero_weights) have zero linear robust weight (w = 0.0); corresponding Jacobian rows are identically zero (rank-deficient)"
@@ -133,16 +152,12 @@ function build_tall_layout(problem::Model, unfixed, matrix_type::Symbol, max_den
     end
 
     # Check adaptive residuals for unfixed adaptive variables
-    k = 1
-    for costvec in values(problem.costs)
-        for c in costvec
-            if c isa AbstractAdaptiveResidual
-                v1 = varindices(c)[1]
-                if blockindices[v1] != 0
-                    throw(ArgumentError("optimvars_nls does not support unfixed AbstractAdaptiveRobustifier variables (found unfixed adaptive variable $v1 in cost $k)"))
-                end
+    eachcost(problem.costs) do c, k
+        if c isa AbstractAdaptiveResidual
+            v1 = varindices(c)[1]
+            if blockindices[v1] != 0
+                throw(ArgumentError("optimvars_nls does not support unfixed AbstractAdaptiveRobustifier variables (found unfixed adaptive variable $v1 in cost $k)"))
             end
-            k += 1
         end
     end
 
@@ -163,21 +178,17 @@ function build_tall_layout(problem::Model, unfixed, matrix_type::Symbol, max_den
     # 4. Untouched variables check and column heights
     block_cost_counts = zeros(Int, nblocks)
     col_heights = zeros(Int, nblocks)
-    k = 1
-    for costvec in values(problem.costs)
-        for c in costvec
-            m = resblocksizes[k]
-            vinds = varindices(c)
-            nd = Int(dynamic(ndeps(c)))
-            for d in 1:nd
-                v = vinds isa Integer ? vinds : vinds[d]
-                b = blockindices[v]
-                if b > 0
-                    block_cost_counts[b] += 1
-                    col_heights[b] += m
-                end
+    eachcost(problem.costs) do c, k
+        m = resblocksizes[k]
+        vinds = varindices(c)
+        nd = Int(dynamic(ndeps(c)))
+        for d in 1:nd
+            v = vinds isa Integer ? vinds : vinds[d]
+            b = blockindices[v]
+            if b > 0
+                block_cost_counts[b] += 1
+                col_heights[b] += m
             end
-            k += 1
         end
     end
 
@@ -196,27 +207,23 @@ function build_tall_layout(problem::Model, unfixed, matrix_type::Symbol, max_den
         block_row_start[b + 1] = block_row_start[b] + col_heights[b]
     end
     block_rows = Vector{Int}(undef, block_row_start[nblocks + 1])
-    k = 1
-    for costvec in values(problem.costs)
-        for c in costvec
-            m = resblocksizes[k]
-            vinds = varindices(c)
-            nd = Int(dynamic(ndeps(c)))
-            base_dep = dep_start_idx[k]
-            for d in 1:nd
-                v = vinds isa Integer ? vinds : vinds[d]
-                b = blockindices[v]
-                if b > 0
-                    sparse_p[base_dep + d - 1] = current_col_offset[b]
-                    dest = block_row_start[b] + current_col_offset[b]
-                    r_start = resoffsets[k]
-                    for r in 0:m-1
-                        block_rows[dest + r + 1] = r_start + r
-                    end
-                    current_col_offset[b] += m
+    eachcost(problem.costs) do c, k
+        m = resblocksizes[k]
+        vinds = varindices(c)
+        nd = Int(dynamic(ndeps(c)))
+        base_dep = dep_start_idx[k]
+        for d in 1:nd
+            v = vinds isa Integer ? vinds : vinds[d]
+            b = blockindices[v]
+            if b > 0
+                sparse_p[base_dep + d - 1] = current_col_offset[b]
+                dest = block_row_start[b] + current_col_offset[b]
+                r_start = resoffsets[k]
+                for r in 0:m-1
+                    block_rows[dest + r + 1] = r_start + r
                 end
+                current_col_offset[b] += m
             end
-            k += 1
         end
     end
 
@@ -246,21 +253,17 @@ function build_tall_layout(problem::Model, unfixed, matrix_type::Symbol, max_den
     J_sparse = SparseMatrixCSC{Float64, Int}(M, N, colptr, rowval, zeros(Float64, nnz_total))
 
     # Finalize sparse_p to absolute 1-based indices in J_csc.nzval
-    k = 1
-    for costvec in values(problem.costs)
-        for c in costvec
-            vinds = varindices(c)
-            nd = Int(dynamic(ndeps(c)))
-            base_dep = dep_start_idx[k]
-            for d in 1:nd
-                v = vinds isa Integer ? vinds : vinds[d]
-                b = blockindices[v]
-                if b > 0
-                    row_offset = sparse_p[base_dep + d - 1]
-                    sparse_p[base_dep + d - 1] = J_sparse.colptr[varoffsets[b]] + row_offset
-                end
+    eachcost(problem.costs) do c, k
+        vinds = varindices(c)
+        nd = Int(dynamic(ndeps(c)))
+        base_dep = dep_start_idx[k]
+        for d in 1:nd
+            v = vinds isa Integer ? vinds : vinds[d]
+            b = blockindices[v]
+            if b > 0
+                row_offset = sparse_p[base_dep + d - 1]
+                sparse_p[base_dep + d - 1] = J_sparse.colptr[varoffsets[b]] + row_offset
             end
-            k += 1
         end
     end
 
