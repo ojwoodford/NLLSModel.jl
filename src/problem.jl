@@ -211,7 +211,8 @@ nresiduals(problem::Model) = Int(countcosts(resnum, problem.costs))
 
 Validate bipartite structure, check static eliminable variable dimensions (Dp in {1, 2, 3}),
 and perform two-pass variable ordering for Schur complement reduction.
-Returns named tuple `(unfixed_inds, c_dims, p_dims, observations, ncblocks, npblocks)`
+Returns named tuple `(unfixed_inds, extra_blocks, c_dims, p_dims, observations, ncblocks, npblocks)`,
+where `extra_blocks` lists the pairs of retained blocks that share a cost (in the sorted retained ordering)
 or `nothing` if the problem does not have both retained and eliminable variables.
 """
 function partition_schur_problem(problem::Model, unfixed::AbstractVector, linsolver_req=nothing)
@@ -255,6 +256,9 @@ function partition_schur_problem(problem::Model, unfixed::AbstractVector, linsol
         observations_dict[var_idx] = Int[]
     end
 
+    # Pairs of retained variables that share a cost (they need a slot in the reduced system's pattern)
+    retained_pairs = Set{Tuple{Int, Int}}()
+
     # Block-Diagonality Check: No residual connects > 1 unfixed eliminable variable
     for costvec in values(problem.costs)
         for cost in costvec
@@ -269,6 +273,11 @@ function partition_schur_problem(problem::Model, unfixed::AbstractVector, linsol
                         push!(observations_dict[lm], cam_map[v])
                     end
                 end
+            end
+            cams_in_cost = [cam_map[v] for v in vinds if v in camera_set]
+            for a in 2:length(cams_in_cost), b in 1:a-1
+                ca, cb = cams_in_cost[a], cams_in_cost[b]
+                push!(retained_pairs, (min(ca, cb), max(ca, cb)))
             end
         end
     end
@@ -306,8 +315,11 @@ function partition_schur_problem(problem::Model, unfixed::AbstractVector, linsol
         obs_remapped[l] = sort([old_to_new_cam[c] for c in orig_obs if haskey(old_to_new_cam, c)])
     end
 
+    extra_blocks = sort!([(old_to_new_cam[a], old_to_new_cam[b]) for (a, b) in retained_pairs])
+
     return (
         unfixed_inds = unfixed_inds,
+        extra_blocks = extra_blocks,
         c_dims = c_dims,
         p_dims = p_dims,
         observations = obs_remapped,

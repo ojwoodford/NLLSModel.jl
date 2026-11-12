@@ -181,6 +181,9 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
         if !isnothing(partition)
             structure = SchurStructure(partition.c_dims, partition.p_dims, partition.observations; nchunks=dynamic(numthreads))
             
+            # The pattern includes retained-retained pairs sharing a cost, not only those sharing an eliminated variable
+            pattern = linsolver_sym === :dense_schur ? nothing : build_schur_pattern(structure; extra_blocks=partition.extra_blocks)
+
             # Decision Matrix: Dense vs. Sparse
             is_dense = if linsolver_sym === :dense_schur
                 true
@@ -188,8 +191,7 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
                 false
             else
                 if structure.nc <= 2000
-                    covis = build_schur_pattern(structure)
-                    chol_fac = SparseArrays.CHOLMOD.analyze(SparseArrays.CHOLMOD.Sparse(Symmetric(covis.S_sparse, :U)))
+                    chol_fac = SparseArrays.CHOLMOD.analyze(SparseArrays.CHOLMOD.Sparse(Symmetric(pattern.S_sparse, :U)))
                     cholmod_symbolic_nnz(chol_fac) >= 0.40 * 0.5 * structure.nc^2
                 else
                     false
@@ -205,8 +207,7 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
                 B_dense = zeros(Float64, structure.nc, structure.nc)
                 SchurBlockMatrix(structure, B_dense, C_data, E_data)
             else
-                covis = build_schur_pattern(structure)
-                B_sys = SparseBlockLinearSystem{Float64}(TransposedPattern(covis.block_pattern), structure.c_dims, structure.c_dims)
+                B_sys = SparseBlockLinearSystem{Float64}(TransposedPattern(pattern.block_pattern), structure.c_dims, structure.c_dims)
                 SchurBlockMatrix(structure, B_sys, C_data, E_data)
             end
 

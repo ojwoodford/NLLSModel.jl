@@ -194,6 +194,30 @@ end
     val_sparse = fast_bAb(H_ss, dx_rand)
     @test isapprox(val_dense, val_sparse; rtol=1e-12, atol=1e-12)
 
+    # 5b. Retained-retained cost with no shared eliminated variable (B1): sparse and dense Schur agree
+    NLLSModel.generatemeasurement(p1::SVector{6, T}, p2::SVector{6, U}) where {T, U} = SVector(p1[1] - p2[1], p1[4] - p2[5])
+    CT = Union{SimpleError2{2, Float64, SVector{6, Float64}, Landmark3D{Float64}}, SimpleError2{2, Float64, SVector{6, Float64}, SVector{6, Float64}}}
+    prob_rr = Model(Union{SVector{6, Float64}, Landmark3D{Float64}}, CT)
+    for i in 1:3
+        addvariable!(prob_rr, randn(SVector{6, Float64}) .+ camoffset)
+    end
+    for i in 1:4
+        addvariable!(prob_rr, Landmark3D(rand(SVector{3, Float64}) .+ lmoffset))
+    end
+    for cam in 1:2, l in 4:7 # landmarks are seen by poses 1 and 2 only
+        addcost!(prob_rr, SimpleError2{SVector{6, Float64}, Landmark3D{Float64}}(randn(SVector{2, Float64}), cam, l))
+    end
+    addcost!(prob_rr, SimpleError2{SVector{6, Float64}, SVector{6, Float64}}(randn(SVector{2, Float64}), 2, 3)) # relative-pose cost
+    @test partition_schur_problem(prob_rr, trues(7), :sparse_schur).extra_blocks == [(2, 3)]
+    f_rd, fdf_rd!, x0_rd, H_rd = optimvars(prob_rr, nothing, static(1); linsolver=:dense_schur)
+    f_rs, fdf_rs!, x0_rs, H_rs = optimvars(prob_rr, nothing, static(1); linsolver=:sparse_schur)
+    tot_rr = H_rd.structure.nc + sum(H_rd.structure.p_dims)
+    g_rd = zeros(tot_rr); g_rs = zeros(tot_rr)
+    @test fdf_rd!(g_rd, H_rd, x0_rd) ≈ fdf_rs!(g_rs, H_rs, x0_rs)
+    @test g_rd ≈ g_rs
+    dx_rr = randn(tot_rr)
+    @test fast_bAb(H_rd, dx_rr) ≈ fast_bAb(H_rs, dx_rr)
+
     # 6. Test CostSlotMap Construction
     num_costs = NLLSModel.countcosts(NLLSModel.costnum, prob_schur.costs)
     slot_map_dense = CostSlotMap(prob_schur, H_ds.structure, fdf_ds!.linsystem.x.blockindices, H_ds.B)
