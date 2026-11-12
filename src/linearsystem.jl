@@ -335,7 +335,7 @@ function updatesymA!(A, a, vars, varflags, blockindices)
     @unroll for i in 1:MAX_ARGS
         if i <= length(vars) && bitiset(varflags, i)
             nvi = nvars(vars[i])
-            rangei = SR(1, nvi) .+ loffseti
+            rangei = blockrange(loffseti + static(1), nvi)
             loffseti += nvi
             @inbounds block(A, blockindices[i], blockindices[i], nvi, nvi) .+= view(a, rangei, rangei)
 
@@ -343,7 +343,7 @@ function updatesymA!(A, a, vars, varflags, blockindices)
             @unroll for j in 1:i-1
                 if bitiset(varflags, j)
                     @inbounds nvj = nvars(vars[j])
-                    rangej = SR(1, nvj) .+ loffsetj
+                    rangej = blockrange(loffsetj + static(1), nvj)
                     loffsetj += nvj
                     if @inbounds blockindices[i] >= blockindices[j] # Make sure the block matrix is lower triangular
                         @inbounds block(A, blockindices[i], blockindices[j], nvi, nvj) .+= view(a, rangei, rangej)
@@ -362,8 +362,7 @@ function updateb!(B, b, vars, varflags, boffsets, blockindices)
     @unroll for i in 1:MAX_ARGS
         if i <= length(vars) && bitiset(varflags, i)
             nv = nvars(vars[i])
-            range = SR(0, nv-1)
-            @inbounds view(B, range .+ boffsets[blockindices[i]]) .+= view(b, range .+ loffset)
+            @inbounds view(B, blockrange(boffsets[blockindices[i]], nv)) .+= view(b, blockrange(loffset, nv))
             loffset += nv
         end
     end
@@ -389,14 +388,15 @@ function updatesymschur!(H_schur::SchurBlockMatrix{Float64}, g_full::Vector{Floa
     @unroll for i in 1:MAX_ARGS
         if i <= length(vars) && bitiset(varflags, i)
             bi = Int(blockindices[i])
-            nvi = dynamic(nvars(vars[i]))
-            rangei = SR(1, nvi) .+ loffseti
+            nvi = nvars(vars[i])
+            rangei = blockrange(loffseti + static(1), nvi)
             loffseti += nvi
+            ni = dynamic(nvi)
 
             if bi <= ncblocks
                 if H_schur.B isa Matrix{Float64}
                     co = boffsets_c[bi]
-                    @inbounds for col in 1:nvi, row in 1:nvi
+                    @inbounds for col in 1:ni, row in 1:ni
                         H_schur.B[co + row - 1, co + col - 1] += H[rangei[row], rangei[col]]
                     end
                 else
@@ -406,7 +406,7 @@ function updatesymschur!(H_schur::SchurBlockMatrix{Float64}, g_full::Vector{Floa
                 l = bi - ncblocks
                 po = ppoffsets[l]
                 idx = po
-                @inbounds for col in 1:nvi, row in 1:nvi
+                @inbounds for col in 1:ni, row in 1:ni
                     H_schur.C_data[idx] += H[rangei[row], rangei[col]]
                     idx += 1
                 end
@@ -416,20 +416,21 @@ function updatesymschur!(H_schur::SchurBlockMatrix{Float64}, g_full::Vector{Floa
             @unroll for j in 1:i-1
                 if bitiset(varflags, j)
                     bj = Int(blockindices[j])
-                    nvj = dynamic(nvars(vars[j]))
-                    rangej = SR(1, nvj) .+ loffsetj
+                    nvj = nvars(vars[j])
+                    rangej = blockrange(loffsetj + static(1), nvj)
                     loffsetj += nvj
+                    nj = dynamic(nvj)
 
                     if bi <= ncblocks && bj <= ncblocks
                         if H_schur.B isa Matrix{Float64}
                             co_i = boffsets_c[bi]
                             co_j = boffsets_c[bj]
                             if bi <= bj
-                                @inbounds for col in 1:nvj, row in 1:nvi
+                                @inbounds for col in 1:nj, row in 1:ni
                                     H_schur.B[co_i + row - 1, co_j + col - 1] += H[rangei[row], rangej[col]]
                                 end
                             else
-                                @inbounds for col in 1:nvi, row in 1:nvj
+                                @inbounds for col in 1:ni, row in 1:nj
                                     H_schur.B[co_j + row - 1, co_i + col - 1] += H[rangej[row], rangei[col]]
                                 end
                             end
@@ -444,15 +445,15 @@ function updatesymschur!(H_schur::SchurBlockMatrix{Float64}, g_full::Vector{Floa
                         l = bj - ncblocks
                         e_idx = searchsortedfirst(@inbounds(view(cpblock, cpptr[l]:(cpptr[l+1]-1))), bi) + cpptr[l] - 1
                         eo = cpoffsets[e_idx]
-                        @inbounds for col in 1:nvj, row in 1:nvi
-                            H_schur.E_data[eo + (row - 1)*nvj + col - 1] += H[rangei[row], rangej[col]]
+                        @inbounds for col in 1:nj, row in 1:ni
+                            H_schur.E_data[eo + (row - 1)*nj + col - 1] += H[rangei[row], rangej[col]]
                         end
                     elseif bi > ncblocks && bj <= ncblocks
                         l = bi - ncblocks
                         e_idx = searchsortedfirst(@inbounds(view(cpblock, cpptr[l]:(cpptr[l+1]-1))), bj) + cpptr[l] - 1
                         eo = cpoffsets[e_idx]
-                        @inbounds for col in 1:nvi, row in 1:nvj
-                            H_schur.E_data[eo + (row - 1)*nvi + col - 1] += H[rangej[row], rangei[col]]
+                        @inbounds for col in 1:ni, row in 1:nj
+                            H_schur.E_data[eo + (row - 1)*ni + col - 1] += H[rangej[row], rangei[col]]
                         end
                     end
                 end
