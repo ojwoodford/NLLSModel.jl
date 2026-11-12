@@ -89,6 +89,35 @@ function computeresjacstatic(varflags::StaticInt, residual::AbstractResidual, va
     return extractvaldual(ydual)
 end
 
+# Buffers and ForwardDiff configuration for dynamically-sized autodiff, cached per task (so threads never share them).
+# The residual and Jacobian returned from `computeresjacdynamic` are views into these buffers: valid until the next call
+# on the same task with the same residual type, variable count and function.
+struct DynamicADBuffers{S, X, R, C}
+    scalar::Bool       # Whether computeresidual returns a number (rather than a vector)
+    x::X               # The evaluation point (always zero)
+    storage::S         # Result storage for the vector case
+    result::R
+    config::C
+end
+
+function adcache()
+    return get!(() -> Dict{Any, Any}(), task_local_storage(), :nllsmodel_adcache)::Dict{Any, Any}
+end
+
+function makedynamicbuffers(f, residual, vars, totalnumvars, M)
+    T = eltype(residual)
+    x = zeros(T, totalnumvars)
+    # Scalar residuals are differentiated as gradients, which needs computeresidual to return a number
+    r0 = computeresidual(residual, vars...)
+    if M == 1 && r0 isa Number
+        result = DiffResults.GradientResult(x)
+        return DynamicADBuffers(true, x, nothing, result, ForwardDiff.GradientConfig(f, x))
+    end
+    storage = zeros(T, (totalnumvars + 1) * M)
+    result = DiffResults.DiffResult(view(storage, 1:M), (reshape(view(storage, M+1:length(storage)), M, totalnumvars),))
+    return DynamicADBuffers(false, x, storage, result, ForwardDiff.JacobianConfig(f, x))
+end
+
 # Automatic dynamically-sized Jacobian computation
 function computeresjacdynamic(varflags, residual::AbstractResidual, vars)
     # Perform dynamic (i.e. variable size vector) auto-differentiation
@@ -96,24 +125,20 @@ function computeresjacdynamic(varflags, residual::AbstractResidual, vars)
 
     # Compute the number of free variables
     totalnumvars = dynamic(computetotalnumvars(varflags, vars))
-
-    # Use the ForwardDiff API to compute the jacobian
     M = dynamic(nres(residual))
-    if M == 1
-        # Scalar residual
-        x = zeros(eltype(residual), totalnumvars)
-        result = DiffResults.GradientResult(x)
-        result = ForwardDiff.gradient!(result, bindleadingargs(computeresjachelper, varflags, residual, vars), x)
-        # Return the residual and jacobian
+
+    f = bindleadingargs(computeresjachelper, varflags, residual, vars)
+    key = (typeof(f), totalnumvars, M)
+    buffers = get!(() -> makedynamicbuffers(f, residual, vars, totalnumvars, M), adcache(), key)
+    return runDynamicAD(f, buffers)
+end
+
+function runDynamicAD(f, b::DynamicADBuffers)
+    if b.scalar
+        result = ForwardDiff.gradient!(b.result, f, b.x, b.config)
         return DiffResults.value(result), DiffResults.gradient(result)'
     end
-
-    # Vector residual
-    resultlength = (totalnumvars + 1) * M
-    resultstorage = zeros(eltype(residual), resultlength)
-    result = DiffResults.DiffResult(view(resultstorage, 1:M), (reshape(view(resultstorage, M+1:resultlength), M, totalnumvars),))
-    result = ForwardDiff.jacobian!(result, bindleadingargs(computeresjachelper, varflags, residual, vars), zeros(eltype(residual), totalnumvars))
-    # Return the residual and jacobian
+    result = ForwardDiff.jacobian!(b.result, f, b.x, b.config)
     return DiffResults.value(result), DiffResults.jacobian(result)
 end
 

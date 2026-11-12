@@ -61,3 +61,34 @@ end
         @test (@allocated NLLSModel.updateb!(b_vec, b, vars, static(3), boffsets, blockindices)) == 0
     end
 end
+
+# Residuals of length one may return a number or a one-element vector (M5)
+struct OneRes{S} <: NLLSModel.AbstractResidual
+    meas::Float64
+end
+NLLSModel.ndeps(::OneRes) = static(1)
+NLLSModel.nres(::OneRes) = static(1)
+NLLSModel.varindices(::OneRes) = 1
+NLLSModel.getvars(::OneRes, vars::Vector) = (vars[1]::Vector{Float64},)
+NLLSModel.computeresidual(r::OneRes{true}, x) = x[1] * x[2] - r.meas
+NLLSModel.computeresidual(r::OneRes{false}, x) = SVector(x[1] * x[2] - r.meas)
+Base.eltype(::OneRes) = Float64
+
+@testset "dynamic autodiff" begin
+    x = [2.0, 3.0]
+    for S in (true, false)
+        res, jac = NLLSModel.computeresjac(static(1), OneRes{S}(1.0), x)
+        @test only(res) ≈ 5.0
+        @test vec(Matrix(jac)) ≈ [3.0, 2.0]
+    end
+    # Repeated calls reuse the cached buffers (allocations are well below a fresh setup)
+    cost = ChainRes{Vector{Float64}}(SVector(0.1, -0.2), 1, 2)
+    a, b = [1.0, 2.0], [0.5, -1.0]
+    NLLSModel.computeresjac(static(3), cost, a, b)
+    first_call = @allocated NLLSModel.computeresjac(static(3), cost, a, b)
+    @test first_call < 2000
+    res, jac = NLLSModel.computeresjac(static(3), cost, a, b)
+    res_s, jac_s = NLLSModel.computeresjac(static(3), ChainRes{SVector{2, Float64}}(SVector(0.1, -0.2), 1, 2), SVector{2}(a), SVector{2}(b))
+    @test collect(res) ≈ collect(res_s)
+    @test Matrix(jac) ≈ Matrix(jac_s)
+end
