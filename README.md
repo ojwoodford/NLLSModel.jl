@@ -48,6 +48,33 @@ Keywords: `unfixed` (an index, a type, a mask or a list of indices), `numthreads
 choices `reduction` (`:auto`, `:none`, `:eliminate`: whether eliminable variables are eliminated by a Schur complement) and
 `reduced` (`:auto`, `:dense`, `:sparse`: storage of the reduced system, ignored when nothing is eliminated).
 
+### Tall formulation
+
+`optimize!(model, options; formulation = :tall)` solves the same model from the residual vector and a dense Jacobian instead of
+the normal equations. Each Levenberg–Marquardt step is a QR factorization of the Jacobian, so `JᵀJ` is never formed and the
+conditioning is that of `J`, not its square. Use it when the model is ill conditioned (the normal equations stall above the
+minimum) and the Jacobian is small enough to hold densely.
+
+```julia
+result = optimize!(problem, OptimizationOptions(iterator = :levenbergmarquardt); formulation = :tall)
+```
+
+In this first version:
+
+- the Jacobian is **dense**. If it would exceed `max_dense_bytes` (default 256 MB) an `ArgumentError` gives its size, before
+  anything is allocated; raise the limit or use `formulation = :normal`;
+- the optimizer must be Levenberg–Marquardt (`iterator = :levenbergmarquardt`) with `linsolver = :auto` or `:qr`; other choices
+  throw the optimizer's `ArgumentError`;
+- `reduction = :eliminate` is an `ArgumentError` (use `:auto` or `:none`); `reduced`, `min_work` and `min_work_cost` are ignored,
+  and `min_work_per_thread` and `max_dense_bytes` are used only here;
+- every cost must be a non-adaptive `AbstractResidual`, and no adaptive kernel variable may be unfixed. Otherwise the error
+  from `optimvars_nls` is rethrown with the prefix `formulation = :tall:`;
+- there is no robust-mode keyword: each cost's kernel decides how its rows enter (see the robust-kernel tutorial), so
+  choosing `HuberKernel` or `Huber2oKernel` chooses first- or second-order treatment.
+
+`formulation` is a keyword of `optimize!` and `optimize` only. It is not an `OptimizationOptions` field and is not inferred from
+`linsolver`; a caller of `optimvars` or `optimvars_nls` chooses by which one they call.
+
 ### Advanced use: `optimvars`
 
 `optimvars` is needed for a custom outer loop, for reusing an `OptimizationWorkspace` across solves with your own objective

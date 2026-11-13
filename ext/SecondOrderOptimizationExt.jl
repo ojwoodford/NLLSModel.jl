@@ -49,19 +49,38 @@ end
 # through `optimize` (which returns the solution); everything else is updated in place by `optimize!`. Either way the
 # solution is written back with `syncvars!`, which knows the block order and the Schur partition.
 """
-    optimize!(model::Model, options = OptimizationOptions(); unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), callback=nullcallback, workspace=nothing, reduction=:auto, reduced=:auto, min_work, min_work_cost) -> OptimizationResult
+    optimize!(model::Model, options = OptimizationOptions(); formulation=:normal, unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), callback=nullcallback, workspace=nothing, reduction=:auto, reduced=:auto, min_work, min_work_cost, min_work_per_thread=5000, max_dense_bytes=256*1024^2) -> OptimizationResult
 
-Solve `model` by the normal equations and write the solution back into `model.variables`. This is the normal way to solve a
-`Model`; it is defined when `SecondOrderOptimization` is loaded (`using SecondOrderOptimization`).
+Solve `model` and write the solution back into `model.variables`. This is the normal way to solve a `Model`; it is defined when
+`SecondOrderOptimization` is loaded (`using SecondOrderOptimization`).
 
-It calls [`optimvars`](@ref), wraps the result in a `HessianObjective`, runs `SecondOrderOptimization.optimize!` (or
-`optimize` when the variable to optimize is immutable, a single variable of static size) and writes the solution back
-with [`syncvars!`](@ref).
+`formulation` chooses how the model is linearized:
+
+- `:normal` (default): the normal equations. Calls [`optimvars`](@ref), wraps the result in a `HessianObjective`, runs
+  `SecondOrderOptimization.optimize!` (or `optimize` when the variable to optimize is immutable, a single variable of static
+  size) and writes the solution back with [`syncvars!`](@ref).
+- `:tall`: the residual vector and a dense Jacobian (a `JacobianObjective`), solved by Levenberg–Marquardt through QR of the
+  Jacobian. Calls [`optimvars_nls`](@ref) with a dense Jacobian. Each cost's kernel decides how its rows enter; there is no robust
+  keyword. This first version needs `iterator = :levenbergmarquardt` with `linsolver = :auto` or `:qr` (the optimizer throws
+  otherwise), a dense Jacobian (an `ArgumentError`, before allocating, if it would exceed `max_dense_bytes`), only non-adaptive
+  `AbstractResidual` costs and no unfixed adaptive kernels (errors from `optimvars_nls` are rethrown prefixed `formulation = :tall:`),
+  and no elimination.
+
+`formulation` is a keyword here only: it is not a field of `OptimizationOptions` and is not inferred from `options.linsolver`. Any
+other value is an `ArgumentError`.
+
+| Keyword | `:normal` | `:tall` |
+|:---|:---|:---|
+| `unfixed`, `numthreads`, `callback`, `workspace` | used | used |
+| `reduction` | `:auto`, `:none`, `:eliminate` | `:auto` or `:none`; `:eliminate` is an `ArgumentError` |
+| `reduced`, `min_work`, `min_work_cost` | used | ignored |
+| `min_work_per_thread`, `max_dense_bytes` | ignored | used |
 
 - `unfixed`: which variables to optimize: an index, a type, a Boolean mask or a list of indices (default: all). The others are left untouched.
-- `numthreads`, `min_work`, `min_work_cost`: threading of the evaluation, as for [`optimvars`](@ref).
+- `numthreads`: threading of the evaluation.
 - `callback`, `workspace`: passed to the optimizer.
-- `reduction`, `reduced`: layout of the linear system, as for [`optimvars`](@ref). Neither is a field of `OptimizationOptions`.
+- `reduction`, `reduced`, `min_work`, `min_work_cost`: layout and threading of the normal-equations system, as for [`optimvars`](@ref).
+- `min_work_per_thread`, `max_dense_bytes`: threading and the size limit of the dense Jacobian, as for [`optimvars_nls`](@ref).
 """
 function SecondOrderOptimization.optimize!(model::Model, options::OptimizationOptions=OptimizationOptions();
         formulation::Symbol=:normal,
@@ -86,7 +105,7 @@ end
 """
     optimize(model::Model, options = OptimizationOptions(); kwargs...) -> (model_copy, result)
 
-Like `optimize!(model, options; kwargs...)`, but runs on a `deepcopy` of `model` and leaves `model` unchanged.
+Like `optimize!(model, options; kwargs...)` (including `formulation`), but runs on a `deepcopy` of `model` and leaves `model` unchanged.
 """
 function SecondOrderOptimization.optimize(model::Model, options::OptimizationOptions=OptimizationOptions(); kwargs...)
     copied = deepcopy(model)
