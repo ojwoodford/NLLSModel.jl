@@ -189,8 +189,8 @@ end
     # 4. Dense Schur Solver (optimvars)
     f_ds, fdf_ds!, x0_ds, H_ds = optimvars(prob_schur, nothing, static(1); linsolver=:dense_schur)
     @test H_ds isa BlockLinearSystems.SchurBlockMatrix
-    @test H_ds.B isa Matrix{Float64}
-    tot_dim_ds = H_ds.structure.nc + sum(H_ds.structure.p_dims)
+    @test H_ds.R isa Matrix{Float64}
+    tot_dim_ds = H_ds.structure.nr + sum(H_ds.structure.e_dims)
     g_ds = zeros(tot_dim_ds)
     c_ds = fdf_ds!(g_ds, H_ds, x0_ds)
     @test isapprox(c_ds, f_ds(x0_ds); atol=1e-12)
@@ -199,7 +199,7 @@ end
     # 5. Sparse Schur Solver (optimvars)
     f_ss, fdf_ss!, x0_ss, H_ss = optimvars(prob_schur, nothing, static(1); linsolver=:sparse_schur)
     @test H_ss isa BlockLinearSystems.SchurBlockMatrix
-    @test H_ss.B isa BlockLinearSystems.SparseBlockLinearSystem
+    @test H_ss.R isa BlockLinearSystems.SparseBlockLinearSystem
     g_ss = zeros(tot_dim_ds)
     c_ss = fdf_ss!(g_ss, H_ss, x0_ss)
     @test isapprox(c_ss, f_ss(x0_ss); atol=1e-12)
@@ -228,7 +228,7 @@ end
     @test partition_schur_problem(prob_rr, trues(7), :sparse_schur).extra_blocks == [(2, 3)]
     f_rd, fdf_rd!, x0_rd, H_rd = optimvars(prob_rr, nothing, static(1); linsolver=:dense_schur)
     f_rs, fdf_rs!, x0_rs, H_rs = optimvars(prob_rr, nothing, static(1); linsolver=:sparse_schur)
-    tot_rr = H_rd.structure.nc + sum(H_rd.structure.p_dims)
+    tot_rr = H_rd.structure.nr + sum(H_rd.structure.e_dims)
     g_rd = zeros(tot_rr); g_rs = zeros(tot_rr)
     @test fdf_rd!(g_rd, H_rd, x0_rd) ≈ fdf_rs!(g_rs, H_rs, x0_rs)
     @test g_rd ≈ g_rs

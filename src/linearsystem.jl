@@ -188,12 +188,12 @@ BlockLinearSystems.copy_structure(ls::MultiVariateLSdense_ls) = MultiVariateLSde
 BlockLinearSystems.copy_structure(ls::MultiVariateLSsparse_ls) = MultiVariateLSsparse_ls(copy_structure(ls.A), zeros(Float64, length(ls.b)))
 function BlockLinearSystems.copy_structure(ls::MultiVariateLSSchur_ls)
     A = ls.A
-    B_copy = if A.B isa Matrix
-        similar(A.B)
+    R_copy = if A.R isa Matrix
+        similar(A.R)
     else
-        copy_structure(A.B)
+        copy_structure(A.R)
     end
-    A_new = SchurBlockMatrix(A.structure, B_copy, similar(A.C_data), similar(A.E_data))
+    A_new = SchurBlockMatrix(A.structure, R_copy, similar(A.E_data), similar(A.C_data))
     return MultiVariateLSSchur_ls(A_new, zeros(Float64, length(ls.b)))
 end
 BlockLinearSystems.copy_structure(ls::LinearSystem{F, V}) where {F, V} = LinearSystem{F, V}(ls.x, copy_structure(ls.ls))
@@ -227,13 +227,13 @@ add!(dest::MultiVariateLSdense_ls, src::MultiVariateLSdense_ls) = (dest.A.data .
 add!(dest::MultiVariateLSsparse_ls, src::MultiVariateLSsparse_ls) = (dest.A.data .+= src.A.data; dest.b .+= src.b; nothing)
 function add!(dest::MultiVariateLSSchur_ls, src::MultiVariateLSSchur_ls)
     dest.b .+= src.b
-    if dest.A.B isa Matrix
-        dest.A.B .+= src.A.B
+    if dest.A.R isa Matrix
+        dest.A.R .+= src.A.R
     else
-        dest.A.B.data .+= src.A.B.data
+        dest.A.R.data .+= src.A.R.data
     end
-    dest.A.C_data .+= src.A.C_data
     dest.A.E_data .+= src.A.E_data
+    dest.A.C_data .+= src.A.C_data
     return nothing
 end
 add!(dest::LinearSystem, src::LinearSystem) = add!(dest.ls, src.ls)
@@ -292,12 +292,12 @@ function updatesymschur!(H_schur::SchurBlockMatrix{Float64}, g_full::Vector{Floa
     updateb!(g_full, g, vars, varflags, boffsets, blockindices)
 
     structure = H_schur.structure
-    ncblocks = structure.ncblocks
-    cpptr = structure.cpptr
-    cpblock = structure.cpblock
-    cpoffsets = structure.cpoffsets
-    ppoffsets = structure.ppoffsets
-    boffsets_c = structure.boffsets_c
+    nrblocks = structure.nrblocks
+    eliminated_ptr = structure.eliminated_ptr
+    entry_retained = structure.entry_retained
+    coffsets = structure.coffsets
+    eoffsets = structure.eoffsets
+    boffsets_r = structure.boffsets_r
 
     loffseti = static(0)
     @unroll for i in 1:MAX_ARGS
@@ -308,21 +308,21 @@ function updatesymschur!(H_schur::SchurBlockMatrix{Float64}, g_full::Vector{Floa
             loffseti += nvi
             ni = dynamic(nvi)
 
-            if bi <= ncblocks
-                if H_schur.B isa Matrix{Float64}
-                    co = boffsets_c[bi]
+            if bi <= nrblocks
+                if H_schur.R isa Matrix{Float64}
+                    ro = boffsets_r[bi]
                     @inbounds for col in 1:ni, row in 1:ni
-                        H_schur.B[co + row - 1, co + col - 1] += H[rangei[row], rangei[col]]
+                        H_schur.R[ro + row - 1, ro + col - 1] += H[rangei[row], rangei[col]]
                     end
                 else
-                    @inbounds block(H_schur.B, bi, bi, nvi, nvi) .+= view(H, rangei, rangei)
+                    @inbounds block(H_schur.R, bi, bi, nvi, nvi) .+= view(H, rangei, rangei)
                 end
             else
-                l = bi - ncblocks
-                po = ppoffsets[l]
-                idx = po
+                e = bi - nrblocks
+                eo = eoffsets[e]
+                idx = eo
                 @inbounds for col in 1:ni, row in 1:ni
-                    H_schur.C_data[idx] += H[rangei[row], rangei[col]]
+                    H_schur.E_data[idx] += H[rangei[row], rangei[col]]
                     idx += 1
                 end
             end
@@ -336,39 +336,39 @@ function updatesymschur!(H_schur::SchurBlockMatrix{Float64}, g_full::Vector{Floa
                     loffsetj += nvj
                     nj = dynamic(nvj)
 
-                    if bi <= ncblocks && bj <= ncblocks
-                        if H_schur.B isa Matrix{Float64}
-                            co_i = boffsets_c[bi]
-                            co_j = boffsets_c[bj]
+                    if bi <= nrblocks && bj <= nrblocks
+                        if H_schur.R isa Matrix{Float64}
+                            ro_i = boffsets_r[bi]
+                            ro_j = boffsets_r[bj]
                             if bi <= bj
                                 @inbounds for col in 1:nj, row in 1:ni
-                                    H_schur.B[co_i + row - 1, co_j + col - 1] += H[rangei[row], rangej[col]]
+                                    H_schur.R[ro_i + row - 1, ro_j + col - 1] += H[rangei[row], rangej[col]]
                                 end
                             else
                                 @inbounds for col in 1:ni, row in 1:nj
-                                    H_schur.B[co_j + row - 1, co_i + col - 1] += H[rangej[row], rangei[col]]
+                                    H_schur.R[ro_j + row - 1, ro_i + col - 1] += H[rangej[row], rangei[col]]
                                 end
                             end
                         else
                             if bi >= bj
-                                @inbounds block(H_schur.B, bi, bj, nvi, nvj) .+= view(H, rangei, rangej)
+                                @inbounds block(H_schur.R, bi, bj, nvi, nvj) .+= view(H, rangei, rangej)
                             else
-                                @inbounds block(H_schur.B, bj, bi, nvj, nvi) .+= view(H, rangej, rangei)
+                                @inbounds block(H_schur.R, bj, bi, nvj, nvi) .+= view(H, rangej, rangei)
                             end
                         end
-                    elseif bi <= ncblocks && bj > ncblocks
-                        l = bj - ncblocks
-                        e_idx = searchsortedfirst(@inbounds(view(cpblock, cpptr[l]:(cpptr[l+1]-1))), bi) + cpptr[l] - 1
-                        eo = cpoffsets[e_idx]
+                    elseif bi <= nrblocks && bj > nrblocks
+                        e = bj - nrblocks
+                        c_idx = searchsortedfirst(@inbounds(view(entry_retained, eliminated_ptr[e]:(eliminated_ptr[e+1]-1))), bi) + eliminated_ptr[e] - 1
+                        co = coffsets[c_idx]
                         @inbounds for col in 1:nj, row in 1:ni
-                            H_schur.E_data[eo + (row - 1)*nj + col - 1] += H[rangei[row], rangej[col]]
+                            H_schur.C_data[co + (row - 1)*nj + col - 1] += H[rangei[row], rangej[col]]
                         end
-                    elseif bi > ncblocks && bj <= ncblocks
-                        l = bi - ncblocks
-                        e_idx = searchsortedfirst(@inbounds(view(cpblock, cpptr[l]:(cpptr[l+1]-1))), bj) + cpptr[l] - 1
-                        eo = cpoffsets[e_idx]
+                    elseif bi > nrblocks && bj <= nrblocks
+                        e = bi - nrblocks
+                        c_idx = searchsortedfirst(@inbounds(view(entry_retained, eliminated_ptr[e]:(eliminated_ptr[e+1]-1))), bj) + eliminated_ptr[e] - 1
+                        co = coffsets[c_idx]
                         @inbounds for col in 1:ni, row in 1:nj
-                            H_schur.E_data[eo + (row - 1)*ni + col - 1] += H[rangej[row], rangei[col]]
+                            H_schur.C_data[co + (row - 1)*ni + col - 1] += H[rangej[row], rangei[col]]
                         end
                     end
                 end

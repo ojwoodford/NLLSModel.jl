@@ -187,9 +187,9 @@ nresiduals(problem::Model) = Int(countcosts(resnum, problem.costs))
 """
     partition_schur_problem(problem::Model, unfixed::AbstractVector, linsolver_req=nothing)
 
-Validate bipartite structure, check static eliminable variable dimensions (Dp in {1, 2, 3}),
+Validate bipartite structure, check static eliminable variable dimensions (De in {1, 2, 3}),
 and perform two-pass variable ordering for Schur complement reduction.
-Returns named tuple `(unfixed_inds, extra_blocks, c_dims, p_dims, observations, ncblocks, npblocks)`,
+Returns named tuple `(unfixed_inds, extra_blocks, r_dims, e_dims, couplings, nrblocks, neblocks)`,
 where `extra_blocks` lists the pairs of retained blocks that share a cost (in the sorted retained ordering)
 or `nothing` if the problem does not have both retained and eliminable variables, or (unless a Schur solver
 was explicitly requested via `linsolver_req`) if its structure does not suit Schur reduction.
@@ -215,7 +215,7 @@ function partition_schur_problem(problem::Model, unfixed::AbstractVector, linsol
 
     # 2. Structural Bipartite Validation
     elim_set = Set(unfixed_raw[findall(is_elim)])
-    camera_set = Set(unfixed_raw[findall(!, is_elim)])
+    retained_set = Set(unfixed_raw[findall(!, is_elim)])
 
     # Validate eliminable variable static dimension in {1, 2, 3}
     block_sizes = [Int(dynamic(nvars(problem.variables[i]))) for i in unfixed_raw]
@@ -229,13 +229,13 @@ function partition_schur_problem(problem::Model, unfixed::AbstractVector, linsol
         end
     end
 
-    # Map from original variable index to camera block index (1:nret)
-    cam_raw_list = unfixed_raw[findall(!, is_elim)]
-    cam_map = Dict{Int, Int}(var_idx => i for (i, var_idx) in enumerate(cam_raw_list))
+    # Map from original variable index to retained block index (1:nret)
+    retained_raw_list = unfixed_raw[findall(!, is_elim)]
+    retained_map = Dict{Int, Int}(var_idx => i for (i, var_idx) in enumerate(retained_raw_list))
 
-    observations_dict = Dict{Int, Vector{Int}}()
+    couplings_dict = Dict{Int, Vector{Int}}()
     for var_idx in elim_set
-        observations_dict[var_idx] = Int[]
+        couplings_dict[var_idx] = Int[]
     end
 
     # Pairs of retained variables that share a cost (they need a slot in the reduced system's pattern)
@@ -250,63 +250,63 @@ function partition_schur_problem(problem::Model, unfixed::AbstractVector, linsol
                 explicit_schur || return nothing
                 throw(ArgumentError("Bipartite structure violation: cost block of type $(typeof(cost)) connects multiple eliminable variables $(elims_in_cost). Eliminable variables cannot couple to each other."))
             elseif length(elims_in_cost) == 1
-                lm = elims_in_cost[1]
+                elim_var = elims_in_cost[1]
                 for v in vinds
-                    if v in camera_set
-                        push!(observations_dict[lm], cam_map[v])
+                    if v in retained_set
+                        push!(couplings_dict[elim_var], retained_map[v])
                     end
                 end
             end
-            cams_in_cost = [cam_map[v] for v in vinds if v in camera_set]
-            for a in 2:length(cams_in_cost), b in 1:a-1
-                ca, cb = cams_in_cost[a], cams_in_cost[b]
-                push!(retained_pairs, (min(ca, cb), max(ca, cb)))
+            retained_in_cost = [retained_map[v] for v in vinds if v in retained_set]
+            for a in 2:length(retained_in_cost), b in 1:a-1
+                ra, rb = retained_in_cost[a], retained_in_cost[b]
+                push!(retained_pairs, (min(ra, rb), max(ra, rb)))
             end
         end
     end
 
-    # Deduplicate observations per landmark
-    observations = Vector{Vector{Int}}(undef, nblocks)
+    # Deduplicate the couplings of each eliminated variable
+    couplings = Vector{Vector{Int}}(undef, nblocks)
     for (i, var_idx) in enumerate(unfixed_raw)
         if is_elim[i]
-            observations[i] = unique(observations_dict[var_idx])
+            couplings[i] = unique(couplings_dict[var_idx])
         else
-            observations[i] = Int[]
+            couplings[i] = Int[]
         end
     end
 
     # 3. Two-pass variable ordering using sort_schur_blocks from BlockLinearSystems
-    perm = sort_schur_blocks(is_elim, block_sizes, observations)
+    perm = sort_schur_blocks(is_elim, block_sizes, couplings)
     unfixed_inds = unfixed_raw[perm]
     sorted_sizes = block_sizes[perm]
 
-    c_dims = UInt8.(sorted_sizes[1:nret])
-    p_dims = UInt8.(sorted_sizes[nret+1:nblocks])
+    r_dims = UInt8.(sorted_sizes[1:nret])
+    e_dims = UInt8.(sorted_sizes[nret+1:nblocks])
 
-    # Re-map camera indices in observations to new camera ordering
-    old_to_new_cam = Dict{Int, Int}()
-    for new_c in 1:nret
-        orig_var = unfixed_inds[new_c]
-        old_c = cam_map[orig_var]
-        old_to_new_cam[old_c] = new_c
+    # Re-map the retained indices in the couplings to the new retained ordering
+    old_to_new_retained = Dict{Int, Int}()
+    for new_r in 1:nret
+        orig_var = unfixed_inds[new_r]
+        old_r = retained_map[orig_var]
+        old_to_new_retained[old_r] = new_r
     end
 
-    obs_remapped = Vector{Vector{Int}}(undef, nelim)
-    for l in 1:nelim
-        orig_idx = perm[nret + l]
-        orig_obs = observations[orig_idx]
-        obs_remapped[l] = sort([old_to_new_cam[c] for c in orig_obs if haskey(old_to_new_cam, c)])
+    couplings_remapped = Vector{Vector{Int}}(undef, nelim)
+    for e in 1:nelim
+        orig_idx = perm[nret + e]
+        orig_couplings = couplings[orig_idx]
+        couplings_remapped[e] = sort([old_to_new_retained[r] for r in orig_couplings if haskey(old_to_new_retained, r)])
     end
 
-    extra_blocks = sort!([(old_to_new_cam[a], old_to_new_cam[b]) for (a, b) in retained_pairs])
+    extra_blocks = sort!([(old_to_new_retained[a], old_to_new_retained[b]) for (a, b) in retained_pairs])
 
     return (
         unfixed_inds = unfixed_inds,
         extra_blocks = extra_blocks,
-        c_dims = c_dims,
-        p_dims = p_dims,
-        observations = obs_remapped,
-        ncblocks = nret,
-        npblocks = nelim
+        r_dims = r_dims,
+        e_dims = e_dims,
+        couplings = couplings_remapped,
+        nrblocks = nret,
+        neblocks = nelim
     )
 end

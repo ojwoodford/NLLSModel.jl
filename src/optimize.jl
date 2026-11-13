@@ -205,7 +205,7 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
     if schur_requested || ((isnothing(linsolver_sym) || linsolver_sym === :auto) && has_elims)
         partition = partition_schur_problem(problem, unfixed, linsolver_sym)
         if !isnothing(partition)
-            structure = SchurStructure(partition.c_dims, partition.p_dims, partition.observations; nchunks=dynamic(numthreads))
+            structure = SchurStructure(partition.r_dims, partition.e_dims, partition.couplings; nchunks=dynamic(numthreads))
             
             # The pattern includes retained-retained pairs sharing a cost, not only those sharing an eliminated variable
             pattern = linsolver_sym === :dense_schur ? nothing : build_schur_pattern(structure; extra_blocks=partition.extra_blocks)
@@ -216,45 +216,45 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
             elseif linsolver_sym === :sparse_schur
                 false
             else
-                if structure.nc <= 2000
+                if structure.nr <= 2000
                     chol_fac = SparseArrays.CHOLMOD.analyze(SparseArrays.CHOLMOD.Sparse(Symmetric(pattern.S_sparse, :U)))
                     # Fall back to the pattern's own size if CHOLMOD's prediction is unavailable
-                    factor_nnz = something(cholmod_symbolic_nnz(chol_fac, structure.nc), nnz(pattern.S_sparse))
-                    factor_nnz >= 0.40 * 0.5 * structure.nc^2
+                    factor_nnz = something(cholmod_symbolic_nnz(chol_fac, structure.nr), nnz(pattern.S_sparse))
+                    factor_nnz >= 0.40 * 0.5 * structure.nr^2
                 else
                     false
                 end
             end
 
-            total_c_size = sum(Int(d)^2 for d in structure.p_dims; init=0)
-            total_e_size = sum(Int(structure.p_dims[l]) * Int(structure.c_dims[structure.cpblock[e]]) for l in eachindex(structure.p_dims) for e in structure.cpptr[l]:(structure.cpptr[l+1]-1); init=0)
-            C_data = zeros(Float64, total_c_size)
+            total_e_size = sum(Int(d)^2 for d in structure.e_dims; init=0)
+            total_c_size = sum(Int(structure.e_dims[e]) * Int(structure.r_dims[structure.entry_retained[c]]) for e in eachindex(structure.e_dims) for c in structure.eliminated_ptr[e]:(structure.eliminated_ptr[e+1]-1); init=0)
             E_data = zeros(Float64, total_e_size)
+            C_data = zeros(Float64, total_c_size)
 
             H = if is_dense
-                B_dense = zeros(Float64, structure.nc, structure.nc)
-                SchurBlockMatrix(structure, B_dense, C_data, E_data)
+                R_dense = zeros(Float64, structure.nr, structure.nr)
+                SchurBlockMatrix(structure, R_dense, E_data, C_data)
             else
-                B_sys = SparseBlockLinearSystem{Float64}(TransposedPattern(pattern.block_pattern), structure.c_dims, structure.c_dims)
-                SchurBlockMatrix(structure, B_sys, C_data, E_data)
+                R_sys = SparseBlockLinearSystem{Float64}(TransposedPattern(pattern.block_pattern), structure.r_dims, structure.r_dims)
+                SchurBlockMatrix(structure, R_sys, E_data, C_data)
             end
 
-            nblocks_tot = partition.ncblocks + partition.npblocks
+            nblocks_tot = partition.nrblocks + partition.neblocks
             blockindices = zeros(UInt, length(problem.variables))
             for (b, var_idx) in enumerate(partition.unfixed_inds)
                 blockindices[var_idx] = b
             end
 
             boffsets = Vector{Int}(undef, nblocks_tot + 1)
-            for b in 1:partition.ncblocks
-                boffsets[b] = structure.boffsets_c[b]
+            for b in 1:partition.nrblocks
+                boffsets[b] = structure.boffsets_r[b]
             end
-            for l in 1:partition.npblocks
-                boffsets[partition.ncblocks + l] = structure.nc + structure.boffsets_p[l]
+            for e in 1:partition.neblocks
+                boffsets[partition.nrblocks + e] = structure.nr + structure.boffsets_e[e]
             end
-            boffsets[end] = structure.nc + sum(Int, structure.p_dims; init=0) + 1
+            boffsets[end] = structure.nr + sum(Int, structure.e_dims; init=0) + 1
 
-            tot_len = structure.nc + sum(Int, structure.p_dims; init=0)
+            tot_len = structure.nr + sum(Int, structure.e_dims; init=0)
             x_vec = zeros(Float64, tot_len)
             b_vec = zeros(Float64, tot_len)
 
@@ -262,7 +262,7 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
             ls_val = MultiVariateLSSchur_ls(H, b_vec)
             lsschur = LinearSystem(ls_x, ls_val)
             ls_shared = sharedschurlinearsystem(lsschur, problem, numthreads)
-            plan = ls_shared isa LinearSystemShared ? build_schur_thread_plan!(problem, blockindices, partition.ncblocks, partition.npblocks, dynamic(numthreads)) : nothing
+            plan = ls_shared isa LinearSystemShared ? build_schur_thread_plan!(problem, blockindices, partition.nrblocks, partition.neblocks, dynamic(numthreads)) : nothing
 
             f = MultiVarCostFunc(problem, partition.unfixed_inds, numthreads)
             fdf! = MultiVarSchurFDF(ls_shared, problem, partition.unfixed_inds, plan)
