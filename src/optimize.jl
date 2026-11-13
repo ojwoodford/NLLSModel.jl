@@ -210,7 +210,9 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
             # The pattern includes retained-retained pairs sharing a cost, not only those sharing an eliminated variable
             pattern = linsolver_sym === :dense_schur ? nothing : build_schur_pattern(structure; extra_blocks=partition.extra_blocks)
 
-            # Decision Matrix: Dense vs. Sparse
+            # Decision Matrix: Dense vs. Sparse. When the symbolic analysis is run for the decision, it is kept and
+            # handed on with the pattern, so the linear system does not analyse the same pattern again.
+            analysed = nothing
             is_dense = if linsolver_sym === :dense_schur
                 true
             elseif linsolver_sym === :sparse_schur
@@ -218,6 +220,7 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
             else
                 if structure.nr <= 2000
                     chol_fac = SparseArrays.CHOLMOD.analyze(SparseArrays.CHOLMOD.Sparse(Symmetric(pattern.S_sparse, :U)))
+                    analysed = chol_fac
                     # Fall back to the pattern's own size if CHOLMOD's prediction is unavailable
                     factor_nnz = something(cholmod_symbolic_nnz(chol_fac, structure.nr), nnz(pattern.S_sparse))
                     factor_nnz >= 0.40 * 0.5 * structure.nr^2
@@ -236,7 +239,9 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
                 SchurBlockMatrix(structure, R_dense, E_data, C_data)
             else
                 R_sys = SparseBlockLinearSystem{Float64}(TransposedPattern(pattern.block_pattern), structure.r_dims, structure.r_dims)
-                SchurBlockMatrix(structure, R_sys, E_data, C_data)
+                # The pattern (and analysed factor, if any) travel with the matrix to the linear system
+                carried = isnothing(analysed) ? pattern : merge(pattern, (S_factor = analysed,))
+                SchurBlockMatrix(structure, R_sys, E_data, C_data; pattern=carried)
             end
 
             nblocks_tot = partition.nrblocks + partition.neblocks

@@ -88,3 +88,16 @@ end
         @test f1(x1) ≈ f4(x4)
     end
 end
+
+@testset "Schur pattern is handed to the linear system" begin
+    Random.seed!(6)
+    prob = optlandmark_problem(4, 20)
+    _, _, _, H = optimvars(prob, nothing, static(1); linsolver=:sparse_schur)
+    @test H.pattern !== nothing
+    @test size(H.pattern.S_sparse, 1) == H.structure.nr
+    _, _, _, Hd = optimvars(prob, nothing, static(1); linsolver=:dense_schur)
+    @test Hd.pattern === nothing
+    # The solver accepts it and optimizes
+    c0, c1, _ = solve(optlandmark_problem(4, 20); linsolver=:sparse_schur)
+    @test c1 < 1e-3 * c0
+end
