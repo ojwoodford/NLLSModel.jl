@@ -73,8 +73,8 @@ In this first version:
 
 - the Jacobian is **dense**. If it would exceed `max_dense_bytes` (default 256 MB) an `ArgumentError` gives its size, before
   anything is allocated; raise the limit or use `formulation = :normal`;
-- the optimizer must be Levenberg–Marquardt (`iterator = :levenbergmarquardt`) with `linsolver = :auto` or `:qr`; other choices
-  throw the optimizer's `ArgumentError`;
+- the optimizer's Jacobian path supports only some iterators (Levenberg–Marquardt is the one to use) with `linsolver = :auto` or
+  `:qr`; other choices (for example `:newton` or `:cholesky`) throw the optimizer's `ArgumentError`;
 - `reduction = :eliminate` is an `ArgumentError` (use `:auto` or `:none`); `reduced`, `min_work` and `min_work_cost` are ignored,
   and `min_work_per_thread` and `max_dense_bytes` are used only here;
 - every cost must be a non-adaptive `AbstractResidual`, and no adaptive kernel variable may be unfixed. Otherwise the error

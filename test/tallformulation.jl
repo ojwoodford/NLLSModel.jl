@@ -264,12 +264,12 @@ end
 
     @testset "rejected by the optimizer" begin
         model = curvefit()
-        for options in (OptimizationOptions(iterator=:dogleg), OptimizationOptions(iterator=:newton), OptimizationOptions(iterator=:levenbergmarquardt, linsolver=:cholesky))
+        for options in (OptimizationOptions(iterator=:gradientdescent), OptimizationOptions(iterator=:newton), OptimizationOptions(iterator=:levenbergmarquardt, linsolver=:cholesky))
             err = try optimize!(deepcopy(model), options; formulation=:tall, numthreads=static(1)); nothing catch e e end
             @test err isa ArgumentError
         end
         # They are fine for the normal equations
-        @test optimize!(deepcopy(model), OptimizationOptions(iterator=:dogleg); numthreads=static(1)) isa OptimizationResult
+        @test optimize!(deepcopy(model), OptimizationOptions(iterator=:gradientdescent); numthreads=static(1)) isa OptimizationResult
     end
 
     @testset "optimize leaves the original model unchanged" begin

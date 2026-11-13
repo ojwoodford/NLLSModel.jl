@@ -61,7 +61,7 @@ Solve `model` and write the solution back into `model.variables`. This is the no
   size) and writes the solution back with [`syncvars!`](@ref).
 - `:tall`: the residual vector and a dense Jacobian (a `JacobianObjective`), solved by Levenberg–Marquardt through QR of the
   Jacobian. Calls [`optimvars_nls`](@ref) with a dense Jacobian. Each cost's kernel decides how its rows enter; there is no robust
-  keyword. This first version needs `iterator = :levenbergmarquardt` with `linsolver = :auto` or `:qr` (the optimizer throws
+  keyword. This first version needs an iterator the optimizer's Jacobian path supports (Levenberg–Marquardt) with `linsolver = :auto` or `:qr` (the optimizer throws
   otherwise), a dense Jacobian (an `ArgumentError`, before allocating, if it would exceed `max_dense_bytes`), only non-adaptive
   `AbstractResidual` costs and no unfixed adaptive kernels (errors from `optimvars_nls` are rethrown prefixed `formulation = :tall:`),
   and no elimination.
