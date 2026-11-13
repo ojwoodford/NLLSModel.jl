@@ -36,6 +36,14 @@ SimpleError4
 generatemeasurement
 ```
 
+## Static-Size Limits
+
+```@docs
+NLLSModel.MAX_STATIC_VAR
+NLLSModel.MAX_STATIC_JAC
+NLLSModel.MAX_STATIC_ROWS
+```
+
 ## Robust Cost Functions
 
 ```@docs

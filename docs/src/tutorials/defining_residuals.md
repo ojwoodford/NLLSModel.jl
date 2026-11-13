@@ -49,3 +49,16 @@ function NLLSModel.computeresjac(::StaticInt{3}, r::RelativePoseResidual, pose1,
     return res, jac
 end
 ```
+
+## Performance: static and run-time sizes
+
+Return a `StaticInt` from [`nres`](@ref) and `nvars` to make sizes static. The gradient and Hessian of each cost are
+formed by one of three kernels, chosen at compile time: the full static multiply (static residual length `M` and
+unfixed variable sizes totalling `n <= MAX_STATIC_VAR` with `M * n <= MAX_STATIC_JAC`), the static-column kernel
+(otherwise, with a static `M <= MAX_STATIC_ROWS`), and the `@turbo` kernel (everything else). The three constants are
+starting values (64, 512 and 16), not tuned.
+
+Everything computed for one cost is single-threaded by design; the outer loop over costs is what is threaded. So your
+`computeresidual`, [`computeresjac`](@ref) and [`computecostgradhess`](@ref) must be single-threaded (no BLAS on large
+matrices, no `Threads.@threads`; use `BLAS.set_num_threads(1)` if you need BLAS), and arrays they return must not be
+shared with other residuals. See the "Performance" section of the README for the table of kernels.

@@ -258,6 +258,12 @@ function ndeps end
 
 Dimensionality of the residual vector returned by `cost` (e.g. `static(M)` or an `Int`).
 
+Returning a `StaticInt` makes the two static kernels available (see "Performance" in the README):
+the full static multiply, which also needs every unfixed variable to have a static size
+(total `n <= MAX_STATIC_VAR`) and `M * n <= MAX_STATIC_JAC`; and, for costs that are not on that path, the
+static-column kernel, which needs `M <= MAX_STATIC_ROWS`. A run-time length (an `Int`) always uses the `@turbo`
+kernel (or plain loops for a Jacobian that is not a strided array of hardware floats).
+
 # Example
 ```julia
 NLLSModel.nres(::MyResidual) = static(3)
@@ -334,6 +340,10 @@ function robustifydkernel end
 
 Computes the residual vector (or scalar) for `cost` given its unpacked variables `vars...`.
 
+Residuals are evaluated on several threads at once, so this function (like [`computeresjac`](@ref) and
+[`computecostgradhess`](@ref)) must itself be single-threaded: no BLAS on large matrices and no `Threads.@threads`.
+If it needs BLAS, call `BLAS.set_num_threads(1)` in the application.
+
 # Example
 ```julia
 NLLSModel.computeresidual(r::MyResidual, x, y) = y - x - r.offset
@@ -346,6 +356,16 @@ function computeresidual end
 
 Computes the residual vector and Jacobian matrix for active variables indicated by bitmask `varflags`.
 Defaults to ForwardDiff automatic differentiation when not specialized.
+
+Rules for user code, because residuals are evaluated on several threads at once:
+- Arrays returned from `computeresjac` (or [`computecostgradhess`](@ref)) must not be shared with other residuals.
+  Returning arrays that the residual owns or that are local to the call is fine; a buffer reused by two residuals
+  evaluated at the same time is not.
+- The code must itself be single-threaded (no BLAS on large matrices, no `Threads.@threads`). If it needs BLAS, call
+  `BLAS.set_num_threads(1)` in the application.
+
+The Jacobian can be an `SMatrix`, a `Matrix` (or any strided matrix of hardware floats) or, for a scalar residual, the
+adjoint of the gradient vector. The kernels for products of the Jacobian are chosen by its type and the type of `nres`.
 """
 function computeresjac end
 
@@ -360,6 +380,10 @@ function computecost end
     computecostgradhess(varflags, cost::AbstractCost, vars...) -> (cost, grad, hess)
 
 Computes the scalar cost, gradient vector, and Hessian matrix for active variables indicated by bitmask `varflags`.
+
+The same rules apply as for [`computeresjac`](@ref): returned arrays must not be shared with other residuals, and the
+code must be single-threaded. For an [`AbstractResidual`](@ref) the gradient and Hessian are computed from the Jacobian
+without BLAS; the arrays returned alias per-task buffers and are valid until the same task evaluates its next cost.
 """
 function computecostgradhess end
 

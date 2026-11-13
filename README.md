@@ -55,3 +55,34 @@ stats = trunk(nlp)
 # Synchronize the optimal variables back into the problem
 syncvars!(nlp, stats.solution)
 ```
+
+## Performance
+
+Everything computed for one cost is single-threaded, by design: all threading is in the outer loop over costs, so no
+BLAS call or threaded loop may run inside a cost. A cost with a very large single residual therefore does not get
+threaded, cache-blocked BLAS; if that matters, supply `computecostgradhess` by hand.
+
+For each squared cost, the gradient `g = dc * J'r` and Hessian `H = dc * J'J + c2 * (J'r)(J'r)'` are formed by one of
+three kernels, chosen at compile time from the types involved (`nres` and `nvars` returning a `StaticInt` is what makes
+a size static):
+
+| # | Kernel | Used when |
+|---|---|---|
+| 1 | Full static multiply (`SMatrix`, unrolled) | every unfixed variable has a static size, totalling `n <= MAX_STATIC_VAR` (64); `nres` is a `StaticInt` `M`; and `M * n <= MAX_STATIC_JAC` (512) |
+| 2 | Static-column kernel | otherwise, when `nres` is a `StaticInt` `M <= MAX_STATIC_ROWS` (16) and the Jacobian is a `Matrix` of `Float32`/`Float64` |
+| 3 | `@turbo` kernel (plain loops for other array types) | otherwise |
+
+Costs not on the full static path use ForwardDiff with run-time sized buffers, cached per task. `MAX_STATIC_VAR`,
+`MAX_STATIC_JAC` and `MAX_STATIC_ROWS` are starting values that have not been tuned; they are constants in `src/NLLSModel.jl`.
+A scalar residual (`nres == 1`) with a run-time sized variable uses an outer-product kernel.
+
+Rules for your own `computeresidual`, `computeresjac` and `computecostgradhess`, because residuals are evaluated on
+several threads at once:
+
+- arrays they return must not be shared with other residuals;
+- the code must itself be single-threaded (no BLAS on large matrices, no `Threads.@threads`). If it needs BLAS, set
+  `BLAS.set_num_threads(1)` in the application.
+
+NLLSModel depends directly on `LoopVectorization.jl` (for the `@turbo` kernel), alongside `BlockLinearSystems.jl`,
+`FastNorm.jl`, `ForwardDiff.jl`, `Polyester.jl`, `OptimizationVariableInterface.jl` and `SIRBSDispatch.jl`.
+
