@@ -44,7 +44,7 @@ end
 
 @testset "optimization.jl" begin
     # Every linear system and iterator takes steps that reduce the cost of a noise-free bundle adjustment problem
-    Random.seed!(3)
+    Random.seed!(1)
     @testset "dense and sparse, $iterator" for iterator in (:levenbergmarquardt, :levenbergmarquardt_dtd, :newton)
         for (ncams, nlms) in ((3, 5), (10, 60))
             problem = perturb_ba_problem(create_ba_problem(ncams, nlms, 0.5), 0.01, 0.0)

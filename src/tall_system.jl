@@ -544,6 +544,24 @@ function scatter_cost_jacobian!(J, jac_scaled, k::Int, layout::NLSTallLayout, co
 end
 
 # Single residual and Jacobian evaluation returning (cost, clamped, err_code, err_val)
+# Per-task scratch matrix for a scaled Jacobian (Triggs correction, robust weights), so that nothing is allocated per cost.
+# The matrix is valid until the same task evaluates its next cost; `scatter_cost_jacobian!` consumes it straight away.
+function tall_scratch(::Type{T}, m::Int, P::Int)::Matrix{T} where T
+    cache = get!(() -> Dict{DataType, Any}(), task_local_storage(), :nllsmodel_tallcache)::Dict{DataType, Any}
+    bysize = get!(() -> Dict{Tuple{Int, Int}, Matrix{T}}(), cache, T)::Dict{Tuple{Int, Int}, Matrix{T}}
+    return get!(() -> Matrix{T}(undef, m, P), bysize, (m, P))
+end
+
+# `w * jac`: unrolled for static Jacobians, into the per-task scratch matrix for dynamic ones
+@inline scaled_jacobian(jac::Union{StaticMatrix, Adjoint{<:Any, <:StaticVector}}, w) = jac .* w
+function scaled_jacobian(jac::AbstractMatrix, w)
+    out = tall_scratch(float(eltype(jac)), size(jac, 1), size(jac, 2))
+    @inbounds for j in axes(jac, 2), i in axes(jac, 1)
+        out[i, j] = jac[i, j] * w
+    end
+    return out
+end
+
 function eval_single_resjac!(r, J, vars, cost, k::Int, layout::NLSTallLayout, robust::Symbol, status::NLSRobustStatus)
     vars_k = getvars(cost, vars)
     r_start = layout.resoffsets[k]
@@ -593,7 +611,7 @@ function eval_single_resjac!(r, J, vars, cost, k::Int, layout::NLSTallLayout, ro
             return 0.0, 0, 0, 0.0
         else
             r[r_range] .= res_k .* w
-            jac_scaled = jac_k .* w
+            jac_scaled = scaled_jacobian(jac_k, w)
             scatter_cost_jacobian!(J, jac_scaled, k, layout, cost)
             return 0.5 * (w * w) * s, 0, 0, 0.0
         end
@@ -609,7 +627,7 @@ function eval_single_resjac!(r, J, vars, cost, k::Int, layout::NLSTallLayout, ro
         nan_cost_jacobian!(J, k, layout, cost)
     elseif mode == WEIGHT_SCALE
         r[r_range] .= res_k .* scale
-        scatter_cost_jacobian!(J, jac_k .* scale, k, layout, cost)
+        scatter_cost_jacobian!(J, scaled_jacobian(jac_k, scale), k, layout, cost)
     else # WEIGHT_CORRECTOR
         tau = sqrt(1.0 + eps_i)
         alpha = -eps_i / (1.0 + tau)
@@ -624,7 +642,7 @@ function eval_single_resjac!(r, J, vars, cost, k::Int, layout::NLSTallLayout, ro
             jac_scaled = sqrt_dc * (jac_k - alpha * (n * u))
         else
             P = size(jac_k, 2)
-            jac_scaled = Matrix{Float64}(undef, m_k, P)
+            jac_scaled = tall_scratch(eltype(jac_k), m_k, P)
             for col_j in 1:P
                 v_j = 0.0
                 for row_r in 1:m_k

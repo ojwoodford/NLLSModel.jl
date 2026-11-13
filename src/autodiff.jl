@@ -1,8 +1,12 @@
 import ForwardDiff, DiffResults
 using Static, StaticArrays
 
-# Decision on whether to use static-sized autodiff - compile-time decision where possible
-function usestatic(varflags::StaticInt, vars)::Bool
+# Decision on whether to use the full static path (static-sized autodiff and the static multiply) - compile-time decision where possible.
+# Needs every unfixed variable to have a static size totalling at most MAX_STATIC_VAR, a static residual length M, and
+# M * (total size) <= MAX_STATIC_JAC, which bounds the static Jacobian that is built and unrolled.
+function usestatic(varflags::StaticInt, residual, vars)::Bool
+    M = nres(residual)
+    dynamic(is_static(M)) || return false
     N = length(vars)
     totalnumvars = static(0)
     @unroll for i in 1:MAX_ARGS
@@ -14,9 +18,9 @@ function usestatic(varflags::StaticInt, vars)::Bool
             totalnumvars += nvi
         end
     end
-    return totalnumvars <= MAX_STATIC_VAR ? true : false
+    return totalnumvars <= MAX_STATIC_VAR && M * totalnumvars <= MAX_STATIC_JAC ? true : false
 end
-usestatic(varflags, vars) = false
+usestatic(varflags, residual, vars) = false
 
 # Count the number of variables across all unfixed variable blocks
 function computetotalnumvars(varflags::StaticInt, vars)
@@ -72,7 +76,7 @@ end
 extractvaldual(dual::ForwardDiff.Dual{TG, T, N}) where {TG, T, N} = ForwardDiff.value(dual), SVector{N, T}(dual.partials.values...)'
 
 # Automatic Jacobian computation
-computeresjac(varflags, residual, vars...) = usestatic(varflags, vars) ? computeresjacstatic(varflags, residual, vars) : computeresjacdynamic(varflags, residual, vars)
+computeresjac(varflags, residual, vars...) = usestatic(varflags, residual, vars) ? computeresjacstatic(varflags, residual, vars) : computeresjacdynamic(varflags, residual, vars)
 
 # Automatic statically-sized Jacobian computation
 function computeresjacstatic(varflags::StaticInt, residual::AbstractResidual, vars)
@@ -90,12 +94,14 @@ function computeresjacstatic(varflags::StaticInt, residual::AbstractResidual, va
 end
 
 # Buffers and ForwardDiff configuration for dynamically-sized autodiff, cached per task (so threads never share them).
-# The residual and Jacobian returned from `computeresjacdynamic` are views into these buffers: valid until the next call
-# on the same task with the same residual type, variable count and function.
-struct DynamicADBuffers{S, X, R, C}
+# The residual and Jacobian returned from `computeresjacdynamic` are the buffers themselves (a `Vector` and a `Matrix`, or
+# a number and the adjoint of a gradient vector for a scalar residual): valid until the next call on the same task with
+# the same residual type, variable count and function.
+struct DynamicADBuffers{T, R, C}
     scalar::Bool       # Whether computeresidual returns a number (rather than a vector)
-    x::X               # The evaluation point (always zero)
-    storage::S         # Result storage for the vector case
+    x::Vector{T}       # The evaluation point (always zero)
+    res::Vector{T}     # Residual (vector case)
+    jac::Matrix{T}     # Jacobian (vector case)
     result::R
     config::C
 end
@@ -111,11 +117,12 @@ function makedynamicbuffers(f, residual, vars, totalnumvars, M)
     r0 = computeresidual(residual, vars...)
     if M == 1 && r0 isa Number
         result = DiffResults.GradientResult(x)
-        return DynamicADBuffers(true, x, nothing, result, ForwardDiff.GradientConfig(f, x))
+        return DynamicADBuffers(true, x, T[], Matrix{T}(undef, 0, 0), result, ForwardDiff.GradientConfig(f, x))
     end
-    storage = zeros(T, (totalnumvars + 1) * M)
-    result = DiffResults.DiffResult(view(storage, 1:M), (reshape(view(storage, M+1:length(storage)), M, totalnumvars),))
-    return DynamicADBuffers(false, x, storage, result, ForwardDiff.JacobianConfig(f, x))
+    res = zeros(T, M)
+    jac = zeros(T, M, totalnumvars)
+    result = DiffResults.DiffResult(res, (jac,))
+    return DynamicADBuffers(false, x, res, jac, result, ForwardDiff.JacobianConfig(f, x))
 end
 
 # Automatic dynamically-sized Jacobian computation
@@ -138,8 +145,8 @@ function runDynamicAD(f, b::DynamicADBuffers)
         result = ForwardDiff.gradient!(b.result, f, b.x, b.config)
         return DiffResults.value(result), DiffResults.gradient(result)'
     end
-    result = ForwardDiff.jacobian!(b.result, f, b.x, b.config)
-    return DiffResults.value(result), DiffResults.jacobian(result)
+    ForwardDiff.jacobian!(b.result, f, b.x, b.config)
+    return b.res, b.jac
 end
 
 computeresjachelper(varflags, residual, vars, x) = computeresidual(residual, updatevars(vars, varflags, x)...) 

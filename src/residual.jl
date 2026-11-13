@@ -54,6 +54,38 @@ function computerescost(residual, kernel, vars)::Float64
     return 0.5 * robustify(kernel, Float64(sqnorm(r)))
 end
 
+# Second-order weight of the robust kernel, positive semi-definite by construction
+gram_c2(dc, d2c, sqres) = d2c == 0 ? zero(dc) : max(2 * d2c, -dc / (3 * sqres))
+
+# Whether a Jacobian is a static array (so the whole computation is unrolled static arithmetic)
+isstaticjac(::StaticMatrix) = true
+isstaticjac(::Adjoint{<:Any, <:StaticVector}) = true
+isstaticjac(_) = false
+
+# Per-task buffers for the gradient and Hessian of one cost, sized for the kernel parameters plus the variables, so
+# that nothing is allocated per cost. `g` and `H` returned from `computerescostgradhess` alias these: they are valid
+# until the same task evaluates its next cost (`gradhesshelper!` adds them to the linear system straight away).
+struct GramBuffers{T}
+    g::Vector{T}   # Kernel parameters, then variables
+    H::Matrix{T}
+    gu::Vector{T}  # Unweighted J'r (needed for the kernel-parameter cross terms of adaptive kernels)
+end
+
+function gram_buffers(::Type{T}, nk::Int, n::Int)::GramBuffers{T} where T
+    cache = get!(() -> Dict{DataType, Any}(), task_local_storage(), :nllsmodel_gramcache)::Dict{DataType, Any}
+    bycost = get!(() -> Dict{Tuple{Int, Int}, GramBuffers{T}}(), cache, T)::Dict{Tuple{Int, Int}, GramBuffers{T}}
+    return get!(() -> GramBuffers{T}(zeros(T, nk + n), zeros(T, nk + n, nk + n), zeros(T, n)), bycost, (nk, n))
+end
+
+# Residual as an SVector when its length is static and small, so the static-column kernel can be used
+@inline staticresidual(res::Number, residual) = res
+@inline staticresidual(res, residual) = staticresidual(res, nres(residual))
+@inline staticresidual(res, ::Integer) = res
+@inline function staticresidual(res::Vector{T}, ::StaticInt{M}) where {T, M}
+    M <= MAX_STATIC_ROWS || return res
+    return SVector{M, T}(ntuple(i -> @inbounds(res[i]), Val(M)))
+end
+
 function computerescostgradhess(varflags, residual, kernel, vars)
     # Check for case that only kernel is optimized
     varflagsres = varflags >> static(1)
@@ -68,45 +100,68 @@ function computerescostgradhess(varflags, residual, kernel, vars)
 
     # Compute the residual and Jacobian
     res, jac = computeresjac(varflagsres, residual, vars...)
- 
-    # Compute the unrobust cost, gradient and Hessian
     sqres = sqnorm(res)
-    g = jac' * res
-    H = jac' * jac
+    if isstaticjac(jac)
+        return computerescostgradhess_static(varflags, kernel, res, jac, sqres)
+    end
+    return computerescostgradhess_dynamic(varflags, kernel, staticresidual(res, residual), jac, sqres)
+end
 
+# Static Jacobians: the full static multiply (kernel 1), unrolled by the compiler
+function computerescostgradhess_static(varflags, kernel, res, jac, sqres)
     if varflags & 1 == 0
         # The kernel is not optimized. Differentiate w.r.t. the cost only
         cost, dc, d2c = robustifydcost(kernel, sqres)
-    else
-        # Differentiate w.r.t. the cost and kernel parameters
-        cost, dc_, d2c_ = robustifydkernel(kernel, sqres)
-        @inbounds dc = dc_[end]
-        @inbounds d2c = d2c_[end,end]
-    
-        # Compute the d^2/dkernel.dvariables block
-        kernelvarind = SR(1, nvars(kernel))
-        @inbounds dkdv = g * view(d2c_, kernelvarind, nvars(kernel)+1)'
+        g, H = gramgrad(jac, res, dc, gram_c2(dc, d2c, sqres))
+        return 0.5 * Float64(cost), g, H
     end
 
-    # IRLS reweighting of Hessian
-    if dc != 1
-        H *= dc
-    end
-    # Second order correction
-    if d2c != 0
-        H += (max(2 * d2c, -dc / (3 * sqres)) * g) * g' # Ensure Hessian is positive semi-definite
-    end
-    # IRLS reweighting of gradient
-    if dc != 1
-        g *= dc
-    end
+    # Differentiate w.r.t. the cost and kernel parameters
+    cost, dc_, d2c_ = robustifydkernel(kernel, sqres)
+    @inbounds dc = dc_[end]
+    @inbounds d2c = d2c_[end,end]
+    g, H = gramgrad(jac, res, dc, gram_c2(dc, d2c, sqres))
 
-    if varflags & 1 == 1
-        # Add on the kernel derivative blocks
-        @inbounds g = vcat(0.5 * view(dc_, kernelvarind), g)
-        @inbounds H = hcat(vcat(0.5 * view(d2c_, kernelvarind, kernelvarind), dkdv), vcat(dkdv', H))
-    end
-    
-    # Return the cost and derivatives
+    # Compute the d^2/dkernel.dvariables block (from the unweighted gradient) and add on the kernel derivative blocks
+    kernelvarind = SR(1, nvars(kernel))
+    @inbounds dkdv = (jac' * res) * view(d2c_, kernelvarind, nvars(kernel)+1)'
+    @inbounds g = vcat(0.5 * view(dc_, kernelvarind), g)
+    @inbounds H = hcat(vcat(0.5 * view(d2c_, kernelvarind, kernelvarind), dkdv), vcat(dkdv', H))
     return 0.5 * Float64(cost), g, H
+end
+
+# Dynamic Jacobians: `gramgrad!` into per-task buffers (the kernel is evaluated before the products)
+function computerescostgradhess_dynamic(varflags, kernel, res, jac, sqres)
+    n = size(jac, 2)
+    T = eltype(jac)
+    if varflags & 1 == 0
+        # The kernel is not optimized. Differentiate w.r.t. the cost only
+        cost, dc, d2c = robustifydcost(kernel, sqres)
+        b = gram_buffers(T, 0, n)
+        gramgrad!(b.H, b.g, jac, res, dc, gram_c2(dc, d2c, sqres))
+        return 0.5 * Float64(cost), b.g, b.H
+    end
+
+    # Differentiate w.r.t. the cost and kernel parameters
+    cost, dc_, d2c_ = robustifydkernel(kernel, sqres)
+    @inbounds dc = dc_[end]
+    @inbounds d2c = d2c_[end,end]
+    nk = dynamic(nvars(kernel))
+    b = gram_buffers(T, nk, n)
+    vars_ = nk+1:nk+n
+    gramgrad!(view(b.H, vars_, vars_), view(b.g, vars_), jac, res, dc, gram_c2(dc, d2c, sqres))
+    jtr!(b.gu, jac, res) # The unweighted gradient, for the d^2/dkernel.dvariables block
+    @inbounds for k in 1:nk
+        b.g[k] = 0.5 * dc_[k]
+        ck = d2c_[k, nk+1]
+        for l in 1:nk
+            b.H[k, l] = 0.5 * d2c_[k, l]
+        end
+        for j in 1:n
+            v = ck * b.gu[j]
+            b.H[k, nk+j] = v
+            b.H[nk+j, k] = v
+        end
+    end
+    return 0.5 * Float64(cost), b.g, b.H
 end
