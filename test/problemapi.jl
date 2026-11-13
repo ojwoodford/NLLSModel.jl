@@ -29,10 +29,9 @@ Base.eltype(::DiffResidual) = Float64
     @test NLLSModel.countcosts(NLLSModel.costnum, sub.costs) == 1
     @test NLLSModel.convertunfixed([2, 3], problem) == BitVector([false, true, true, false])
     @test NLLSModel.convertunfixed(Float64, problem) == trues(4)
-    # M10: variables larger than 255 dimensions are rejected when added
+    # M10: any variable size can be added; the 255 limit applies only to blocks of block linear systems (see test/bigvariable.jl)
     bigproblem = Model(Vector{Float64}, DiffResidual)
-    @test_throws AssertionError NLLSModel.addvariable!(bigproblem, zeros(256))
-    @test NLLSModel.addvariable!(bigproblem, zeros(255)) == 1
+    @test NLLSModel.addvariable!(bigproblem, zeros(256)) == 1
     # B10: scaled non-robust kernel fast path
     k = NLLSModel.Scaled(NLLSModel.NoRobust(), 2.0)
     @test NLLSModel.robustifydcost(k, 3.0) == (6.0, 2.0, 0.0)
