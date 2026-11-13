@@ -161,11 +161,11 @@ function cholmod_symbolic_nnz(fac::SparseArrays.CHOLMOD.Factor, n::Integer)
     end
 end
 
-function optimvars(problem::Model, unfixed=nothing, numthreads=StaticInt(Threads.nthreads()); linsolver=nothing)
-    return optimvars_dispatch(problem, convertunfixed(unfixed, problem), static(numthreads), linsolver)
+function optimvars(problem::Model, unfixed=nothing, numthreads=StaticInt(Threads.nthreads()); linsolver=nothing, min_work::Integer=MIN_WORK_FOR_THREADED_LINEARIZATION)
+    return optimvars_dispatch(problem, convertunfixed(unfixed, problem), static(numthreads), linsolver, min_work)
 end
 
-function optimvars_dispatch(problem::Model, unfixed::Integer, numthreads::StaticInt, linsolver=nothing)
+function optimvars_dispatch(problem::Model, unfixed::Integer, numthreads::StaticInt, linsolver=nothing, min_work::Integer=MIN_WORK_FOR_THREADED_LINEARIZATION)
     x0 = problem.variables[unfixed]
     varlen = nvars(x0)
     if dynamic(is_static(varlen)) && varlen <= 16
@@ -173,17 +173,17 @@ function optimvars_dispatch(problem::Model, unfixed::Integer, numthreads::Static
     else
         ls = LinearSystem{UniVariateLSdynamic_x, UniVariateLSdynamic_ls}((unfixed, dynamic(varlen)), (dynamic(varlen),))
     end
-    ls_shared = sharedlinearsystem(ls, problem, numthreads)
+    ls_shared = sharedlinearsystem(ls, problem, numthreads, min_work)
     f = SingleVarCostFunc(problem, unfixed, numthreads)
     fdf! = SingleVarCostGradHess(ls_shared, problem, unfixed)
     return (f, fdf!, x0, nothing)
 end
 
-function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads::StaticInt, linsolver=nothing)
+function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads::StaticInt, linsolver=nothing, min_work::Integer=MIN_WORK_FOR_THREADED_LINEARIZATION)
     @assert length(problem.variables) > 0
     nblocks = sum(unfixed)
     if nblocks == 1
-        return optimvars_dispatch(problem, findfirst(unfixed), numthreads, linsolver)
+        return optimvars_dispatch(problem, findfirst(unfixed), numthreads, linsolver, min_work)
     end
 
     linsolver_sym = isnothing(linsolver) ? nothing : Symbol(linsolver)
@@ -254,7 +254,7 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
             ls_x = MultiVariateLSSchur_x(x_vec, blockindices, boffsets, structure, partition.unfixed_inds)
             ls_val = MultiVariateLSSchur_ls(H, b_vec)
             lsschur = LinearSystem(ls_x, ls_val)
-            ls_shared = sharedschurlinearsystem(lsschur, problem, numthreads)
+            ls_shared = sharedschurlinearsystem(lsschur, problem, numthreads, min_work)
             plan = ls_shared isa LinearSystemShared ? build_schur_thread_plan!(problem, blockindices, partition.nrblocks, partition.neblocks, dynamic(numthreads)) : nothing
 
             f = MultiVarCostFunc(problem, partition.unfixed_inds, numthreads)
@@ -279,12 +279,12 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
     if len >= 40 && sparse_dense_decision(len, sparsity, blocksizes)
         bsm = SparseBlockLinearSystem{Float64}(TransposedPattern(sparsity), blocksizes, blocksizes)
         lssparse = MultiVariateLSsparse(bsm, blockindices, true)
-        plan = blockthreadplan(problem, blockindices, length(blocksizes), numthreads)
+        plan = blockthreadplan(problem, blockindices, length(blocksizes), numthreads, min_work)
         fdf! = MultiVarSparseFDF(lssparse, problem, unfixed_sync, plan)
         return (f, fdf!, x0, lssparse.x.hessian)
     else
         lsdense = MultiVariateLSdense(blocksizes, blockindices)
-        plan = blockthreadplan(problem, blockindices, length(blocksizes), numthreads)
+        plan = blockthreadplan(problem, blockindices, length(blocksizes), numthreads, min_work)
         fdf! = MultiVarDenseFDF(lsdense, problem, unfixed_sync, plan)
         return (f, fdf!, x0, nothing)
     end

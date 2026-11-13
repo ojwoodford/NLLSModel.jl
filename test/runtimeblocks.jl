@@ -120,3 +120,13 @@ end
         end
     end
 end
+
+@testset "min_work option" begin
+    p = chainproblem(SVector{2, Float64}, 6)
+    for _ in 2:300, i in 1:5
+        addcost!(p, ChainRes{SVector{2, Float64}}(SVector(0.1i, -0.2), i, i + 1))
+    end
+    @test optimvars(p, nothing, static(4))[2].plan isa NLLSModel.BlockThreadPlan
+    @test optimvars(p, nothing, static(4); min_work=10^9)[2].plan === nothing
+    @test optimvars(p, nothing, static(4); min_work=1)[2].plan isa NLLSModel.BlockThreadPlan
+end
