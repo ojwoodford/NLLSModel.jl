@@ -20,7 +20,8 @@ where:
 - **Fast Block Linear Systems**: Custom `DenseBlockLinearSystem` and `SparseBlockLinearSystem` (from `BlockLinearSystems.jl`) tailored for sparse $LDL^T$, Cholesky, and QR factorizations.
 - **Automatic Differentiation**: Evaluates residual Jacobians and cost gradients/Hessians automatically via `ForwardDiff.jl`, or uses user-supplied analytic derivatives via [`computeresjac`](@ref).
 - **Robust M-Estimators**: First- and second-order robust kernels plus adaptive robustifiers ([`ContaminatedGaussian`](@ref)).
-- **Solver-Agnostic Extraction**: Use [`optimvars`](@ref) to obtain `(f, fdf!, x0, H)` for direct use with `SecondOrderOptimization.jl` or `NLLSsolver.jl`.
+- **One-Call Solving**: `optimize!(model, options)` (with `using SecondOrderOptimization`) solves the model and writes the solution back.
+- **Solver-Agnostic Extraction**: For advanced use, [`optimvars`](@ref) returns `(f, fdf!, x0, H)` for custom outer loops or other optimizers.
 - **Multi-threaded Evaluation**: Automatic thread-parallel residual and Hessian evaluation via `Polyester.jl`.
 
 ## Quick Start
@@ -47,9 +48,26 @@ problem = Model(SVector{2, Float64}, PointDistanceResidual)
 idx = addvariable!(problem, SVector(0.0, 0.0))
 addcost!(problem, PointDistanceResidual(SVector(3.0, 4.0), idx))
 
-# 3. Extract optimization callables and solve
-f, fdf!, x0, H = optimvars(problem)
-x_opt, result = optimize(f, fdf!, x0, OptimizationOptions(iterator = :levenbergmarquardt); H = H)
-println("Estimated variable: ", x_opt)
+# 3. Solve. The solution is written back into the model
+result = optimize!(problem, OptimizationOptions(iterator = :levenbergmarquardt))
+println("Estimated variable: ", problem.variables[idx])
 println("Final cost: ", result.bestcost)
 ```
+
+`optimize!(model, options)` is defined by a package extension: it needs `using SecondOrderOptimization` (NLLSModel already
+depends on `BlockLinearSystems`). `optimize(model, options)` returns `(model_copy, result)` and leaves `model` unchanged.
+The keywords `reduction` and `reduced` choose the linear-system layout; see [Linear Solvers & Sparsity](@ref).
+
+## Advanced Use: `optimvars`
+
+Use [`optimvars`](@ref) when you need the pieces yourself: a custom outer loop, a reused `OptimizationWorkspace`, the NLPModels
+wrapper, or another optimizer.
+
+```julia
+f, fdf!, x0, H = optimvars(problem)
+result = optimize!(x0, HessianObjective(f, fdf!; H), OptimizationOptions(iterator = :levenbergmarquardt))
+syncvars!(problem, fdf!, x0)
+```
+
+A single variable of static size is immutable: call `x, result = optimize(x0, HessianObjective(f, fdf!; H), options)` and
+`syncvars!(problem, fdf!, x)`.

@@ -14,7 +14,8 @@ Nonlinear Least Squares (NLLS) and factor-graph modeling in Julia.
 - **Automatic & Analytic Derivatives**: Uses `ForwardDiff.jl` automatically on `computeresidual`, or user-defined analytic Jacobians via `computeresjac`.
 - **Robust M-Estimators**: Built-in `HuberKernel`, `GemanMcclureKernel`, `Scaled`, and adaptive `ContaminatedGaussian`.
 - **Block-Dense & Block-Sparse Linear Systems**: Uses `DenseBlockLinearSystem` and `SparseBlockLinearSystem` from `BlockLinearSystems.jl` for fast, zero-allocation Hessian assembly.
-- **Optimizer-Agnostic Problem Interface**: Extract `(f, fdf!, x0, H) = optimvars(problem, unfixed, numthreads)` for seamless integration with many second order optimizers, such as `SecondOrderOptimization.jl` or `Optim.jl`.
+- **One-Call Solving**: `optimize!(model, options)` solves a `Model` with `SecondOrderOptimization.jl` and writes the solution back into it (load `SecondOrderOptimization`).
+- **Optimizer-Agnostic Problem Interface**: For advanced use, extract `(f, fdf!, x0, H) = optimvars(problem, unfixed, numthreads)` for integration with other second order optimizers, such as `Optim.jl`.
 - **NLPModels.jl Ecosystem**: Load `NLPModels` to wrap any `Model` as an `AbstractNLPModel` via `NLPLSModel(problem)` and solve with `JSOSolvers.jl` (`trunk`, `tron`), `Ipopt.jl`, or `Optim.jl`.
 
 ## Quick Start
@@ -37,9 +38,30 @@ problem = Model(SVector{2, Float64}, OffsetResidual)
 v = addvariable!(problem, SVector(0.0, 0.0))
 addcost!(problem, OffsetResidual(SVector(3.0, -2.0), v))
 
-f, fdf!, x0, H = optimvars(problem)
-x_opt, result = optimize(f, fdf!, x0, OptimizationOptions(iterator = :levenbergmarquardt); H = H)
+result = optimize!(problem, OptimizationOptions(iterator = :levenbergmarquardt))
+problem.variables[v] # The solution
 ```
+
+`optimize!(model, options)` is provided by a package extension, so it needs `using SecondOrderOptimization` (`BlockLinearSystems`
+is already a dependency of NLLSModel). `optimize(model, options)` leaves `model` alone and returns `(model_copy, result)`.
+Keywords: `unfixed` (an index, a type, a mask or a list of indices), `numthreads`, `callback`, `workspace`, and the layout
+choices `reduction` (`:auto`, `:none`, `:eliminate`: whether eliminable variables are eliminated by a Schur complement) and
+`reduced` (`:auto`, `:dense`, `:sparse`: storage of the reduced system, ignored when nothing is eliminated).
+
+### Advanced use: `optimvars`
+
+`optimvars` is needed for a custom outer loop, for reusing an `OptimizationWorkspace` across solves with your own objective
+handling, or to feed the NLPModels wrapper or another optimizer. It returns the cost, the in-place gradient/Hessian
+evaluator, the starting variables and the Hessian prototype, which you wrap in a `HessianObjective`:
+
+```julia
+f, fdf!, x0, H = optimvars(problem)
+result = optimize!(x0, HessianObjective(f, fdf!; H), OptimizationOptions(iterator = :levenbergmarquardt))
+syncvars!(problem, fdf!, x0) # Write the solution back
+```
+
+`SecondOrderOptimization.optimize!` needs a mutable `x0`; a single variable of static size is immutable, so use
+`x, result = optimize(x0, HessianObjective(f, fdf!; H), options)` and `syncvars!(problem, fdf!, x)` there.
 
 ### Solving with NLPModels.jl and JSOSolvers
 

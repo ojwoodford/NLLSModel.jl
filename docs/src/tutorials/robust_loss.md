@@ -44,5 +44,5 @@ addcost!(problem, RobustPointResidual(SVector(1.0, 1.0), idx, Huber2oKernel(1.5)
 addcost!(problem, RobustPointResidual(SVector(1.1, 0.9), idx, Huber2oKernel(1.5)))
 addcost!(problem, RobustPointResidual(SVector(50.0, -40.0), idx, Huber2oKernel(1.5))) # Outlier
 
-res = optimize!(problem)
+res = optimize!(problem) # Needs `using SecondOrderOptimization`
 ```

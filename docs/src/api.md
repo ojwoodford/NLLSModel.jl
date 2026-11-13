@@ -11,10 +11,21 @@ subproblem
 subproblem!
 cost
 optimvars
+partition_schur_problem
 optimvars_nls
 nls_callbacks
 flat_optimvars_nls
 ```
+
+## Solving a Model
+
+With `using SecondOrderOptimization`, a package extension adds two methods to its functions:
+
+- `optimize!(model::Model, options = OptimizationOptions(); unfixed, numthreads, callback, workspace, reduction = :auto, reduced = :auto, min_work, min_work_cost) -> result` solves the model and writes the solution into `model.variables`.
+- `optimize(model::Model, options = OptimizationOptions(); kwargs...) -> (model_copy, result)` does the same on a copy.
+
+`reduction` (`:auto`, `:none`, `:eliminate`) and `reduced` (`:auto`, `:dense`, `:sparse`) are described under [`optimvars`](@ref) and in
+[Linear Solvers & Sparsity](@ref). For custom outer loops use [`optimvars`](@ref) and `HessianObjective` directly.
 
 ## Cost & Residual Interface
 
