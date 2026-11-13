@@ -351,7 +351,7 @@ end
         J1 = copy(J_proto1)
         c1 = resjac1(r1, J1, x01)
 
-        f4, res4, resjac4, x04, J_proto4 = optimvars_nls(prob; robust=:none, numthreads=static(4), min_costs_per_thread=10)
+        f4, res4, resjac4, x04, J_proto4 = optimvars_nls(prob; robust=:none, numthreads=static(4), min_work_per_thread=10)
         r4 = zeros(100)
         J4 = copy(J_proto4)
         c4 = resjac4(r4, J4, x04)

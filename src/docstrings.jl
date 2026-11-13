@@ -194,7 +194,7 @@ addcost!(problem, my_residual)
 addcost!
 
 """
-    optimvars(problem::Model, unfixed=nothing, numthreads=StaticInt(Threads.nthreads()); linsolver=nothing, min_work=$MIN_WORK_FOR_THREADED_LINEARIZATION) -> (f, fdf!, x0, H)
+    optimvars(problem::Model, unfixed=nothing, numthreads=StaticInt(Threads.nthreads()); linsolver=nothing, min_work=$MIN_WORK_FOR_THREADED_LINEARIZATION, min_work_cost=$MIN_WORK_FOR_THREADED_COST) -> (f, fdf!, x0, H)
 
 Constructs the objective function `f`, in-place gradient/Hessian evaluator `fdf!`, initial variable state `x0`, and Hessian template `H` (`nothing` for static/dense systems or a `SparseMatrixCSC` for sparse systems) for `problem`.
 
@@ -210,6 +210,7 @@ x_opt, result = optimize(f, fdf!, x0, options; H=H)
 - `numthreads`: Number of threads to use for parallel cost and derivative evaluation (`StaticInt` or `Integer`).
 - `linsolver`: Optional linear solver (`:schur`, `:dense_schur`, `:sparse_schur`, ...); `nothing` or `:auto` selects automatically.
 - `min_work`: Linearization is threaded only if the problem's estimated work (see `costwork`: residual length times variables squared, summed over costs; one scalar residual of one variable is one unit) is at least this.
+- `min_work_cost`: The same floor for evaluating the cost alone, which is cheaper per unit of work and so needs more of it to pay for threading.
 """
 optimvars
 

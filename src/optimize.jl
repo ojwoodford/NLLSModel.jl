@@ -17,10 +17,12 @@ struct SingleVarCostFunc{P, U, NT}
     problem::P
     unfixed::U
     numthreads::NT
+    min_work::Int # Estimated work below which the cost is evaluated on one thread
 end
+SingleVarCostFunc(problem, unfixed, numthreads) = SingleVarCostFunc(problem, unfixed, numthreads, MIN_WORK_FOR_THREADED_COST)
 @inline function (f::SingleVarCostFunc)(x)
     @inbounds f.problem.variables[f.unfixed] = x
-    return cost(f.problem.variables, f.problem.costs, f.numthreads)
+    return cost(f.problem.variables, f.problem.costs, f.numthreads, f.min_work)
 end
 
 struct SingleVarCostGradHess{LS, P, U}
@@ -71,10 +73,12 @@ struct MultiVarCostFunc{P, U, NT}
     problem::P
     unfixed_inds::U
     numthreads::NT
+    min_work::Int # Estimated work below which the cost is evaluated on one thread
 end
+MultiVarCostFunc(problem, unfixed_inds, numthreads) = MultiVarCostFunc(problem, unfixed_inds, numthreads, MIN_WORK_FOR_THREADED_COST)
 @inline function (f::MultiVarCostFunc)(vars)
     full_vars = sync_unfixed_vars!(f.problem, f.unfixed_inds, vars)
-    return cost(full_vars, f.problem.costs, f.numthreads)
+    return cost(full_vars, f.problem.costs, f.numthreads, f.min_work)
 end
 
 struct MultiVarDenseFDF{LS, P, U, PL}
@@ -161,11 +165,11 @@ function cholmod_symbolic_nnz(fac::SparseArrays.CHOLMOD.Factor, n::Integer)
     end
 end
 
-function optimvars(problem::Model, unfixed=nothing, numthreads=StaticInt(Threads.nthreads()); linsolver=nothing, min_work::Integer=MIN_WORK_FOR_THREADED_LINEARIZATION)
-    return optimvars_dispatch(problem, convertunfixed(unfixed, problem), static(numthreads), linsolver, min_work)
+function optimvars(problem::Model, unfixed=nothing, numthreads=StaticInt(Threads.nthreads()); linsolver=nothing, min_work::Integer=MIN_WORK_FOR_THREADED_LINEARIZATION, min_work_cost::Integer=MIN_WORK_FOR_THREADED_COST)
+    return optimvars_dispatch(problem, convertunfixed(unfixed, problem), static(numthreads), linsolver, min_work, min_work_cost)
 end
 
-function optimvars_dispatch(problem::Model, unfixed::Integer, numthreads::StaticInt, linsolver=nothing, min_work::Integer=MIN_WORK_FOR_THREADED_LINEARIZATION)
+function optimvars_dispatch(problem::Model, unfixed::Integer, numthreads::StaticInt, linsolver=nothing, min_work::Integer=MIN_WORK_FOR_THREADED_LINEARIZATION, min_work_cost::Integer=MIN_WORK_FOR_THREADED_COST)
     x0 = problem.variables[unfixed]
     varlen = nvars(x0)
     if dynamic(is_static(varlen)) && varlen <= 16
@@ -174,16 +178,16 @@ function optimvars_dispatch(problem::Model, unfixed::Integer, numthreads::Static
         ls = LinearSystem{UniVariateLSdynamic_x, UniVariateLSdynamic_ls}((unfixed, dynamic(varlen)), (dynamic(varlen),))
     end
     ls_shared = sharedlinearsystem(ls, problem, numthreads, min_work)
-    f = SingleVarCostFunc(problem, unfixed, numthreads)
+    f = SingleVarCostFunc(problem, unfixed, numthreads, min_work_cost)
     fdf! = SingleVarCostGradHess(ls_shared, problem, unfixed)
     return (f, fdf!, x0, nothing)
 end
 
-function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads::StaticInt, linsolver=nothing, min_work::Integer=MIN_WORK_FOR_THREADED_LINEARIZATION)
+function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads::StaticInt, linsolver=nothing, min_work::Integer=MIN_WORK_FOR_THREADED_LINEARIZATION, min_work_cost::Integer=MIN_WORK_FOR_THREADED_COST)
     @assert length(problem.variables) > 0
     nblocks = sum(unfixed)
     if nblocks == 1
-        return optimvars_dispatch(problem, findfirst(unfixed), numthreads, linsolver, min_work)
+        return optimvars_dispatch(problem, findfirst(unfixed), numthreads, linsolver, min_work, min_work_cost)
     end
 
     linsolver_sym = isnothing(linsolver) ? nothing : Symbol(linsolver)
@@ -257,7 +261,7 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
             ls_shared = sharedschurlinearsystem(lsschur, problem, numthreads, min_work)
             plan = ls_shared isa LinearSystemShared ? build_schur_thread_plan!(problem, blockindices, partition.nrblocks, partition.neblocks, dynamic(numthreads)) : nothing
 
-            f = MultiVarCostFunc(problem, partition.unfixed_inds, numthreads)
+            f = MultiVarCostFunc(problem, partition.unfixed_inds, numthreads, min_work_cost)
             fdf! = MultiVarSchurFDF(ls_shared, problem, partition.unfixed_inds, plan)
             x0 = problem.variables[partition.unfixed_inds]
             return (f, fdf!, x0, H)
@@ -273,7 +277,7 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
         unfixed_sync = unfixed_inds
         x0 = problem.variables[unfixed_inds]
     end
-    f = MultiVarCostFunc(problem, unfixed_sync, numthreads)
+    f = MultiVarCostFunc(problem, unfixed_sync, numthreads, min_work_cost)
 
     sparsity = block_sparsity(problem, unfixed_inds)
     if len >= 40 && sparse_dense_decision(len, sparsity, blocksizes)

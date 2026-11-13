@@ -33,6 +33,7 @@ struct NLSTallLayout
     is_dense::Bool
     linear_weights::Vector{Float64} # Precomputed sqrt(w) for linear kernels
     all_linear::Bool
+    work::Int                       # Estimated work (see costwork), compared with min_work_per_thread
 end
 
 # Call `f(cost, k)` for every cost, with `k` its running index across all cost vectors. Recursing over the tuple of cost
@@ -293,7 +294,8 @@ function build_tall_layout(problem::Model, unfixed, matrix_type::Symbol, max_den
         costvec_start_idx, dep_start_idx,
         sparse_p, col_heights,
         is_dense,
-        linear_weights, all_linear
+        linear_weights, all_linear,
+        Int(countcosts(costwork, problem.costs))
     ), J_proto
 end
 
@@ -683,7 +685,7 @@ struct NLSResidual{P, L, U, NT, TR}
     robust::Symbol
     status::NLSRobustStatus
     numthreads::NT
-    min_costs_per_thread::Int
+    min_work_per_thread::Int
     task_results::TR
 end
 
@@ -694,7 +696,7 @@ struct NLSResJac{P, L, U, NT, TR}
     robust::Symbol
     status::NLSRobustStatus
     numthreads::NT
-    min_costs_per_thread::Int
+    min_work_per_thread::Int
     task_results::TR
 end
 
@@ -752,13 +754,13 @@ function check_tall_status!(status, clamped_tot, err_code, err_val, fname)
 end
 
 # Serial or threaded evaluation of all costs with `evalone(cost, k)`, shared by the residual and residual+Jacobian evaluators
-function tall_eval!(evalone::F, costvecs, layout, status, task_results, N_req::Int, min_costs::Int, fname) where F
-    if N_req <= 1 || layout.K < 2 * min_costs
+function tall_eval!(evalone::F, costvecs, layout, status, task_results, N_req::Int, min_work::Int, fname) where F
+    if N_req <= 1 || layout.work < 2 * min_work
         tot_cost, clamped_tot, err_code, err_val = eval_costvecs(evalone, costvecs, layout.costvec_start_idx, 1, 1, 1)
         check_tall_status!(status, clamped_tot, err_code, err_val, fname)
         return tot_cost
     end
-    N_chunks = min(N_req, layout.K ÷ min_costs)
+    N_chunks = min(N_req, layout.work ÷ min_work)
     for t in 1:N_chunks
         task_results[t] = TaskResult(0.0, 0, 0, 0.0)
     end
@@ -785,13 +787,13 @@ function (res!::NLSResidual)(r::AbstractVector{Float64}, vars)
     robust = res!.robust
     status = res!.status
     numthreads = res!.numthreads
-    min_costs = res!.min_costs_per_thread
+    min_work = res!.min_work_per_thread
 
     full_vars = sync_tall_vars!(problem, res!.unfixed_inds, vars)
 
     return tall_eval!(
         (c, k) -> eval_single_res!(r, full_vars, c, k, layout, robust, status),
-        values(problem.costs), layout, status, res!.task_results, Int(dynamic(numthreads)), min_costs, "res!")
+        values(problem.costs), layout, status, res!.task_results, Int(dynamic(numthreads)), min_work, "res!")
 end
 
 function (resjac!::NLSResJac)(r::AbstractVector{Float64}, J, vars; prezeroed::Bool=false)
@@ -805,17 +807,17 @@ function (resjac!::NLSResJac)(r::AbstractVector{Float64}, J, vars; prezeroed::Bo
     robust = resjac!.robust
     status = resjac!.status
     numthreads = resjac!.numthreads
-    min_costs = resjac!.min_costs_per_thread
+    min_work = resjac!.min_work_per_thread
 
     full_vars = sync_tall_vars!(problem, resjac!.unfixed_inds, vars)
 
     return tall_eval!(
         (c, k) -> eval_single_resjac!(r, J, full_vars, c, k, layout, robust, status),
-        values(problem.costs), layout, status, resjac!.task_results, Int(dynamic(numthreads)), min_costs, "resjac!")
+        values(problem.costs), layout, status, resjac!.task_results, Int(dynamic(numthreads)), min_work, "resjac!")
 end
 
 """
-    optimvars_nls(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), min_costs_per_thread=1000, robust=:none, matrix_type=:auto, max_dense_bytes=256*1024^2)
+    optimvars_nls(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), min_work_per_thread=1000, robust=:none, matrix_type=:auto, max_dense_bytes=256*1024^2)
 
 Constructs tall residual and Jacobian callable structs `(f, res!, resjac!, x0, J_proto)` for `problem`.
 Unlike `optimvars`, `unfixed` and `numthreads` are keyword arguments.
@@ -824,7 +826,7 @@ function optimvars_nls(
     problem::Model;
     unfixed = nothing,
     numthreads = StaticInt(Threads.nthreads()),
-    min_costs_per_thread::Int = 1000,
+    min_work_per_thread::Int = 1000,
     robust::Symbol = :none,
     matrix_type::Symbol = :auto,
     max_dense_bytes::Int = 256 * 1024^2,
@@ -869,14 +871,14 @@ function optimvars_nls(
     task_results = [TaskResult(0.0, 0, 0, 0.0) for _ in 1:max(1, N_req)]
     status = NLSRobustStatus()
 
-    res! = NLSResidual(problem, layout, unfixed_inds, robust, status, static(numthreads), min_costs_per_thread, task_results)
-    resjac! = NLSResJac(problem, layout, unfixed_inds, robust, status, static(numthreads), min_costs_per_thread, task_results)
+    res! = NLSResidual(problem, layout, unfixed_inds, robust, status, static(numthreads), min_work_per_thread, task_results)
+    resjac! = NLSResJac(problem, layout, unfixed_inds, robust, status, static(numthreads), min_work_per_thread, task_results)
 
     return (f, res!, resjac!, x0, J_proto)
 end
 
 """
-    flat_optimvars_nls(problem::Model; unfixed=nothing, numthreads=static(1), min_costs_per_thread=1000, robust=:none, matrix_type=:auto, max_dense_bytes=256*1024^2)
+    flat_optimvars_nls(problem::Model; unfixed=nothing, numthreads=static(1), min_work_per_thread=1000, robust=:none, matrix_type=:auto, max_dense_bytes=256*1024^2)
 
 Constructs a flat Euclidean vector wrapper around `optimvars_nls`.
 Returns a NamedTuple `(; f, res!, resjac!, jac!, x0, J_proto, layout, status)`.
@@ -886,7 +888,7 @@ function flat_optimvars_nls(
     problem::Model;
     unfixed = nothing,
     numthreads = static(1),
-    min_costs_per_thread::Int = 1000,
+    min_work_per_thread::Int = 1000,
     robust::Symbol = :none,
     matrix_type::Symbol = :auto,
     max_dense_bytes::Int = 256 * 1024^2,
@@ -909,7 +911,7 @@ function flat_optimvars_nls(
         problem;
         unfixed = unfixed,
         numthreads = numthreads,
-        min_costs_per_thread = min_costs_per_thread,
+        min_work_per_thread = min_work_per_thread,
         robust = robust,
         matrix_type = matrix_type,
         max_dense_bytes = max_dense_bytes,
@@ -958,7 +960,7 @@ function flat_optimvars_nls(
 end
 
 """
-    nls_callbacks(problem::Model; unfixed=nothing, numthreads=static(1), min_costs_per_thread=1000, matrix_type=:auto, max_dense_bytes=256*1024^2)
+    nls_callbacks(problem::Model; unfixed=nothing, numthreads=static(1), min_work_per_thread=1000, matrix_type=:auto, max_dense_bytes=256*1024^2)
 
 Lightweight callback helper for `LeastSquaresOptim.jl`.
 Accepts any non-adaptive `AbstractResidual` problem with linear kernels (`islinearkernel`).
@@ -969,7 +971,7 @@ function nls_callbacks(
     problem::Model;
     unfixed = nothing,
     numthreads = static(1),
-    min_costs_per_thread::Int = 1000,
+    min_work_per_thread::Int = 1000,
     matrix_type::Symbol = :auto,
     max_dense_bytes::Int = 256 * 1024^2,
 )
@@ -986,7 +988,7 @@ function nls_callbacks(
         problem;
         unfixed = unfixed,
         numthreads = numthreads,
-        min_costs_per_thread = min_costs_per_thread,
+        min_work_per_thread = min_work_per_thread,
         robust = robust_mode,
         matrix_type = matrix_type,
         max_dense_bytes = max_dense_bytes,

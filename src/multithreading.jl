@@ -18,8 +18,8 @@ end
     return view(collection, chunk_indices(length(collection), N, taskid))
 end
 
-function cost_multithreaded(vars, costs::CostStruct, ::StaticInt{N})::Float64 where {N}
-    if countcosts(costwork, costs) < MIN_WORK_FOR_THREADED_COST
+function cost_multithreaded(vars, costs::CostStruct, ::StaticInt{N}, min_work::Integer=MIN_WORK_FOR_THREADED_COST)::Float64 where {N}
+    if countcosts(costwork, costs) < min_work
         return sum(bindleadingargs(computecost, vars), costs; init=0.0)
     end
     tot = 0.0

@@ -9,7 +9,7 @@ end
 NLLSModel.ndeps(::ChainRes) = static(2)
 NLLSModel.nres(::ChainRes) = static(2)
 NLLSModel.varindices(r::ChainRes) = SVector(r.i, r.j)
-NLLSModel.getvars(r::ChainRes{V}, vars::Vector) where V = (vars[r.i]::V, vars[r.j]::V)
+NLLSModel.getvars(r::ChainRes{V}, vars::AbstractVector) where V = (vars[r.i]::V, vars[r.j]::V)
 NLLSModel.computeresidual(r::ChainRes, a, b) = SVector(a[1] - b[1] + 0.1 * a[2] * b[2], a[2] - b[2]) - r.meas
 Base.eltype(::ChainRes) = Float64
 
@@ -129,4 +129,24 @@ end
     @test optimvars(p, nothing, static(4))[2].plan isa NLLSModel.BlockThreadPlan
     @test optimvars(p, nothing, static(4); min_work=10^9)[2].plan === nothing
     @test optimvars(p, nothing, static(4); min_work=1)[2].plan isa NLLSModel.BlockThreadPlan
+end
+
+@testset "work-based thresholds for cost evaluation and the tall path" begin
+    p = chainproblem(SVector{2, Float64}, 6)
+    for _ in 2:300, i in 1:5
+        addcost!(p, ChainRes{SVector{2, Float64}}(SVector(0.1i, -0.2), i, i + 1))
+    end
+    # Cost evaluation: the floor is an option and the result does not depend on it
+    f_default, _, x, _ = optimvars(p, nothing, static(4))
+    f_always, _, _, _ = optimvars(p, nothing, static(4); min_work_cost=1)
+    f_never, _, _, _ = optimvars(p, nothing, static(4); min_work_cost=10^9)
+    @test f_always.min_work == 1 && f_never.min_work == 10^9
+    @test f_default(x) ≈ f_always(x) ≈ f_never(x)
+    # Tall path: work (not cost count) decides whether the evaluators thread, and the layout records it
+    _, res1, _, x1, _ = optimvars_nls(p; numthreads=static(1))
+    _, res4, _, x4, _ = optimvars_nls(p; numthreads=static(4), min_work_per_thread=10)
+    @test res4.layout.work == NLLSModel.countcosts(NLLSModel.costwork, p.costs)
+    r1 = zeros(res1.layout.M); r4 = zeros(res4.layout.M)
+    @test res1(r1, x1) ≈ res4(r4, x4)
+    @test r1 ≈ r4
 end
