@@ -17,6 +17,7 @@ using OptimizationVariableInterface: nvars, update, update!
     include("frontdoor.jl")
     include("tallproblems.jl")
     include("tallkernels.jl")
+    include("tallformulation.jl")
     include("NLPModel.jl")
     include("nls_interface.jl")
 end
