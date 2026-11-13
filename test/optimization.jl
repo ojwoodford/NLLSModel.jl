@@ -34,11 +34,8 @@ function optlandmark_problem(ncams, nlms)
 end
 
 function solve(problem; iterator=:levenbergmarquardt, reduction=:auto, reduced=:auto, maxiters=100)
-    f, fdf!, x0, H = optimvars(problem, nothing, static(1); reduction, reduced)
-    c0 = f(x0)
-    options = OptimizationOptions(iterator=iterator, maxiters=maxiters)
-    res = optimize!(x0, HessianObjective(f, fdf!; H), options)
-    NLLSModel.syncvars!(problem, fdf!, x0)
+    c0 = NLLSModel.cost(problem)
+    res = optimize!(problem, OptimizationOptions(iterator=iterator, maxiters=maxiters); numthreads=static(1), reduction, reduced)
     return c0, NLLSModel.cost(problem), res
 end
 
