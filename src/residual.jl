@@ -77,11 +77,13 @@ function gram_buffers(::Type{T}, nk::Int, n::Int)::GramBuffers{T} where T
     return get!(() -> GramBuffers{T}(zeros(T, nk + n), zeros(T, nk + n, nk + n), zeros(T, n)), bycost, (nk, n))
 end
 
-# Residual as an SVector when its length is static and small, so the static-column kernel can be used
+# Residual as an SVector when it is a `Vector` of static length at most MAX_STATIC_ROWS, so the static-column kernel can be
+# used; anything else is returned unchanged. The entry point only reads `nres(residual)`; the dispatch on its value is a
+# separate function, so it can never fall back onto the entry point whatever `nres` returns.
 @inline staticresidual(res::Number, residual) = res
-@inline staticresidual(res, residual) = staticresidual(res, nres(residual))
-@inline staticresidual(res, ::Integer) = res
-@inline function staticresidual(res::Vector{T}, ::StaticInt{M}) where {T, M}
+@inline staticresidual(res, residual) = _staticresidual(res, nres(residual))
+@inline _staticresidual(res, _) = res
+@inline function _staticresidual(res::Vector{T}, ::StaticInt{M}) where {T, M}
     M <= MAX_STATIC_ROWS || return res
     return SVector{M, T}(ntuple(i -> @inbounds(res[i]), Val(M)))
 end

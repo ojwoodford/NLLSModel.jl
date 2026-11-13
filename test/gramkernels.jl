@@ -1,4 +1,5 @@
 using NLLSModel, Test, Static, StaticArrays, LinearAlgebra, Random
+import SecondOrderOptimization: optimize!, OptimizationOptions
 
 # A1: the native gradient and Gauss-Newton Hessian kernels
 @testset "gramkernels.jl" begin
@@ -388,4 +389,229 @@ end
             @test J' * J ≈ H
         end
     end
+end
+
+# ---- B1: a static residual with a dynamic Jacobian ----
+# Hand-written computeresjac returning a residual of container type `R` (SVector, MVector, Vector) and a `Matrix` Jacobian
+struct StatHand{M, R, K} <: NLLSModel.AbstractResidual # R: :svector, :mvector or :vector; nres is static unless `dynamicnres`
+    meas::Vector{Float64}
+    jac::Matrix{Float64}
+    kernel::K
+    dynamicnres::Bool
+end
+StatHand{M, R}(meas, n, kernel; dynamicnres=false) where {M, R} = StatHand{M, R, typeof(kernel)}(meas, zeros(M, n), kernel, dynamicnres)
+NLLSModel.ndeps(::StatHand) = static(1)
+NLLSModel.nres(r::StatHand{M}) where M = r.dynamicnres ? M : static(M)
+NLLSModel.varindices(::StatHand) = 1
+NLLSModel.getvars(::StatHand, vars::AbstractVector) = (vars[1]::Vector{Float64},)
+NLLSModel.robustkernel(r::StatHand) = r.kernel
+Base.eltype(::StatHand) = Float64
+function NLLSModel.computeresjac(varflags, r::StatHand{M, R}, x) where {M, R}
+    for k in 1:M
+        fill!(view(r.jac, k, :), 0.0)
+        r.jac[k, k] = x[k+1]
+        r.jac[k, k+1] = x[k]
+    end
+    vals = ntuple(k -> x[k] * x[k+1] - r.meas[k], Val(M))
+    res = R === :svector ? SVector{M, Float64}(vals) : R === :mvector ? MVector{M, Float64}(vals) : collect(vals)
+    return res, r.jac
+end
+
+# The same with the kernel parameters of an adaptive kernel as variable 1
+struct StatAdaptive{M, R} <: NLLSModel.AbstractAdaptiveResidual
+    meas::Vector{Float64}
+    jac::Matrix{Float64}
+end
+StatAdaptive{M, R}(meas, n::Integer) where {M, R} = StatAdaptive{M, R}(meas, zeros(M, n))
+NLLSModel.ndeps(::StatAdaptive) = static(2)
+NLLSModel.nres(::StatAdaptive{M}) where M = static(M)
+NLLSModel.varindices(::StatAdaptive) = SVector(1, 2)
+NLLSModel.getvars(::StatAdaptive, vars::AbstractVector) = (vars[1]::ContaminatedGaussian{Float64}, vars[2]::Vector{Float64})
+Base.eltype(::StatAdaptive) = Float64
+function NLLSModel.computeresjac(varflags, r::StatAdaptive{M, R}, x) where {M, R}
+    for k in 1:M
+        fill!(view(r.jac, k, :), 0.0)
+        r.jac[k, k] = x[k+1]
+        r.jac[k, k+1] = x[k]
+    end
+    vals = ntuple(k -> x[k] * x[k+1] - r.meas[k], Val(M))
+    return (R === :svector ? SVector{M, Float64}(vals) : MVector{M, Float64}(vals)), r.jac
+end
+
+# One static variable of size N, with the Jacobian returned as an SMatrix (S) or as a Matrix
+struct StatFull{M, N, S, K} <: NLLSModel.AbstractResidual
+    meas::SVector{M, Float64}
+    kernel::K
+end
+NLLSModel.ndeps(::StatFull) = static(1)
+NLLSModel.nres(::StatFull{M}) where M = static(M)
+NLLSModel.varindices(::StatFull) = 1
+NLLSModel.getvars(::StatFull{M, N}, vars::AbstractVector) where {M, N} = (vars[1]::SVector{N, Float64},)
+NLLSModel.robustkernel(r::StatFull) = r.kernel
+Base.eltype(::StatFull) = Float64
+function NLLSModel.computeresjac(varflags, r::StatFull{M, N, S}, x) where {M, N, S}
+    res = SVector{M, Float64}(ntuple(k -> x[mod1(k, N)] * x[mod1(k + 1, N)] - r.meas[k], Val(M)))
+    J = zeros(M, N)
+    for k in 1:M
+        J[k, mod1(k, N)] += x[mod1(k + 1, N)]
+        J[k, mod1(k + 1, N)] += x[mod1(k, N)]
+    end
+    return res, S ? SMatrix{M, N, Float64}(J) : J
+end
+
+# A residual whose `nres` is whatever it is told
+struct NresOf{V}
+    v::V
+end
+NLLSModel.nres(r::NresOf) = r.v
+
+# The kernel `gramgrad!` reaches, from the predicates it dispatches on
+function kernelof(res, jac)
+    H, g = Matrix{Float64}, Vector{Float64}
+    NLLSModel.staticcols_ok(typeof(jac), typeof(res)) && return :staticcols
+    NLLSModel.turbo_ok(H, g, typeof(jac), typeof(res)) && return :turbo
+    return :plain
+end
+
+@testset "B1: staticresidual over the grid" begin
+    srows = NLLSModel.MAX_STATIC_ROWS
+    inputs(L) = (("Float64", 2.5), ("Vector", randn(L)), ("SVector", SVector{L, Float64}(randn(L))),
+                 ("MVector", MVector{L, Float64}(randn(L))), ("view", view(randn(L + 2), 2:L+1)))
+    nresvals = (("Int", 5, 5), ("StaticInt at the limit", static(srows), srows), ("StaticInt below the limit", static(3), 3),
+                ("StaticInt above the limit", static(srows + 1), srows + 1))
+    @testset "$vname, nres is $nname" for (nname, nresval, L) in nresvals, (vname, val) in inputs(L)
+        out = NLLSModel.staticresidual(val, NresOf(nresval))
+        if val isa Vector && nresval isa StaticInt && dynamic(nresval) <= srows
+            @test out isa SVector{L, Float64}
+            @test collect(out) == val
+        else
+            @test out === val
+        end
+    end
+    @testset "no method ambiguities" begin
+        ambiguous = Test.detect_ambiguities(NLLSModel; recursive=false)
+        @test isempty(filter(pair -> any(m -> m.name in (:staticresidual, :_staticresidual), pair), ambiguous))
+    end
+end
+
+@testset "B1: (static residual, Matrix Jacobian) end to end" begin
+    rng = MersenneTwister(31)
+    x = randn(rng, 48)
+    kernels = (NoRobust(), HuberKernel(0.5), Huber2oKernel(0.5))
+    @testset "$(typeof(kernel)), M = $M, $R" for kernel in kernels, M in (1, 7, 16, 17, 40), R in (:svector, :mvector)
+        meas = randn(rng, M)
+        res = StatHand{M, R}(meas, 48, kernel)
+        ref = StatHand{M, :vector}(meas, 48, kernel) # (Vector, Matrix)
+        c, g, H = NLLSModel.computerescostgradhess(static(2), res, kernel, (x,))
+        g, H = copy(g), copy(H) # Buffers are reused by the next evaluation
+        cv, gv, Hv = NLLSModel.computerescostgradhess(static(2), ref, kernel, (x,))
+        c_ref, g_ref, H_ref = reference_costgradhess(static(2), res, kernel, (x,))
+        @test c ≈ cv && g ≈ gv && H ≈ Hv
+        @test c ≈ c_ref && g ≈ g_ref && H ≈ H_ref
+        @test H == H'
+        # The kernel reached
+        r, J = NLLSModel.computeresjac(static(1), res, x)
+        expected = R === :svector && M <= NLLSModel.MAX_STATIC_ROWS ? :staticcols : :plain
+        @test kernelof(NLLSModel.staticresidual(r, res), J) == expected
+        rv, Jv = NLLSModel.computeresjac(static(1), ref, x)
+        expectedv = M <= NLLSModel.MAX_STATIC_ROWS ? :staticcols : :turbo
+        @test kernelof(NLLSModel.staticresidual(rv, ref), Jv) == expectedv
+    end
+
+    @testset "(Vector, Matrix) with a plain Int nres, M = $M" for M in (3, 40)
+        for kernel in kernels
+            meas = randn(rng, M)
+            res = StatHand{M, :vector}(meas, 48, kernel; dynamicnres=true)
+            ref = StatHand{M, :vector}(meas, 48, kernel)
+            c, g, H = NLLSModel.computerescostgradhess(static(2), res, kernel, (x,))
+            g, H = copy(g), copy(H)
+            c_ref, g_ref, H_ref = reference_costgradhess(static(2), res, kernel, (x,))
+            @test c ≈ c_ref && g ≈ g_ref && H ≈ H_ref
+            r, J = NLLSModel.computeresjac(static(1), res, x)
+            @test NLLSModel.staticresidual(r, res) === r # Not converted
+            @test kernelof(r, J) == :turbo
+        end
+    end
+
+    @testset "adaptive kernel, M = $M, $R" for M in (7, 17), R in (:svector, :mvector)
+        kernel = ContaminatedGaussian(0.5, 5.0, 0.4)
+        meas = randn(rng, M)
+        res = StatAdaptive{M, R}(meas, 48)
+        for varflags in (static(3), static(2))
+            c, g, H = NLLSModel.computerescostgradhess(varflags, res, kernel, (x,))
+            g, H = copy(g), copy(H)
+            c_ref, g_ref, H_ref = reference_costgradhess(varflags, res, kernel, (x,))
+            @test c ≈ c_ref && g ≈ g_ref && H ≈ H_ref
+            @test H ≈ H' # (the kernel's own second-derivative block is symmetric only to rounding)
+        end
+    end
+
+    @testset "against the fully static version, M = $M" for M in (1, 7, 16, 17), kernel in kernels
+        N = 6
+        xs = SVector{N, Float64}(randn(rng, N))
+        meas = SVector{M, Float64}(randn(rng, M))
+        stat = StatFull{M, N, true, typeof(kernel)}(meas, kernel)
+        dyn = StatFull{M, N, false, typeof(kernel)}(meas, kernel)
+        _, J = NLLSModel.computeresjac(static(1), stat, xs)
+        @test J isa SMatrix
+        cs, gs, Hs = NLLSModel.computerescostgradhess(static(2), stat, kernel, (xs,))
+        cd, gd, Hd = NLLSModel.computerescostgradhess(static(2), dyn, kernel, (xs,))
+        @test cs ≈ cd && collect(gs) ≈ gd && Matrix(Hs) ≈ Hd
+        @test kernelof(meas, zeros(M, N)) == (M <= NLLSModel.MAX_STATIC_ROWS ? :staticcols : :plain)
+    end
+end
+
+@testset "B1: no allocation for (SVector, Matrix) after warm-up" begin
+    x = randn(MersenneTwister(41), 24)
+    cg(res, vars) = NLLSModel.computerescostgradhess(static(2), res, NoRobust(), vars)
+    for M in (7, 16)
+        res = StatHand{M, :svector}(randn(MersenneTwister(42), M), 24, NoRobust())
+        cg(res, (x,))
+        cg(res, (x,))
+        @test (@allocated cg(res, (x,))) == 0
+    end
+end
+
+# The Procrustes "Specialized" layout: one variable, a static 7-vector residual per point, the Jacobian written into a per-task Matrix
+struct ProcRes{HAND} <: NLLSModel.AbstractResidual
+    p::SVector{4, Float64}
+    q::SVector{7, Float64}
+end
+NLLSModel.ndeps(::ProcRes) = static(1)
+NLLSModel.nres(::ProcRes) = static(7)
+NLLSModel.varindices(::ProcRes) = 1
+NLLSModel.getvars(::ProcRes, vars::AbstractVector) = (vars[1]::Vector{Float64},)
+Base.eltype(::ProcRes) = Float64
+procvalue(r::ProcRes, a, k) = sin(a[mod1(k, 4)]) * r.p[mod1(k + 1, 4)] + 0.1 * a[mod1(k + 1, 4)]^2 - r.q[k]
+NLLSModel.computeresidual(r::ProcRes, a) = SVector{7}(ntuple(k -> procvalue(r, a, k), Val(7)))
+function NLLSModel.computeresjac(varflags, r::ProcRes{true}, a)
+    J = get!(() -> zeros(7, 4), task_local_storage(), :procrustes_jac)::Matrix{Float64}
+    fill!(J, 0.0)
+    for k in 1:7
+        J[k, mod1(k, 4)] += cos(a[mod1(k, 4)]) * r.p[mod1(k + 1, 4)]
+        J[k, mod1(k + 1, 4)] += 0.2 * a[mod1(k + 1, 4)]
+    end
+    return SVector{7}(ntuple(k -> procvalue(r, a, k), Val(7))), J
+end
+
+function procproblem(HAND, npoints, seed)
+    rng = MersenneTwister(seed)
+    truth = [0.3, -0.5, 0.8, 0.2]
+    model = Model(Vector{Float64}, ProcRes{HAND})
+    addvariable!(model, truth .+ 0.4 .* randn(rng, 4))
+    for _ in 1:npoints
+        p = SVector{4, Float64}(randn(rng, 4))
+        q = SVector{7, Float64}(ntuple(k -> procvalue(ProcRes{HAND}(p, zeros(SVector{7})), truth, k), Val(7))) .+ 0.01 .* randn(rng, SVector{7, Float64})
+        addcost!(model, ProcRes{HAND}(p, q))
+    end
+    return model
+end
+
+@testset "B1: a whole solve with (SVector, Matrix) costs, $nthreads thread(s)" for nthreads in (1, 4)
+    options = OptimizationOptions(iterator=:levenbergmarquardt, maxiters=50)
+    hand, auto = procproblem(true, 300, 51), procproblem(false, 300, 51)
+    optimize!(hand, options; numthreads=static(nthreads), min_work=0, min_work_cost=0)
+    optimize!(auto, options; numthreads=static(nthreads), min_work=0, min_work_cost=0)
+    @test NLLSModel.cost(hand) ≈ NLLSModel.cost(auto) rtol=1e-8
+    @test hand.variables[1] ≈ auto.variables[1] atol=1e-6
 end

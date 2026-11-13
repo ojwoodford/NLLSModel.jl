@@ -372,8 +372,11 @@ Rules for user code, because residuals are evaluated on several threads at once:
 - The code must itself be single-threaded (no BLAS on large matrices, no `Threads.@threads`). If it needs BLAS, call
   `BLAS.set_num_threads(1)` in the application.
 
-The Jacobian can be an `SMatrix`, a `Matrix` (or any strided matrix of hardware floats) or, for a scalar residual, the
-adjoint of the gradient vector. The kernels for products of the Jacobian are chosen by its type and the type of `nres`.
+The residual can be a `Number`, a `Vector` or any `StaticVector` (`SVector`, `MVector`, ...). The Jacobian can be an
+`SMatrix`, a `Matrix` (or any strided matrix of hardware floats) or, for a scalar residual, the adjoint of the gradient
+vector. The two need not both be static or both dynamic: a static residual with a `Matrix` Jacobian is fine, as is a
+`Vector` residual with an `SMatrix`. The kernels for products of the Jacobian are chosen by the types of the residual and
+Jacobian and by the type of `nres` (see [`nres`](@ref)).
 """
 function computeresjac end
 
