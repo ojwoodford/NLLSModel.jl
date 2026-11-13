@@ -330,6 +330,13 @@ end
         # Below the cap the full static multiply is still used
         small = CapRes{4, 4}(SVector{4, Float64}(randn(MersenneTwister(2), 4)))
         @test path(small, SVector{4, Float64}(1, 2, 3, 4)) isa SMatrix
+        # Above the cap with a short static residual (3 x 64): dynamic autodiff, but the static-column kernel, not @turbo
+        wide = CapRes{3, 64}(SVector{3, Float64}(1.0, 2.0, 3.0))
+        xw = SVector{64, Float64}(randn(MersenneTwister(5), 64))
+        @test !NLLSModel.usestatic(static(1), wide, (xw,))
+        rw, jw = NLLSModel.computeresjac(static(1), wide, xw)
+        @test NLLSModel.staticresidual(rw, wide) isa SVector{3, Float64}
+        @test NLLSModel.staticcols_ok(typeof(jw), typeof(NLLSModel.staticresidual(rw, wide)))
     end
     @testset "dynamic variables, static residual around MAX_STATIC_ROWS" begin
         xv = randn(MersenneTwister(3), 40)
