@@ -817,7 +817,7 @@ function (resjac!::NLSResJac)(r::AbstractVector{Float64}, J, vars; prezeroed::Bo
 end
 
 """
-    optimvars_nls(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), min_work_per_thread=1000, robust=:none, matrix_type=:auto, max_dense_bytes=256*1024^2)
+    optimvars_nls(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), min_work_per_thread=5000, robust=:none, matrix_type=:auto, max_dense_bytes=256*1024^2)
 
 Constructs tall residual and Jacobian callable structs `(f, res!, resjac!, x0, J_proto)` for `problem`.
 Unlike `optimvars`, `unfixed` and `numthreads` are keyword arguments.
@@ -826,7 +826,7 @@ function optimvars_nls(
     problem::Model;
     unfixed = nothing,
     numthreads = StaticInt(Threads.nthreads()),
-    min_work_per_thread::Int = 1000,
+    min_work_per_thread::Int = 5000,
     robust::Symbol = :none,
     matrix_type::Symbol = :auto,
     max_dense_bytes::Int = 256 * 1024^2,
@@ -861,10 +861,10 @@ function optimvars_nls(
 
     if is_single
         x0 = problem.variables[unfixed_inds]
-        f = SingleVarCostFunc(problem, unfixed_inds, static(numthreads))
+        f = SingleVarCostFunc(problem, unfixed_inds, static(numthreads), 2 * min_work_per_thread)
     else
         x0 = unfixed_inds === nothing ? problem.variables : problem.variables[unfixed_inds]
-        f = MultiVarCostFunc(problem, unfixed_inds, static(numthreads))
+        f = MultiVarCostFunc(problem, unfixed_inds, static(numthreads), 2 * min_work_per_thread)
     end
 
     N_req = Int(dynamic(numthreads))
@@ -878,7 +878,7 @@ function optimvars_nls(
 end
 
 """
-    flat_optimvars_nls(problem::Model; unfixed=nothing, numthreads=static(1), min_work_per_thread=1000, robust=:none, matrix_type=:auto, max_dense_bytes=256*1024^2)
+    flat_optimvars_nls(problem::Model; unfixed=nothing, numthreads=static(1), min_work_per_thread=5000, robust=:none, matrix_type=:auto, max_dense_bytes=256*1024^2)
 
 Constructs a flat Euclidean vector wrapper around `optimvars_nls`.
 Returns a NamedTuple `(; f, res!, resjac!, jac!, x0, J_proto, layout, status)`.
@@ -888,7 +888,7 @@ function flat_optimvars_nls(
     problem::Model;
     unfixed = nothing,
     numthreads = static(1),
-    min_work_per_thread::Int = 1000,
+    min_work_per_thread::Int = 5000,
     robust::Symbol = :none,
     matrix_type::Symbol = :auto,
     max_dense_bytes::Int = 256 * 1024^2,
@@ -960,7 +960,7 @@ function flat_optimvars_nls(
 end
 
 """
-    nls_callbacks(problem::Model; unfixed=nothing, numthreads=static(1), min_work_per_thread=1000, matrix_type=:auto, max_dense_bytes=256*1024^2)
+    nls_callbacks(problem::Model; unfixed=nothing, numthreads=static(1), min_work_per_thread=5000, matrix_type=:auto, max_dense_bytes=256*1024^2)
 
 Lightweight callback helper for `LeastSquaresOptim.jl`.
 Accepts any non-adaptive `AbstractResidual` problem with linear kernels (`islinearkernel`).
@@ -971,7 +971,7 @@ function nls_callbacks(
     problem::Model;
     unfixed = nothing,
     numthreads = static(1),
-    min_work_per_thread::Int = 1000,
+    min_work_per_thread::Int = 5000,
     matrix_type::Symbol = :auto,
     max_dense_bytes::Int = 256 * 1024^2,
 )

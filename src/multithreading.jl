@@ -1,10 +1,13 @@
 using Polyester
 
-# Problems with less work than these are evaluated on a single thread. Work is estimated by `costwork` (a proxy: residual
-# length times variables squared, so one scalar residual of one variable is one unit). The thresholds below are the
-# former cost-count thresholds, so simple costs behave as before and heavier costs start threading sooner.
-const MIN_WORK_FOR_THREADED_COST = 100_000 # Evaluating the cost alone is cheap, so needs a lot of work to pay for threading
-const MIN_WORK_FOR_THREADED_LINEARIZATION = 10_000 # Each thread also needs its own copy of the linear system
+# Problems with less work than these are evaluated on a single thread. Work is estimated by `costwork` (residual length
+# times variables squared; one scalar residual of one variable is one unit). The defaults come from measurements of affine
+# bundle adjustment problems on an Apple-silicon laptop with 4 threads (serial time per unit of work: about 0.7 ns for the
+# cost, 17 ns for the linearization; threading the cost already wins at 16 000 units, 10.6 -> 3.2 us, while threading the
+# linearization loses at 2 000 units, 32 -> 37 us, breaks even near 10 000 and gives 1.6x at 160 000). Both can be set per
+# problem with the `min_work_cost` and `min_work` options of `optimvars`.
+const MIN_WORK_FOR_THREADED_COST = 15_000 # Evaluating the cost alone: roughly 10 us of serial work
+const MIN_WORK_FOR_THREADED_LINEARIZATION = 10_000 # Linearizing: the break-even measured above
 
 @inline function chunk_indices(len::Integer, nchunks::Integer, chunkid::Integer)
     chunkid > nchunks && return 1:0

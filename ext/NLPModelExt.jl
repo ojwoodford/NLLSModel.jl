@@ -302,7 +302,7 @@ mutable struct NLLSModelNLS{P, L, RES, RESJAC, J} <: AbstractNLSModel{Float64, V
 end
 
 """
-    NLLSNLSModel(problem::Model; unfixed=nothing, numthreads=static(1), min_work_per_thread=1000, matrix_type=:auto, max_dense_bytes=32*1024^2, name="NLLSNLSModel")
+    NLLSNLSModel(problem::Model; unfixed=nothing, numthreads=static(1), min_work_per_thread=5000, matrix_type=:auto, max_dense_bytes=32*1024^2, name="NLLSNLSModel")
 
 Constructs an `NLLSModelNLS <: AbstractNLSModel{Float64, Vector{Float64}}` adapter for `problem`.
 Requires all costs to be non-adaptive `AbstractResidual`s with linear robust kernels (`islinearkernel`).
@@ -312,7 +312,7 @@ function NLLSModel.NLLSNLSModel(
     problem::Model;
     unfixed = nothing,
     numthreads = static(1),
-    min_work_per_thread::Int = 1000,
+    min_work_per_thread::Int = 5000,
     matrix_type::Symbol = :auto,
     max_dense_bytes::Int = 32 * 1024^2,
     name::String = "NLLSNLSModel",
