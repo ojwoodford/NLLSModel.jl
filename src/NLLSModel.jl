@@ -51,7 +51,31 @@ abstract type AbstractAdaptiveRobustifier <: AbstractRobustifier end # Robustifi
 # Constants
 const MAX_ARGS = 10 # Maximum number of variables a residual can depend on
 const MAX_BLOCK_SZ = 32 # Maximum DoF of a variable and also maximum length of a residual allowed for various operations, such as marginalization
-const MAX_STATIC_VAR = 64 # Maximum static variable size for static sized autodiff to be used
+"""
+    MAX_STATIC_VAR
+
+Maximum total size of the unfixed variables of a cost for the full static path (static-sized autodiff and the static
+multiply of `gramgrad`). Inherited from NLLSsolver; not measured.
+"""
+const MAX_STATIC_VAR = 64
+
+"""
+    MAX_STATIC_JAC
+
+Maximum rows × columns (`nres` times the total size of the unfixed variables) of the Jacobian of a cost for the full
+static path. It bounds the size of the static Jacobian that is built and unrolled; a cost above it takes the dynamic
+autodiff path and the static-column or `@turbo` kernel. A starting value, not measured.
+"""
+const MAX_STATIC_JAC = 512
+
+"""
+    MAX_STATIC_ROWS
+
+Maximum static residual length (`nres` returning a `StaticInt`) for the static-column kernel of `gramgrad!`, which is
+used for costs that are not on the full static path. Longer (or run-time) residuals use the `@turbo` kernel. Tested
+independently of the number of columns. A starting value, not measured.
+"""
+const MAX_STATIC_ROWS = 16
 
 # Includes
 include("utils.jl")
@@ -62,6 +86,7 @@ include("unroll.jl")
 include("linearsystem.jl")
 include("robust.jl")
 include("robustadaptive.jl")
+include("gramkernels.jl")
 include("residual.jl")
 include("autodiff.jl")
 include("cost.jl")

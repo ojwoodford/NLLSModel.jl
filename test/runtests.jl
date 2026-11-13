@@ -8,6 +8,7 @@ using OptimizationVariableInterface: nvars, update, update!
     include("nonsquaredcost.jl")
     include("adaptivecost.jl")
     include("multithreading.jl")
+    include("gramkernels.jl")
     include("problemapi.jl")
     include("runtimeblocks.jl")
     include("bigvariable.jl")
