@@ -92,3 +92,31 @@ Base.eltype(::OneRes) = Float64
     @test collect(res) ≈ collect(res_s)
     @test Matrix(jac) ≈ Matrix(jac_s)
 end
+
+# Threaded dense and sparse linearization (block-column ownership, no per-thread copies) matches the serial result
+@testset "threaded block systems" begin
+    for (n, copies, V) in ((6, 300, SVector{2, Float64}), (600, 3, SVector{2, Float64}), (6, 300, Vector{Float64}))
+        build() = begin
+            p = chainproblem(V, n)
+            for _ in 2:copies, i in 1:n-1
+                addcost!(p, ChainRes{V}(SVector(0.1i, -0.2), i, i + 1))
+            end
+            addcost!(p, ChainRes{V}(SVector(0.3, 0.1), 1, n)) # A cost spanning the first and last blocks (different threads)
+            p
+        end
+        p1, p4 = build(), build()
+        @test NLLSModel.countcosts(NLLSModel.costwork, p1.costs) >= NLLSModel.MIN_WORK_FOR_THREADED_LINEARIZATION
+        f1, fdf1!, x1, H1 = optimvars(p1, nothing, static(1))
+        f4, fdf4!, x4, H4 = optimvars(p4, nothing, static(4))
+        @test fdf4!.plan isa NLLSModel.BlockThreadPlan
+        @test fdf4!.linsystem isa NLLSModel.LinearSystem # No per-thread copies
+        g1 = zeros(2n); g4 = zeros(2n)
+        H1_ = H1 === nothing ? zeros(2n, 2n) : H1
+        H4_ = H4 === nothing ? zeros(2n, 2n) : H4
+        for _ in 1:2 # The buffers are re-zeroed on every evaluation
+            @test fdf1!(g1, H1_, x1) ≈ fdf4!(g4, H4_, x4)
+            @test g1 ≈ g4
+            @test Matrix(H1_) ≈ Matrix(H4_)
+        end
+    end
+end
