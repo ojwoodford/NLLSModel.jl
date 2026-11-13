@@ -18,6 +18,7 @@ using OptimizationVariableInterface: nvars, update, update!
     include("tallproblems.jl")
     include("tallkernels.jl")
     include("tallformulation.jl")
+    include("tallcontract.jl")
     include("NLPModel.jl")
     include("nls_interface.jl")
 end
