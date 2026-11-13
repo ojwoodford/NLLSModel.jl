@@ -190,18 +190,12 @@ issolved(model, targets, which=eachindex(targets); atol=1e-6) = all(k -> isappro
     end
 
     @testset "static rule agrees with the optimizer: $name" for (name, V, n) in (("1", SVector{1, Float64}, 1), ("16", SVector{16, Float64}, 16), ("17", SVector{17, Float64}, 17), ("dynamic 3", Vector{Float64}, 3), ("dynamic 17", Vector{Float64}, 17))
-        # (SecondOrderOptimization A4's `usesstaticsystem` is not implemented, so compare the two linear system types directly)
         model, _ = singleproblem(V, n, 8)
         _, fdf!, x0, H = optimvars(model, nothing, static(1))
         ours = typeof(fdf!.linsystem.ls) <: NLLSModel.UniVariateLSstatic_ls
         theirs = makelinearsystem(x0, H, :auto) isa SecondOrderOptimization.StaticLinearSystem
-        # SecondOrderOptimization builds a static system for a StaticVector of any size, NLLSModel only up to 16. The two
-        # systems are independent (fdf! fills whatever the optimizer hands it), so this costs speed, not correctness.
-        if V <: StaticVector && n > 16
-            @test_broken ours == theirs
-        else
-            @test ours == theirs
-        end
+        @test ours == theirs
+        @test ours == usesstaticsystem(x0) # SecondOrderOptimization's one statement of the rule (MAX_STATIC_SYSTEM = 16)
         @test ours == (V <: StaticVector && n <= 16)
     end
 
