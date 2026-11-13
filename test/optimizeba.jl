@@ -174,20 +174,20 @@ end
     addvariable!(prob_bad, Landmark3D(SVector(4.0, 5.0, 6.0)))
     addcost!(prob_bad, SimpleError2{SVector{6, Float64}, Landmark3D{Float64}}(SVector(0.0, 0.0), 1, 2))
     addcost!(prob_bad, SimpleError2{Landmark3D{Float64}, Landmark3D{Float64}}(SVector(0.0, 0.0), 2, 3))
-    @test_throws ArgumentError partition_schur_problem(prob_bad, trues(length(prob_bad.variables)), :schur)
+    @test_throws ArgumentError partition_schur_problem(prob_bad, trues(length(prob_bad.variables)), true)
 
     # A2) With automatic solver selection the same problem falls back to a non-Schur solver (B6)
-    @test isnothing(partition_schur_problem(prob_bad, trues(length(prob_bad.variables)), nothing))
-    @test isnothing(partition_schur_problem(prob_bad, trues(length(prob_bad.variables)), :auto))
+    @test isnothing(partition_schur_problem(prob_bad, trues(length(prob_bad.variables)), false))
+    @test isnothing(partition_schur_problem(prob_bad, trues(length(prob_bad.variables))))
     _, _, _, H_bad = optimvars(prob_bad, nothing, static(1))
     @test !(H_bad isa BlockLinearSystems.SchurBlockMatrix)
 
-    # B) Calling with no eliminable variables when linsolver=:schur throws ArgumentError
+    # B) Calling with no eliminable variables when reduction=:eliminate throws ArgumentError
     prob_no_elim = create_ba_problem(2, 2, 1.0)
-    @test_throws ArgumentError partition_schur_problem(prob_no_elim, trues(length(prob_no_elim.variables)), :schur)
+    @test_throws ArgumentError partition_schur_problem(prob_no_elim, trues(length(prob_no_elim.variables)), true)
 
     # 4. Dense Schur Solver (optimvars)
-    f_ds, fdf_ds!, x0_ds, H_ds = optimvars(prob_schur, nothing, static(1); linsolver=:dense_schur)
+    f_ds, fdf_ds!, x0_ds, H_ds = optimvars(prob_schur, nothing, static(1); reduction=:eliminate, reduced=:dense)
     @test H_ds isa BlockLinearSystems.SchurBlockMatrix
     @test H_ds.R isa Matrix{Float64}
     tot_dim_ds = H_ds.structure.nr + sum(H_ds.structure.e_dims)
@@ -197,7 +197,7 @@ end
     @test (@allocated fdf_ds!(g_ds, H_ds, x0_ds)) == 0
 
     # 5. Sparse Schur Solver (optimvars)
-    f_ss, fdf_ss!, x0_ss, H_ss = optimvars(prob_schur, nothing, static(1); linsolver=:sparse_schur)
+    f_ss, fdf_ss!, x0_ss, H_ss = optimvars(prob_schur, nothing, static(1); reduction=:eliminate, reduced=:sparse)
     @test H_ss isa BlockLinearSystems.SchurBlockMatrix
     @test H_ss.R isa BlockLinearSystems.SparseBlockLinearSystem
     g_ss = zeros(tot_dim_ds)
@@ -225,9 +225,9 @@ end
         addcost!(prob_rr, SimpleError2{SVector{6, Float64}, Landmark3D{Float64}}(randn(SVector{2, Float64}), cam, l))
     end
     addcost!(prob_rr, SimpleError2{SVector{6, Float64}, SVector{6, Float64}}(randn(SVector{2, Float64}), 2, 3)) # relative-pose cost
-    @test partition_schur_problem(prob_rr, trues(7), :sparse_schur).extra_blocks == [(2, 3)]
-    f_rd, fdf_rd!, x0_rd, H_rd = optimvars(prob_rr, nothing, static(1); linsolver=:dense_schur)
-    f_rs, fdf_rs!, x0_rs, H_rs = optimvars(prob_rr, nothing, static(1); linsolver=:sparse_schur)
+    @test partition_schur_problem(prob_rr, trues(7), true).extra_blocks == [(2, 3)]
+    f_rd, fdf_rd!, x0_rd, H_rd = optimvars(prob_rr, nothing, static(1); reduction=:eliminate, reduced=:dense)
+    f_rs, fdf_rs!, x0_rs, H_rs = optimvars(prob_rr, nothing, static(1); reduction=:eliminate, reduced=:sparse)
     tot_rr = H_rd.structure.nr + sum(H_rd.structure.e_dims)
     g_rd = zeros(tot_rr); g_rs = zeros(tot_rr)
     @test fdf_rd!(g_rd, H_rd, x0_rd) ≈ fdf_rs!(g_rs, H_rs, x0_rs)

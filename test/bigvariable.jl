@@ -1,5 +1,5 @@
 using NLLSModel, Test, Static, StaticArrays, SparseArrays, LinearAlgebra
-import SecondOrderOptimization: optimize, OptimizationOptions
+import SecondOrderOptimization: optimize!, OptimizationOptions, HessianObjective
 import OptimizationVariableInterface
 
 # The 255-dimension limit comes from BlockLinearSystems' UInt8 block sizes. It applies only to variables that become blocks
@@ -85,7 +85,8 @@ end
     # It can be optimized on its own, and the single variable system does not use blocks
     f, fdf!, x0, H = optimvars(problem, 1, static(1))
     @test H === nothing
-    x, res = optimize(f, fdf!, x0, OptimizationOptions(iterator=:levenbergmarquardt, maxiters=20); H=H)
+    res = optimize!(x0, HessianObjective(f, fdf!; H), OptimizationOptions(iterator=:levenbergmarquardt, maxiters=20))
+    x = x0
     @test f(x) < 1e-8
     @test x ≈ collect(1.0:256)
 
@@ -103,17 +104,18 @@ end
         msg = err isa ArgumentError ? err.msg : ""
         @test occursin("Variable 1", msg) && occursin("256", msg) && occursin("1 to 255", msg) && occursin("on its own", msg)
     end
-    checkerror(() -> optimvars(problem, nothing, static(1); linsolver=:cholesky)) # Dense
-    checkerror(() -> optimvars(bigproblem(256, 40), nothing, static(1); linsolver=:cholesky)) # Sparse (large enough to be chosen)
-    for linsolver in (:dense_schur, :sparse_schur, nothing) # Schur (the default chooses it for eliminable variables)
-        checkerror(() -> optimvars(schurproblem(256), nothing, static(1); linsolver=linsolver))
+    checkerror(() -> optimvars(problem, nothing, static(1); reduction=:none)) # Dense
+    checkerror(() -> optimvars(bigproblem(256, 40), nothing, static(1); reduction=:none)) # Sparse (large enough to be chosen)
+    for reduced in (:dense, :sparse, :auto) # Schur (the default chooses it for eliminable variables)
+        checkerror(() -> optimvars(schurproblem(256), nothing, static(1); reduced))
     end
 
     # A variable of 255 dimensions still works as a block, including in a Schur system
-    f, fdf!, x0, H = optimvars(schurproblem(255), nothing, static(1); linsolver=:dense_schur)
+    f, fdf!, x0, H = optimvars(schurproblem(255), nothing, static(1); reduced=:dense)
     @test f(x0) > 0
     problem = bigproblem(255)
     f, fdf!, x0, H = optimvars(problem, nothing, static(1))
-    x, res = optimize(f, fdf!, x0, OptimizationOptions(iterator=:levenbergmarquardt, maxiters=50); H=H)
-    @test f(x) < f(x0)
+    c0 = f(x0)
+    optimize!(x0, HessianObjective(f, fdf!; H), OptimizationOptions(iterator=:levenbergmarquardt, maxiters=50))
+    @test f(x0) < c0
 end

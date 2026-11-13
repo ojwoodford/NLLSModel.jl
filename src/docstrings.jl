@@ -194,21 +194,29 @@ addcost!(problem, my_residual)
 addcost!
 
 """
-    optimvars(problem::Model, unfixed=nothing, numthreads=StaticInt(Threads.nthreads()); linsolver=nothing, min_work=$MIN_WORK_FOR_THREADED_LINEARIZATION, min_work_cost=$MIN_WORK_FOR_THREADED_COST) -> (f, fdf!, x0, H)
+    optimvars(problem::Model, unfixed=nothing, numthreads=StaticInt(Threads.nthreads()); reduction=:auto, reduced=:auto, min_work=$MIN_WORK_FOR_THREADED_LINEARIZATION, min_work_cost=$MIN_WORK_FOR_THREADED_COST) -> (f, fdf!, x0, H)
+
+The normal way to solve a `Model` is `optimize!(model, options)` (needs `using SecondOrderOptimization`); `optimvars` is the
+advanced route, for custom outer loops, reusing a workspace, or other solvers.
 
 Constructs the objective function `f`, in-place gradient/Hessian evaluator `fdf!`, initial variable state `x0`, and Hessian template `H` (`nothing` for static/dense systems or a `SparseMatrixCSC` for sparse systems) for `problem`.
 
-The returned 4-tuple can be passed directly to `SecondOrderOptimization.optimize`:
+Wrap the returned 4-tuple in a `HessianObjective` and pass it to `SecondOrderOptimization.optimize!`, then write the
+solution back into the model:
 ```julia
-f, fdf!, x0, H = optimvars(problem)
-x_opt, result = optimize(f, fdf!, x0, options; H=H)
+f, fdf!, x0, H = optimvars(model)
+result = optimize!(x0, HessianObjective(f, fdf!; H), options)
+syncvars!(model, fdf!, x0)
 ```
+(`optimize!` needs a mutable `x0`; for a single variable of static size use `optimize`, which returns `(x, result)`, and
+sync `x`.)
 
 # Arguments
 - `problem::Model`: The nonlinear least squares problem.
 - `unfixed`: Optional variable index (`Integer`), variable type (`DataType`), or boolean mask specifying which variables to optimize (defaults to `nothing`, optimizing all variables).
 - `numthreads`: Number of threads to use for parallel cost and derivative evaluation (`StaticInt` or `Integer`).
-- `linsolver`: Optional linear solver (`:schur`, `:dense_schur`, `:sparse_schur`, ...); `nothing` or `:auto` selects automatically.
+- `reduction`: whether eliminable variables are eliminated (Schur complement). `:auto` (default) eliminates when the model has `iseliminable` variables and the structure fits, and falls back to no elimination otherwise; `:eliminate` eliminates or throws an `ArgumentError`; `:none` never eliminates. Any other value is an `ArgumentError`. The returned `H` is a `SchurBlockMatrix` exactly when elimination happens, and the optimizer eliminates exactly when it is handed one.
+- `reduced`: storage of the reduced system when elimination happens: `:auto` (default; chosen from the predicted fill of a Cholesky factor), `:dense` or `:sparse`. It is silently ignored (no error, no warning) when no elimination happens, that is with `reduction = :none`, or with `:auto` on a model that does not eliminate.
 - `min_work`: Linearization is threaded only if the problem's estimated work (see `costwork`: residual length times variables squared, summed over costs; one scalar residual of one variable is one unit) is at least this.
 - `min_work_cost`: The same floor for evaluating the cost alone, which is cheaper per unit of work and so needs more of it to pay for threading.
 """

@@ -184,21 +184,21 @@ countcosts(fun, costs::CostStruct) = sum(fun, values(costs); init=0)
 nresiduals(problem::Model) = Int(countcosts(resnum, problem.costs))
 
 """
-    partition_schur_problem(problem::Model, unfixed::AbstractVector, linsolver_req=nothing)
+    partition_schur_problem(problem::Model, unfixed::AbstractVector, explicit::Bool=false)
 
 Validate bipartite structure, check static eliminable variable dimensions (De in {1, 2, 3}),
 and perform two-pass variable ordering for Schur complement reduction.
 Returns named tuple `(unfixed_inds, extra_blocks, r_dims, e_dims, couplings, nrblocks, neblocks)`,
 where `extra_blocks` lists the pairs of retained blocks that share a cost (in the sorted retained ordering)
-or `nothing` if the problem does not have both retained and eliminable variables, or (unless a Schur solver
-was explicitly requested via `linsolver_req`) if its structure does not suit Schur reduction.
+or `nothing` if the problem does not have both retained and eliminable variables, or if its structure does not suit
+Schur reduction. With `explicit = true` (`reduction = :eliminate` in [`optimvars`](@ref)) a structure that does not fit
+throws an `ArgumentError` instead.
 """
-function partition_schur_problem(problem::Model, unfixed::AbstractVector, linsolver_req=nothing)
+function partition_schur_problem(problem::Model, unfixed::AbstractVector, explicit::Bool=false)
     unfixed_raw = findall(unfixed)
     nblocks = length(unfixed_raw)
     nblocks > 1 || return nothing
-    # Only throw if a Schur solver was explicitly requested; otherwise the caller falls back to a non-Schur solver
-    explicit_schur = linsolver_req in (:schur, :dense_schur, :sparse_schur)
+    # Only throw if elimination was explicitly requested; otherwise the caller falls back to no elimination
 
     # 1. Identify eliminable variables using iseliminable trait
     is_elim = [dynamic(OptimizationVariableInterface.iseliminable(typeof(problem.variables[i]))) for i in unfixed_raw]
@@ -206,7 +206,7 @@ function partition_schur_problem(problem::Model, unfixed::AbstractVector, linsol
     nret = nblocks - nelim
 
     if nelim == 0 || nret == 0
-        if linsolver_req in (:schur, :dense_schur, :sparse_schur)
+        if explicit
             throw(ArgumentError("Schur complement solver requires at least one retained and one eliminable variable (got $nret retained, $nelim eliminable)."))
         end
         return nothing
@@ -222,7 +222,7 @@ function partition_schur_problem(problem::Model, unfixed::AbstractVector, linsol
         if e
             d = block_sizes[idx]
             if d < 1 || d > 3
-                explicit_schur || return nothing
+                explicit || return nothing
                 throw(ArgumentError("Eliminable variables must have static dimension in {1, 2, 3}, got $d for variable $(unfixed_raw[idx])."))
             end
         end
@@ -246,7 +246,7 @@ function partition_schur_problem(problem::Model, unfixed::AbstractVector, linsol
             vinds = varindices(cost)
             elims_in_cost = [v for v in vinds if v in elim_set]
             if length(elims_in_cost) > 1
-                explicit_schur || return nothing
+                explicit || return nothing
                 throw(ArgumentError("Bipartite structure violation: cost block of type $(typeof(cost)) connects multiple eliminable variables $(elims_in_cost). Eliminable variables cannot couple to each other."))
             elseif length(elims_in_cost) == 1
                 elim_var = elims_in_cost[1]

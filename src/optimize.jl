@@ -165,11 +165,13 @@ function cholmod_symbolic_nnz(fac::SparseArrays.CHOLMOD.Factor, n::Integer)
     end
 end
 
-function optimvars(problem::Model, unfixed=nothing, numthreads=StaticInt(Threads.nthreads()); linsolver=nothing, min_work::Integer=MIN_WORK_FOR_THREADED_LINEARIZATION, min_work_cost::Integer=MIN_WORK_FOR_THREADED_COST)
-    return optimvars_dispatch(problem, convertunfixed(unfixed, problem), static(numthreads), linsolver, min_work, min_work_cost)
+function optimvars(problem::Model, unfixed=nothing, numthreads=StaticInt(Threads.nthreads()); reduction::Symbol=:auto, reduced::Symbol=:auto, min_work::Integer=MIN_WORK_FOR_THREADED_LINEARIZATION, min_work_cost::Integer=MIN_WORK_FOR_THREADED_COST)
+    reduction in (:auto, :none, :eliminate) || throw(ArgumentError("Unknown reduction $(repr(reduction)); expected :auto, :none or :eliminate."))
+    reduced in (:auto, :dense, :sparse) || throw(ArgumentError("Unknown reduced $(repr(reduced)); expected :auto, :dense or :sparse."))
+    return optimvars_dispatch(problem, convertunfixed(unfixed, problem), static(numthreads), reduction, reduced, min_work, min_work_cost)
 end
 
-function optimvars_dispatch(problem::Model, unfixed::Integer, numthreads::StaticInt, linsolver=nothing, min_work::Integer=MIN_WORK_FOR_THREADED_LINEARIZATION, min_work_cost::Integer=MIN_WORK_FOR_THREADED_COST)
+function optimvars_dispatch(problem::Model, unfixed::Integer, numthreads::StaticInt, reduction::Symbol=:auto, reduced::Symbol=:auto, min_work::Integer=MIN_WORK_FOR_THREADED_LINEARIZATION, min_work_cost::Integer=MIN_WORK_FOR_THREADED_COST)
     x0 = problem.variables[unfixed]
     varlen = nvars(x0)
     if dynamic(is_static(varlen)) && varlen <= 16
@@ -183,31 +185,29 @@ function optimvars_dispatch(problem::Model, unfixed::Integer, numthreads::Static
     return (f, fdf!, x0, nothing)
 end
 
-function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads::StaticInt, linsolver=nothing, min_work::Integer=MIN_WORK_FOR_THREADED_LINEARIZATION, min_work_cost::Integer=MIN_WORK_FOR_THREADED_COST)
+function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads::StaticInt, reduction::Symbol=:auto, reduced::Symbol=:auto, min_work::Integer=MIN_WORK_FOR_THREADED_LINEARIZATION, min_work_cost::Integer=MIN_WORK_FOR_THREADED_COST)
     @assert length(problem.variables) > 0
     nblocks = sum(unfixed)
     if nblocks == 1
-        return optimvars_dispatch(problem, findfirst(unfixed), numthreads, linsolver, min_work, min_work_cost)
+        return optimvars_dispatch(problem, findfirst(unfixed), numthreads, reduction, reduced, min_work, min_work_cost)
     end
 
-    linsolver_sym = isnothing(linsolver) ? nothing : Symbol(linsolver)
-    schur_requested = linsolver_sym in (:schur, :dense_schur, :sparse_schur)
     has_elims = any(v -> dynamic(OptimizationVariableInterface.iseliminable(typeof(v))), problem.variables)
 
-    if schur_requested || ((isnothing(linsolver_sym) || linsolver_sym === :auto) && has_elims)
-        partition = partition_schur_problem(problem, unfixed, linsolver_sym)
+    if reduction === :eliminate || (reduction === :auto && has_elims)
+        partition = partition_schur_problem(problem, unfixed, reduction === :eliminate)
         if !isnothing(partition)
             structure = SchurStructure(partition.r_dims, partition.e_dims, partition.couplings; nchunks=dynamic(numthreads))
             
             # The pattern includes retained-retained pairs sharing a cost, not only those sharing an eliminated variable
-            pattern = linsolver_sym === :dense_schur ? nothing : build_schur_pattern(structure; extra_blocks=partition.extra_blocks)
+            pattern = reduced === :dense ? nothing : build_schur_pattern(structure; extra_blocks=partition.extra_blocks)
 
             # Decision Matrix: Dense vs. Sparse. When the symbolic analysis is run for the decision, it is kept and
             # handed on with the pattern, so the linear system does not analyse the same pattern again.
             analysed = nothing
-            is_dense = if linsolver_sym === :dense_schur
+            is_dense = if reduced === :dense
                 true
-            elseif linsolver_sym === :sparse_schur
+            elseif reduced === :sparse
                 false
             else
                 if structure.nr <= 2000

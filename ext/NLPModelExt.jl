@@ -44,7 +44,7 @@ end
 
 function NLLSModel.NLPLSModel(problem::Model; unfixed=nothing, numthreads=static(1), name="NLPLSModel")
     # Never use the Schur path here: the model works on the full (non-reduced) system
-    f, fdf!, x0, H_temp = optimvars(problem, unfixed, numthreads; linsolver=:cholesky)
+    f, fdf!, x0, H_temp = optimvars(problem, unfixed, numthreads; reduction=:none)
     conv_unfixed = NLLSModel.convertunfixed(unfixed, problem)
 
     if conv_unfixed isa Integer
