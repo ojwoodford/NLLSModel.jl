@@ -718,6 +718,18 @@ struct NLSResJac{P, L, U, NT, TR}
     task_results::TR
 end
 
+"""
+    syncvars!(problem::Model, res!::Union{NLSResidual, NLSResJac}, x_opt) -> Model
+
+Write the solution `x_opt` found for the evaluators returned by [`optimvars_nls`](@ref) back into `problem.variables`.
+The evaluators copy every point they are evaluated at into the model, so after an optimizer returns the model holds the
+last point *evaluated*, which may be a rejected trial. This sets the solution.
+"""
+function OptimizationVariableInterface.syncvars!(problem::Model, fn::Union{NLSResidual, NLSResJac}, x)
+    sync_tall_vars!(problem, fn.unfixed_inds, x)
+    return problem
+end
+
 clamped_count(fn::Union{NLSResidual, NLSResJac}) = fn.status.clamped_count
 reset_clamped_count!(fn::Union{NLSResidual, NLSResJac}) = (fn.status.clamped_count = 0; fn.status.warned_clamp = false; fn)
 
