@@ -66,7 +66,7 @@ Maximum rows × columns (`nres` times the total size of the unfixed variables) o
 static path. It bounds the size of the static Jacobian that is built and unrolled; a cost above it takes the dynamic
 autodiff path and the static-column or `@turbo` kernel. A starting value, not measured.
 """
-const MAX_STATIC_JAC = 512
+const MAX_STATIC_JAC = 128
 
 """
     MAX_STATIC_ROWS

@@ -68,7 +68,7 @@ a size static):
 
 | # | Kernel | Used when |
 |---|---|---|
-| 1 | Full static multiply (`SMatrix`, unrolled) | every unfixed variable has a static size, totalling `n <= MAX_STATIC_VAR` (64); `nres` is a `StaticInt` `M`; and `M * n <= MAX_STATIC_JAC` (512) |
+| 1 | Full static multiply (`SMatrix`, unrolled) | every unfixed variable has a static size, totalling `n <= MAX_STATIC_VAR` (64); `nres` is a `StaticInt` `M`; and `M * n <= MAX_STATIC_JAC` (128) |
 | 2 | Static-column kernel | otherwise, when `nres` is a `StaticInt` `M <= MAX_STATIC_ROWS` (16) and the Jacobian is a `Matrix` of `Float32`/`Float64` |
 | 3 | `@turbo` kernel (plain loops for other array types) | otherwise |
 

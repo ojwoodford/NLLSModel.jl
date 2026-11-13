@@ -312,7 +312,7 @@ end
     x = SVector{n, Float64}(randn(MersenneTwister(1), n))
     @testset "static variables, M * n around MAX_STATIC_JAC" begin
         Mbelow, Mat, Mabove = cap ÷ n - 1, cap ÷ n, cap ÷ n + 1
-        # (Running the static path at the cap compiles a 512-element unrolled Jacobian, which is slow: only its selection is checked)
+        # (Running the static path at the cap compiled a 512-element unrolled Jacobian in about 3 minutes, which is why the cap is 128; the numerics are still only run above it)
         for (M, expectstatic) in ((Mbelow, true), (Mat, true), (Mabove, false))
             res = CapRes{M, n}(SVector{M, Float64}(randn(MersenneTwister(2), M)))
             @test NLLSModel.usestatic(static(1), res, (x,)) == expectstatic
