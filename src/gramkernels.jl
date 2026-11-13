@@ -20,12 +20,19 @@ using LoopVectorization: @turbo
 #   several threads at once, so any threading (BLAS included) inside one cost competes with the outer loop.
 # - Wrong sizes throw `DimensionMismatch`.
 #
-# Kernels, chosen at compile time by the argument types (the full static multiply, kernel 1, is `gramgrad` below, which
-# works on static arrays and returns static arrays):
+# Kernels (the full static multiply, kernel 1, is `gramgrad` below, which works on static arrays and returns static arrays).
+# For the dynamic ones, `gram_kernel` / `jtr_kernel` choose in this order:
 # 2. static-column kernel: `J` is a `Matrix` of `Float32`/`Float64` and `r` an `SVector{M}` with `M <= MAX_STATIC_ROWS`;
 #    `J` is viewed as `n` static columns and the dot products are unrolled.
-# 3. `@turbo` kernel: every array is a strided array of the same hardware float type.
-# 4. plain loops (`@inbounds @simd`) for anything else: an `Adjoint`, a non-contiguous view, another element type.
+# 3. plain loops when `J` has a single column (`n == 1`), whatever the types: a column of many rows is a single dot
+#    product, which the plain loop does 2 to 4 times faster than `@turbo` (benchmark/results).
+# 4. `@turbo` kernel: every array is a strided array of the same hardware float type (`Array`s and unit-range views of
+#    them): a `Vector` residual with a `Matrix` Jacobian, for instance. `@turbo` needs arrays with a memory address.
+# 5. plain loops (`@fastmath @inbounds @simd`) for anything else: an `Adjoint`, a non-contiguous view, another element type, and
+#    an `SVector` longer than `MAX_STATIC_ROWS` or an `MVector` of any length with a `Matrix` Jacobian. These are the
+#    intended path, not a gap: nothing is copied and `@turbo` is not offered the types it cannot address.
+# `@fastmath` lets the compiler assume finite values, so the plain kernels are tested to still carry a `NaN` or `Inf`
+# in `J` or `r` through to `g` and `H` (the optimizer terminates on a non-finite gradient).
 
 const GramFloat = Union{Float32, Float64}
 const _GramIdx = Union{Base.Slice{Base.OneTo{Int}}, UnitRange{Int}}
@@ -48,13 +55,23 @@ end
     return M, n
 end
 
+# Which dynamic kernel runs: :staticcols, :turbo or :plain (see the contract at the top)
+@inline function gram_kernel(H, g, J, r)
+    staticcols_ok(typeof(J), typeof(r)) && return :staticcols
+    size(J, 2) == 1 && return :plain
+    turbo_ok(typeof(H), typeof(g), typeof(J), typeof(r)) && return :turbo
+    return :plain
+end
+@inline jtr_kernel(g, J, r) = gram_kernel(J, g, J, r) # (`J` stands in for the 2-D `H` that the predicate wants)
+
 # g = J' * r, unweighted
 function jtr!(g, J, r)
     M, n = size(J)
     (length(r) == M && length(g) == n) || throw(DimensionMismatch("jtr!: J is $(M)x$n, r has length $(length(r)), g has length $(length(g))"))
-    if staticcols_ok(typeof(J), typeof(r))
+    kernel = jtr_kernel(g, J, r)
+    if kernel === :staticcols
         jtr_staticcols!(g, J, r)
-    elseif turbo_ok(typeof(g), typeof(g), typeof(J), typeof(r))
+    elseif kernel === :turbo
         jtr_turbo!(g, J, r)
     else
         jtr_plain!(g, J, r)
@@ -66,9 +83,10 @@ function gramgrad!(H, g, J, r, dc, c2)
     gram_check(H, g, J, r)
     T = eltype(H)
     dcT, c2T = convert(T, dc), convert(T, c2)
-    if staticcols_ok(typeof(J), typeof(r))
+    kernel = gram_kernel(H, g, J, r)
+    if kernel === :staticcols
         gram_staticcols!(H, g, J, r, dcT, c2T)
-    elseif turbo_ok(typeof(H), typeof(g), typeof(J), typeof(r))
+    elseif kernel === :turbo
         gram_turbo!(H, g, J, r, dcT, c2T)
     else
         gram_plain!(H, g, J, r, dcT, c2T)
@@ -119,7 +137,7 @@ function jtr_plain!(g, J, r)
     M, n = size(J)
     @inbounds for i in 1:n
         acc = zero(eltype(g))
-        @simd for k in 1:M
+        @fastmath @simd for k in 1:M
             acc += J[k, i] * r[k]
         end
         g[i] = acc
@@ -132,7 +150,7 @@ function gram_plain!(H, g, J, r, dc, c2)
     @inbounds for i in 1:n
         for j in 1:i
             acc = zero(eltype(H))
-            @simd for k in 1:M
+            @fastmath @simd for k in 1:M
                 acc += J[k, i] * J[k, j]
             end
             H[i, j] = acc

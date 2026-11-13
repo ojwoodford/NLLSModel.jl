@@ -85,14 +85,21 @@ BLAS call or threaded loop may run inside a cost. A cost with a very large singl
 threaded, cache-blocked BLAS; if that matters, supply `computecostgradhess` by hand.
 
 For each squared cost, the gradient `g = dc * J'r` and Hessian `H = dc * J'J + c2 * (J'r)(J'r)'` are formed by one of
-three kernels, chosen at compile time from the types involved (`nres` and `nvars` returning a `StaticInt` is what makes
-a size static):
+the kernels below, chosen from the types involved (`nres` and `nvars` returning a `StaticInt` is what makes a size
+static). Rows 2 to 4 are tried in order; the first that applies runs:
 
 | # | Kernel | Used when |
 |---|---|---|
 | 1 | Full static multiply (`SMatrix`, unrolled) | every unfixed variable has a static size, totalling `n <= MAX_STATIC_VAR` (64); `nres` is a `StaticInt` `M`; and `M * n <= MAX_STATIC_JAC` (128) |
 | 2 | Static-column kernel | otherwise, when `nres` is a `StaticInt` `M <= MAX_STATIC_ROWS` (16) and the Jacobian is a `Matrix` of `Float32`/`Float64` |
-| 3 | `@turbo` kernel (plain loops for other array types) | otherwise |
+| 3 | Plain loops, single column | the Jacobian has one column (`n == 1`), whatever the types: a single long dot product, which plain loops do 2 to 4 times faster than `@turbo` for 100 to 1000 rows |
+| 4 | `@turbo` kernel | the Jacobian is a `Matrix` (or unit-range view) and the residual a `Vector` (or unit-range view) of the same `Float32`/`Float64` type, which is what dynamic autodiff produces, and a hand-written `(Vector, Matrix)` |
+| 5 | Plain loops (`@fastmath @inbounds @simd`) | anything `@turbo` cannot address: an `SVector` longer than `MAX_STATIC_ROWS`, or an `MVector` of any length, with a `Matrix` Jacobian (hand-written `computeresjac` only), an `Adjoint`, a strided view, mixed element types. Intended, not a gap: nothing is copied |
+
+On an Apple M1 Pro, `@turbo` was 1.2 to 2 times faster than the plain loops over most of the grid of 1 to 1000 rows and 1
+to 250 columns, and 22 to 34% faster on a linearization the kernels dominate; see `benchmark/results/`. The plain loops
+carry a `NaN` or `Inf` in the Jacobian or residual through to the gradient and Hessian, as the optimizer's termination
+tests need.
 
 Costs not on the full static path use ForwardDiff with run-time sized buffers, cached per task. `MAX_STATIC_VAR`,
 `MAX_STATIC_JAC` and `MAX_STATIC_ROWS` are starting values that have not been tuned; they are constants in `src/NLLSModel.jl`.

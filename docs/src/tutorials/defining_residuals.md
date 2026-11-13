@@ -53,10 +53,12 @@ end
 ## Performance: static and run-time sizes
 
 Return a `StaticInt` from [`nres`](@ref) and `nvars` to make sizes static. The gradient and Hessian of each cost are
-formed by one of three kernels, chosen at compile time: the full static multiply (static residual length `M` and
-unfixed variable sizes totalling `n <= MAX_STATIC_VAR` with `M * n <= MAX_STATIC_JAC`), the static-column kernel
-(otherwise, with a static `M <= MAX_STATIC_ROWS`), and the `@turbo` kernel (everything else). The three constants are
-starting values (64, 128 and 16), not tuned.
+formed by one of these kernels: the full static multiply (static residual length `M` and unfixed variable sizes
+totalling `n <= MAX_STATIC_VAR` with `M * n <= MAX_STATIC_JAC`); otherwise the static-column kernel (a static
+`M <= MAX_STATIC_ROWS`); otherwise plain loops when the Jacobian has a single column; otherwise the `@turbo` kernel for a
+`Matrix` Jacobian with a `Vector` residual; and plain loops for anything `@turbo` cannot address (an `SVector` longer
+than `MAX_STATIC_ROWS`, or an `MVector`, with a `Matrix` Jacobian). The three constants are starting values (64, 128 and
+16), not tuned.
 
 Everything computed for one cost is single-threaded by design; the outer loop over costs is what is threaded. So your
 `computeresidual`, [`computeresjac`](@ref) and [`computecostgradhess`](@ref) must be single-threaded (no BLAS on large

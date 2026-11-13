@@ -12,7 +12,9 @@
 #
 # Part 1 times, for identical Vector/Matrix inputs, gram_plain! against gram_turbo! (with and without the second-order
 # term, c2 == 0 and c2 != 0) and jtr_plain! against jtr_turbo!, over rows M x columns n, in Float64 and Float32. The ratio
-# per cell is time(plain) / time(turbo): above 1 means @turbo is faster.
+# per cell is time(plain) / time(turbo): above 1 means @turbo is faster. "plain" is the kernel as it is now (with
+# @fastmath); the plain kernel before @fastmath was added (F2) is timed too, and the n == 1 column is shown before routing
+# (turbo, which is what ran) and after (plain).
 # Part 2 times one whole linearization (fdf!, the gradient and Hessian of all costs) with each kernel forced, on 1 and 4 threads.
 using BenchmarkTools, NLLSModel, Static, StaticArrays, Random, Printf, Dates
 
@@ -36,26 +38,55 @@ const ARCH = string(Sys.ARCH, ", LLVM CPU target ", Sys.CPU_NAME)
 # ---- Part 1: the kernels ----
 const K = NLLSModel
 
+# The plain kernels as they were before F2 added @fastmath, kept here so the change can be timed
+function jtr_plain_old!(g, J, r)
+    M, n = size(J)
+    @inbounds for i in 1:n
+        acc = zero(eltype(g))
+        @simd for k in 1:M
+            acc += J[k, i] * r[k]
+        end
+        g[i] = acc
+    end
+end
+function gram_plain_old!(H, g, J, r, dc, c2)
+    M, n = size(J)
+    jtr_plain_old!(g, J, r)
+    @inbounds for i in 1:n
+        for j in 1:i
+            acc = zero(eltype(H))
+            @simd for k in 1:M
+                acc += J[k, i] * J[k, j]
+            end
+            H[i, j] = acc
+        end
+    end
+    K.gram_weight_mirror!(H, g, n, dc, c2)
+    K.gram_scale!(g, n, dc)
+end
+
 # Each cell is built by a function, so that the arguments are interpolated into the benchmark
 function cell_gram(T, M, n, c2)
     J = randn(T, M, n); r = randn(T, M); H = zeros(T, n, n); g = zeros(T, n)
     dc = T(0.7); c2T = T(c2)
     tp = @belapsed K.gram_plain!($H, $g, $J, $r, $dc, $c2T) seconds=BENCH_SECONDS
     tt = @belapsed K.gram_turbo!($H, $g, $J, $r, $dc, $c2T) seconds=BENCH_SECONDS
-    return tp, tt
+    to = @belapsed gram_plain_old!($H, $g, $J, $r, $dc, $c2T) seconds=BENCH_SECONDS
+    return tp, tt, to
 end
 function cell_jtr(T, M, n)
     J = randn(T, M, n); r = randn(T, M); g = zeros(T, n)
     tp = @belapsed K.jtr_plain!($g, $J, $r) seconds=BENCH_SECONDS
     tt = @belapsed K.jtr_turbo!($g, $J, $r) seconds=BENCH_SECONDS
-    return tp, tt
+    to = @belapsed jtr_plain_old!($g, $J, $r) seconds=BENCH_SECONDS
+    return tp, tt, to
 end
 
 function part1()
-    results = Dict{Tuple{Symbol, DataType}, Matrix{NTuple{2, Float64}}}()
+    results = Dict{Tuple{Symbol, DataType}, Matrix{NTuple{3, Float64}}}()
     for T in (Float64, Float32)
         for (name, f) in ((:gram_c2_zero, (M, n) -> cell_gram(T, M, n, 0.0)), (:gram_c2_nonzero, (M, n) -> cell_gram(T, M, n, 0.3)), (:jtr, (M, n) -> cell_jtr(T, M, n)))
-            tab = Matrix{NTuple{2, Float64}}(undef, length(ROWS), length(COLS))
+            tab = Matrix{NTuple{3, Float64}}(undef, length(ROWS), length(COLS))
             for (i, M) in enumerate(ROWS), (j, n) in enumerate(COLS)
                 tab[i, j] = f(M, n)
             end
@@ -180,18 +211,42 @@ function report(io, results, whole)
         rat = [t[1] / t[2] for t in tab]
         println(io, "\nrange ", @sprintf("%.2f–%.2f", minimum(rat), maximum(rat)), ", geometric mean ", @sprintf("%.2f", exp(sum(log, rat) / length(rat))), "; cells within 10%: ", count(r -> 0.9 <= r <= 1.1, rat), " of ", length(rat), "\n")
     end
+    println(io, "## Plain kernel before and after `@fastmath` (F2)\n")
+    println(io, "Each cell is `time(plain without @fastmath) / time(plain with @fastmath)`: above 1, `@fastmath` is faster; below 1 it is slower.\n")
+    for T in (Float64, Float32), (name, title) in ((:gram_c2_zero, "gram"), (:jtr, "jtr"))
+        tab = results[(name, T)]
+        println(io, "### $title, $T\n")
+        println(io, "| M \\ n | ", join(COLS, " | "), " |")
+        println(io, "|---|", join(fill("---:", length(COLS)), "|"), "|")
+        for (i, M) in enumerate(ROWS)
+            println(io, "| $M | ", join((@sprintf("%.2f", tab[i, j][3] / tab[i, j][1]) for j in eachindex(COLS)), " | "), " |")
+        end
+        rat = [t[3] / t[1] for t in tab]
+        println(io, "\nrange ", @sprintf("%.2f–%.2f", minimum(rat), maximum(rat)), ", geometric mean ", @sprintf("%.2f", exp(sum(log, rat) / length(rat))), "; cells slower with `@fastmath` by more than 10%: ", count(r -> r < 0.9, rat), " of ", length(rat), "\n")
+    end
+    println(io, "## The n == 1 column, before and after routing to the plain kernel (F2)\n")
+    println(io, "Before: `@turbo` (what ran). After: plain with `@fastmath` (what runs). Times in ns; the last column is before / after.\n")
+    println(io, "| kernel | type | M | before (turbo) | after (plain) | before / after |")
+    println(io, "|---|---|---:|---:|---:|---:|")
+    for T in (Float64, Float32), (name, title) in ((:gram_c2_zero, "gram"), (:jtr, "jtr")), (i, M) in enumerate(ROWS)
+        j = findfirst(==(1), COLS)
+        isnothing(j) && continue
+        tp, tt, _ = results[(name, T)][i, j]
+        println(io, "| $title | $T | $M | ", @sprintf("%.1f", 1e9 * tt), " | ", @sprintf("%.1f", 1e9 * tp), " | ", @sprintf("%.2f", tt / tp), " |")
+    end
+    println(io)
     println(io, "## Whole linearization (fdf! over all costs), kernel forced\n")
     println(io, "| Problem | threads | plain (ms) | turbo (ms) | plain / turbo |")
     println(io, "|---|---:|---:|---:|---:|")
     for (name, nt, tp, tt) in whole
         println(io, "| $name | $nt | ", @sprintf("%.3f", 1e3 * tp), " | ", @sprintf("%.3f", 1e3 * tt), " | ", @sprintf("%.2f", tp / tt), " |")
     end
-    println(io, "\n## Raw times of Part 1 (ns), `plain/turbo`\n")
+    println(io, "\n## Raw times of Part 1 (ns), `plain/turbo/plain without @fastmath`\n")
     for T in (Float64, Float32), name in (:gram_c2_zero, :gram_c2_nonzero, :jtr)
         tab = results[(name, T)]
         println(io, "### $name, $T\n\n| M \\ n | ", join(COLS, " | "), " |\n|---|", join(fill("---:", length(COLS)), "|"), "|")
         for (i, M) in enumerate(ROWS)
-            println(io, "| $M | ", join((@sprintf("%.0f/%.0f", 1e9 * tab[i, j][1], 1e9 * tab[i, j][2]) for j in eachindex(COLS)), " | "), " |")
+            println(io, "| $M | ", join((@sprintf("%.0f/%.0f/%.0f", 1e9 * tab[i, j][1], 1e9 * tab[i, j][2], 1e9 * tab[i, j][3]) for j in eachindex(COLS)), " | "), " |")
         end
         println(io)
     end

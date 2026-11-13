@@ -269,8 +269,8 @@ Dimensionality of the residual vector returned by `cost` (e.g. `static(M)` or an
 Returning a `StaticInt` makes the two static kernels available (see "Performance" in the README):
 the full static multiply, which also needs every unfixed variable to have a static size
 (total `n <= MAX_STATIC_VAR`) and `M * n <= MAX_STATIC_JAC`; and, for costs that are not on that path, the
-static-column kernel, which needs `M <= MAX_STATIC_ROWS`. A run-time length (an `Int`) always uses the `@turbo`
-kernel (or plain loops for a Jacobian that is not a strided array of hardware floats).
+static-column kernel, which needs `M <= MAX_STATIC_ROWS`. A run-time length (an `Int`) uses the `@turbo` kernel, or
+plain loops for a single-column Jacobian and for a Jacobian that is not a strided array of hardware floats.
 
 # Example
 ```julia

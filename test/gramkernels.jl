@@ -31,8 +31,7 @@ import SecondOrderOptimization: optimize!, OptimizationOptions
     end
 
     @testset "kernel selection" begin
-        kernel(J, r) = NLLSModel.staticcols_ok(typeof(J), typeof(r)) ? :staticcols :
-                       NLLSModel.turbo_ok(typeof(zeros(2, 2)), typeof(zeros(2)), typeof(J), typeof(r)) ? :turbo : :plain
+        kernel(J, r) = NLLSModel.gram_kernel(zeros(eltype(J), size(J, 2), size(J, 2)), zeros(eltype(J), size(J, 2)), J, r)
         J(M, n) = zeros(M, n)
         @test kernel(J(16, 5), zeros(SVector{16, Float64})) == :staticcols
         @test kernel(J(NLLSModel.MAX_STATIC_ROWS, 5), zeros(SVector{NLLSModel.MAX_STATIC_ROWS, Float64})) == :staticcols
@@ -467,10 +466,8 @@ NLLSModel.nres(r::NresOf) = r.v
 
 # The kernel `gramgrad!` reaches, from the predicates it dispatches on
 function kernelof(res, jac)
-    H, g = Matrix{Float64}, Vector{Float64}
-    NLLSModel.staticcols_ok(typeof(jac), typeof(res)) && return :staticcols
-    NLLSModel.turbo_ok(H, g, typeof(jac), typeof(res)) && return :turbo
-    return :plain
+    n = size(jac, 2)
+    return NLLSModel.gram_kernel(zeros(n, n), zeros(n), jac, res)
 end
 
 @testset "B1: staticresidual over the grid" begin
@@ -614,4 +611,113 @@ end
     optimize!(auto, options; numthreads=static(nthreads), min_work=0, min_work_cost=0)
     @test NLLSModel.cost(hand) ≈ NLLSModel.cost(auto) rtol=1e-8
     @test hand.variables[1] ≈ auto.variables[1] atol=1e-6
+end
+
+# ---- F2: plain loops for single columns and long static residuals, with @fastmath ----
+@testset "F2: kernel reached" begin
+    kernel(J, r) = NLLSModel.gram_kernel(zeros(eltype(J), size(J, 2), size(J, 2)), zeros(eltype(J), size(J, 2)), J, r)
+    jkernel(J, r) = NLLSModel.jtr_kernel(zeros(eltype(J), size(J, 2)), J, r)
+    @testset "n == 1, M = $M" for M in (1, 17, 100, 1000)
+        @test kernel(zeros(M, 1), zeros(M)) == :plain
+        @test jkernel(zeros(M, 1), zeros(M)) == :plain
+        @test kernel(zeros(Float32, M, 1), zeros(Float32, M)) == :plain
+    end
+    @test kernel(zeros(100, 2), zeros(100)) == :turbo
+    @test jkernel(zeros(100, 2), zeros(100)) == :turbo
+    @test kernel(zeros(1, 2), zeros(1)) == :turbo
+    # The static-column kernel still comes first for a short static residual
+    @test kernel(zeros(7, 1), zeros(SVector{7, Float64})) == :staticcols
+    @test jkernel(zeros(7, 1), zeros(SVector{7, Float64})) == :staticcols
+    # Long static residuals and MVectors with a Matrix stay on the plain kernel, by design
+    for r in (zeros(SVector{17, Float64}), zeros(SVector{40, Float64}), zeros(MVector{7, Float64}), zeros(MVector{40, Float64}))
+        @test kernel(zeros(length(r), 5), r) == :plain
+        @test jkernel(zeros(length(r), 5), r) == :plain
+    end
+    # An MMatrix Jacobian is not admitted to @turbo either
+    @test kernel(zeros(MMatrix{20, 5, Float64}), zeros(20)) == :plain
+end
+
+@testset "F2: plain, @turbo and the definition agree, $T" for T in (Float64, Float32)
+    rng = MersenneTwister(61)
+    tol = T === Float64 ? 1e-12 : 2e-4
+    for M in (1, 2, 3, 8, 17, 23, 40, 100), n in (1, 2, 6, 10, 30), (dc, c2) in ((1.0, 0.0), (0.3, -0.05))
+        J = randn(rng, T, M, n); r = randn(rng, T, M)
+        gu = Float64.(J)' * Float64.(r)
+        g_ref = dc * gu
+        H_ref = dc * (Float64.(J)' * Float64.(J)) + c2 * gu * gu'
+        Hp, gp = zeros(T, n, n), zeros(T, n)
+        Ht, gt = zeros(T, n, n), zeros(T, n)
+        NLLSModel.gram_plain!(Hp, gp, J, r, T(dc), T(c2))
+        NLLSModel.gram_turbo!(Ht, gt, J, r, T(dc), T(c2))
+        @test isapprox(Float64.(Hp), H_ref; rtol=tol, atol=tol * max(1, maximum(abs, H_ref)))
+        @test isapprox(Float64.(gp), g_ref; rtol=tol, atol=tol * max(1, maximum(abs, g_ref)))
+        @test isapprox(Hp, Ht; rtol=10tol, atol=10tol * max(1, maximum(abs, Ht)))
+        @test Hp == Hp' # Still exactly symmetric under @fastmath
+        jp, jt = zeros(T, n), zeros(T, n)
+        NLLSModel.jtr_plain!(jp, J, r); NLLSModel.jtr_turbo!(jt, J, r)
+        @test isapprox(Float64.(jp), gu; rtol=tol, atol=tol * max(1, maximum(abs, gu)))
+        @test isapprox(jp, jt; rtol=10tol, atol=10tol * max(1, maximum(abs, jt)))
+    end
+end
+
+@testset "F2: a NaN or Inf reaches g and H through the plain kernels, $T, $bad" for T in (Float64, Float32), bad in (NaN, Inf, -Inf)
+    rng = MersenneTwister(62)
+    M, n, c = 17, 6, 3
+    dc, c2 = T(0.3), T(-0.05)
+    # Each runs a plain kernel: called directly, through gramgrad! on an SVector{17} residual and on an Adjoint Jacobian
+    runs = (("gram_plain!", (H, g, J, r) -> NLLSModel.gram_plain!(H, g, J, r, dc, c2)),
+            ("gramgrad!, SVector{17}", (H, g, J, r) -> NLLSModel.gramgrad!(H, g, J, SVector{17, T}(r), dc, c2)),
+            ("gramgrad!, MVector{17}", (H, g, J, r) -> NLLSModel.gramgrad!(H, g, J, MVector{17, T}(r), dc, c2)),
+            ("gramgrad!, Adjoint", (H, g, J, r) -> NLLSModel.gramgrad!(H, g, collect(J')', r, dc, c2)))
+    @testset "$name, bad entry in J" for (name, run) in runs
+        J = randn(rng, T, M, n); r = randn(rng, T, M)
+        J[5, c] = bad
+        H, g = zeros(T, n, n), zeros(T, n)
+        run(H, g, J, r)
+        @test !isfinite(g[c])
+        @test all(!isfinite, H[c, :]) && all(!isfinite, H[:, c])
+        others = setdiff(1:n, c)
+        @test all(isfinite, g[others]) && all(isfinite, H[others, others])
+    end
+    @testset "$name, bad entry in r" for (name, run) in runs
+        J = randn(rng, T, M, n); r = randn(rng, T, M)
+        r[5] = bad
+        H, g = zeros(T, n, n), zeros(T, n)
+        run(H, g, J, r)
+        @test all(!isfinite, g) && all(!isfinite, H)
+    end
+    @testset "jtr_plain!" begin
+        J = randn(rng, T, M, n); r = randn(rng, T, M)
+        J[5, c] = bad
+        g = zeros(T, n)
+        NLLSModel.jtr_plain!(g, J, r)
+        @test !isfinite(g[c]) && all(isfinite, g[setdiff(1:n, c)])
+        J[5, c] = 1; r[5] = bad
+        NLLSModel.jtr_plain!(g, J, r)
+        @test all(!isfinite, g)
+    end
+    @testset "a single column (routed to plain)" begin
+        J = randn(rng, T, 100, 1); r = randn(rng, T, 100)
+        J[40, 1] = bad
+        H, g = zeros(T, 1, 1), zeros(T, 1)
+        NLLSModel.gramgrad!(H, g, J, r, dc, c2)
+        @test !isfinite(g[1]) && !isfinite(H[1, 1])
+    end
+end
+
+@testset "F2: no allocation for the routed cases" begin
+    rng = MersenneTwister(63)
+    cases = (("n == 1, 100 rows", randn(rng, 100, 1), randn(rng, 100)),
+             ("n == 1, 1000 rows", randn(rng, 1000, 1), randn(rng, 1000)),
+             ("SVector{17}", randn(rng, 17, 9), SVector{17, Float64}(randn(rng, 17))),
+             ("SVector{40}", randn(rng, 40, 9), SVector{40, Float64}(randn(rng, 40))),
+             ("MVector{7}", randn(rng, 7, 9), MVector{7, Float64}(randn(rng, 7))),
+             ("Float32, n == 1", randn(rng, Float32, 100, 1), randn(rng, Float32, 100)))
+    for (name, J, r) in cases
+        T = eltype(J); n = size(J, 2)
+        H, g = zeros(T, n, n), zeros(T, n)
+        f(H, g, J, r) = (NLLSModel.gramgrad!(H, g, J, r, 0.3, -0.05); NLLSModel.jtr!(g, J, r))
+        f(H, g, J, r); f(H, g, J, r)
+        @test (@allocated f(H, g, J, r)) == 0
+    end
 end
