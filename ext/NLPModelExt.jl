@@ -8,7 +8,7 @@ using StaticArrays
 using Static
 using OptimizationVariableInterface
 import OptimizationVariableInterface: nvars, syncvars!
-import NLLSModel: islinearkernel, flat_optimvars_nls, sync_flat_vars!
+import NLLSModel: islinearkernel, islinear, flat_optimvars_nls, sync_flat_vars!
 
 # Packing, copying and unpacking helpers are shared with the flat-variable code in NLLSModel (src/flatvars.jl)
 import NLLSModel: pack_single_var!, pack_var!, copy_var, copy_vars_list, unpack_single_var, unpack_var_elem
@@ -317,24 +317,16 @@ function NLLSModel.NLLSNLSModel(
     max_dense_bytes::Int = 32 * 1024^2,
     name::String = "NLLSNLSModel",
 )
-    for costvec in values(problem.costs)
-        for c in costvec
-            if c isa AbstractAdaptiveResidual || !islinearkernel(robustkernel(c))
-                throw(ArgumentError("NLLSNLSModel only supports linear kernels (NoRobust or finite non-negative Scaled linear kernels) on non-adaptive residuals; found $(typeof(c isa AbstractAdaptiveResidual ? c : robustkernel(c)))"))
-            end
-        end
-    end
-
-    robust_mode = all(c -> robustkernel(c) isa NoRobust, Iterators.flatten(values(problem.costs))) ? :none : :irls
     flat = flat_optimvars_nls(
         problem;
         unfixed = unfixed,
         numthreads = numthreads,
         min_work_per_thread = min_work_per_thread,
-        robust = robust_mode,
         matrix_type = matrix_type,
         max_dense_bytes = max_dense_bytes,
     )
+
+    islinear(flat) || NLLSModel.throw_nonlinear("NLLSNLSModel", problem)
 
     M = flat.layout_tall.M
     N = flat.layout.n

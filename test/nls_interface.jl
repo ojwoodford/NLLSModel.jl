@@ -201,7 +201,7 @@ end
         prob_sc = Model(Float64, RobustWrapper{ScalarVarIndRes, Scaled{Float64, NoRobust}})
         addvariable!(prob_sc, 5.0)
         addcost!(prob_sc, RobustWrapper(ScalarVarIndRes(), Scaled(NoRobust(), 2.5)))
-        flat_sc = flat_optimvars_nls(prob_sc; robust=:irls)
+        flat_sc = flat_optimvars_nls(prob_sc)
         r_sc = zeros(1)
         J_sc = copy(flat_sc.J_proto)
         c_sc = flat_sc.resjac!(r_sc, J_sc, flat_sc.x0)
@@ -211,7 +211,7 @@ end
     end
 
     @testset "6.1.2 Normal-Equation Equivalence" begin
-        # Mode 1: robust = :none
+        # NoRobust
         prob1 = Model(SVector{2, Float64}, Union{TestRosenbrock1, TestRosenbrock2})
         addvariable!(prob1, SVector(-1.2, 1.0))
         addcost!(prob1, TestRosenbrock1())
@@ -222,7 +222,7 @@ end
         H_norm = zeros(2, 2)
         c_norm = fdf!_norm(g_norm, H_norm, x0_norm)
 
-        f_tall, res!_tall, resjac!_tall, x0_tall, J_proto = optimvars_nls(prob1; robust=:none, numthreads=static(1))
+        f_tall, res!_tall, resjac!_tall, x0_tall, J_proto = optimvars_nls(prob1, numthreads=static(1))
         r_tall = zeros(2)
         J_tall = copy(J_proto)
         c_tall = resjac!_tall(r_tall, J_tall, x0_tall)
@@ -231,7 +231,7 @@ end
         @test isapprox(J_tall' * J_tall, H_norm; atol=1e-12)
         @test isapprox(c_tall, c_norm; atol=1e-12)
 
-        # Mode 2: robust = :irls
+        # A first-order kernel (zero second derivative): IRLS
         prob2 = Model(Float64, RobustWrapper{ScalarVarIndRes, HuberKernel{Float64, Static.False}})
         addvariable!(prob2, 5.0)
         addcost!(prob2, RobustWrapper(ScalarVarIndRes(), HuberKernel(1.0)))
@@ -240,14 +240,14 @@ end
         H2 = zeros(1, 1)
         c2 = fdf2(g2, H2, x02)
 
-        _, _, resjac2, _, J_proto2 = optimvars_nls(prob2; robust=:irls, numthreads=static(1))
+        _, _, resjac2, _, J_proto2 = optimvars_nls(prob2, numthreads=static(1))
         r2 = zeros(1)
         J2 = copy(J_proto2)
         c_tall2 = resjac2(r2, J2, x02)
         @test isapprox(J2' * r2, g2; atol=1e-12)
         @test isapprox(c_tall2, c2; atol=1e-12)
 
-        # Mode 3: robust = :corrector across scales
+        # A second-order kernel: IRLS with the Triggs correction, across scales
         for scale in [1e-3, 1.0, 1e3]
             prob3 = Model(Float64, RobustWrapper{ScalarVarIndRes, HuberKernel{Float64, Static.True}})
             addvariable!(prob3, 5.0 * scale)
@@ -257,7 +257,7 @@ end
             H3 = zeros(1, 1)
             c3 = fdf3(g3, H3, x03)
 
-            _, _, resjac3, _, J_proto3 = optimvars_nls(prob3; robust=:corrector, numthreads=static(1))
+            _, _, resjac3, _, J_proto3 = optimvars_nls(prob3, numthreads=static(1))
             r3 = zeros(1)
             J3 = copy(J_proto3)
             c_tall3 = resjac3(r3, J3, x03)
@@ -273,7 +273,7 @@ end
         addvariable!(prob_zw, 10.0)
         addcost!(prob_zw, RobustWrapper(ScalarVarIndRes(), ZeroWeightKernel()))
 
-        flat = flat_optimvars_nls(prob_zw; robust=:irls, matrix_type=:sparse)
+        flat = flat_optimvars_nls(prob_zw, matrix_type=:sparse)
         J_reused = copy(flat.J_proto)
         fill!(J_reused.nzval, 999.0) # Pre-fill with non-zero garbage
         r = zeros(1)
@@ -290,7 +290,7 @@ end
             addvariable!(prob, SVector(1.0))
             addcost!(prob, NonFiniteRes(mode))
 
-            flat = flat_optimvars_nls(prob; robust=:none)
+            flat = flat_optimvars_nls(prob)
             r = zeros(1)
             J = copy(flat.J_proto)
 
@@ -312,7 +312,7 @@ end
         addvariable!(prob_clamp, 3.0)
         addcost!(prob_clamp, RobustWrapper(ScalarVarIndRes(), MockClampingKernel(-1e-15)))
 
-        flat_clamp = flat_optimvars_nls(prob_clamp; robust=:irls)
+        flat_clamp = flat_optimvars_nls(prob_clamp)
         r = zeros(1)
         J = copy(flat_clamp.J_proto)
 
@@ -330,7 +330,7 @@ end
         addvariable!(prob_domain, 3.0)
         addcost!(prob_domain, RobustWrapper(ScalarVarIndRes(), MockClampingKernel(-0.1)))
 
-        flat_domain = flat_optimvars_nls(prob_domain; robust=:irls)
+        flat_domain = flat_optimvars_nls(prob_domain)
         r_dom = zeros(1)
         J_dom = copy(flat_domain.J_proto)
         @test_throws DomainError flat_domain.resjac!(r_dom, J_dom, flat_domain.x0)
@@ -346,12 +346,12 @@ end
             addcost!(prob, TestPairDiff(i, i + 1, 0.5))
         end
 
-        f1, res1, resjac1, x01, J_proto1 = optimvars_nls(prob; robust=:none, numthreads=static(1))
+        f1, res1, resjac1, x01, J_proto1 = optimvars_nls(prob, numthreads=static(1))
         r1 = zeros(100)
         J1 = copy(J_proto1)
         c1 = resjac1(r1, J1, x01)
 
-        f4, res4, resjac4, x04, J_proto4 = optimvars_nls(prob; robust=:none, numthreads=static(4), min_work_per_thread=10)
+        f4, res4, resjac4, x04, J_proto4 = optimvars_nls(prob, numthreads=static(4), min_work_per_thread=10)
         r4 = zeros(100)
         J4 = copy(J_proto4)
         c4 = resjac4(r4, J4, x04)
@@ -370,10 +370,10 @@ end
         addcost!(prob, TestAdaptiveRes(SVector(1, 2)))
 
         # Unfixed adaptive variable must throw ArgumentError
-        @test_throws ArgumentError optimvars_nls(prob; unfixed=nothing, robust=:irls)
+        @test_throws ArgumentError optimvars_nls(prob; unfixed=nothing)
 
         # Fixed adaptive variable (unfixed = 2) must succeed
-        flat_adapt = flat_optimvars_nls(prob; unfixed=2, robust=:irls)
+        flat_adapt = flat_optimvars_nls(prob; unfixed=2)
         r = zeros(1)
         J = copy(flat_adapt.J_proto)
         c = flat_adapt.resjac!(r, J, flat_adapt.x0)
@@ -383,11 +383,30 @@ end
     end
 
     @testset "6.1.8 Guards & Trait Checks" begin
-        # 1. robust=:none with HuberKernel throws
+        # 1. There is no robust mode; the linear-only paths throw for a non-linear kernel, and islinear says why
         prob_huber = Model(Float64, RobustWrapper{ScalarVarIndRes, HuberKernel{Float64, Static.False}})
         addvariable!(prob_huber, 3.0)
         addcost!(prob_huber, RobustWrapper(ScalarVarIndRes(), HuberKernel(1.0)))
-        @test_throws ArgumentError optimvars_nls(prob_huber; robust=:none)
+        @test_throws MethodError optimvars_nls(prob_huber; robust=:irls)
+        @test_throws MethodError flat_optimvars_nls(prob_huber; robust=:none)
+        @test !islinear(optimvars_nls(prob_huber)[3])
+        @test !islinear(flat_optimvars_nls(prob_huber))
+        @test_throws ArgumentError nls_callbacks(prob_huber)
+        @test_throws ArgumentError NLLSNLSModel(prob_huber)
+        # islinear: all linear, mixed, all robust
+        prob_lin = Model(Float64, RobustWrapper{ScalarVarIndRes, Scaled{Float64, NoRobust}})
+        addvariable!(prob_lin, 3.0)
+        addcost!(prob_lin, RobustWrapper(ScalarVarIndRes(), Scaled(NoRobust(), 2.0)))
+        @test islinear(optimvars_nls(prob_lin)[3]) && islinear(optimvars_nls(prob_lin)[2]) && islinear(flat_optimvars_nls(prob_lin))
+        prob_mix = Model(Float64, Union{RobustWrapper{ScalarVarIndRes, Scaled{Float64, NoRobust}}, RobustWrapper{ScalarVarIndRes, HuberKernel{Float64, Static.False}}})
+        addvariable!(prob_mix, 3.0)
+        addcost!(prob_mix, RobustWrapper(ScalarVarIndRes(), Scaled(NoRobust(), 2.0)))
+        addcost!(prob_mix, RobustWrapper(ScalarVarIndRes(), HuberKernel(1.0)))
+        @test !islinear(optimvars_nls(prob_mix)[3])
+        @test_throws ArgumentError nls_callbacks(prob_mix)
+        @test_throws ArgumentError NLLSNLSModel(prob_mix)
+        @test nls_callbacks(prob_lin) isa NamedTuple
+        @test NLLSNLSModel(prob_lin) isa AbstractNLSModel
 
         # 2. Scaled(NoRobust(), -1.0) throws
         prob_neg = Model(Float64, RobustWrapper{ScalarVarIndRes, Scaled{Float64, NoRobust}})
@@ -403,7 +422,7 @@ end
         prob_dense = Model(SVector{2, Float64}, TestRosenbrock1)
         addvariable!(prob_dense, SVector(1.0, 2.0))
         addcost!(prob_dense, TestRosenbrock1())
-        _, _, resjac_d, x0_d, _ = optimvars_nls(prob_dense; robust=:none, matrix_type=:dense)
+        _, _, resjac_d, x0_d, _ = optimvars_nls(prob_dense, matrix_type=:dense)
         J_nan = fill(NaN, 1, 2)
         r_d = zeros(1)
         resjac_d(r_d, J_nan, x0_d)

@@ -379,14 +379,12 @@ end
         _, fdf!, x0, _ = optimvars(problem, nothing, static(1))
         g = zeros(24); H = zeros(24, 24)
         c = fdf!(g, H, x0)
-        for robust in (kernel isa NoRobust ? (:none, :irls) : (:corrector,))
-            _, _, resjac!, xt, J0 = optimvars_nls(problem; robust=robust, numthreads=static(1))
-            r = zeros(size(J0, 1)); J = copy(J0)
-            ct = resjac!(r, J, xt)
-            @test ct ≈ c
-            @test J' * r ≈ g
-            @test J' * J ≈ H
-        end
+        _, _, resjac!, xt, J0 = optimvars_nls(problem; numthreads=static(1))
+        r = zeros(size(J0, 1)); J = copy(J0)
+        ct = resjac!(r, J, xt)
+        @test ct ≈ c
+        @test J' * r ≈ g
+        @test J' * J ≈ H
     end
 end
 

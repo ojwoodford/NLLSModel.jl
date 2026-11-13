@@ -46,3 +46,18 @@ addcost!(problem, RobustPointResidual(SVector(50.0, -40.0), idx, Huber2oKernel(1
 
 res = optimize!(problem) # Needs `using SecondOrderOptimization`
 ```
+
+## Robust Kernels in the Tall Formulation
+
+The tall residual-and-Jacobian evaluators ([`optimvars_nls`](@ref), [`flat_optimvars_nls`](@ref)) have no robust mode. As on
+the normal-equations path, the kernel of each cost decides how its rows enter, from what `robustifydcost` returns:
+
+| Kernel | Rows of that cost |
+|:---|:---|
+| linear (`NoRobust`, a valid `Scaled`) | unweighted or scaled by a constant |
+| second derivative zero (`HuberKernel`, `GemanMcclureKernel`) | IRLS: scaled by the square root of the first derivative |
+| second derivative non-zero (`Huber2oKernel`, `GemanMcclure2oKernel`) | IRLS with the Triggs correction |
+
+Choosing first- or second-order treatment therefore means choosing the kernel type. `resjac!` returns the true cost,
+which equals `½‖r‖²` only when every kernel is linear; [`islinear`](@ref)`(resjac!)` reports that, and
+[`nls_callbacks`](@ref) and `NLLSNLSModel` (which hand `r` to solvers that derive the cost from it) require it.

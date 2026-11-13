@@ -25,7 +25,7 @@ import SIRBSDispatch: sirbsdispatch
 export Model, NLPLSModel, NLLSNLSModel
 export addvariable!, addcost!, addresidual!, subproblem, subproblem!
 export cost, optimvars, optimvars_nls, flat_optimvars_nls, nls_callbacks, syncvars!, nresiduals
-export isadditive, islinearkernel, clamped_count, reset_clamped_count!
+export isadditive, islinearkernel, islinear, clamped_count, reset_clamped_count!
 export partition_schur_problem
 
 # Cost and residual types & definition interface

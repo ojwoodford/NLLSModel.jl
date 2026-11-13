@@ -15,6 +15,7 @@ partition_schur_problem
 optimvars_nls
 nls_callbacks
 flat_optimvars_nls
+islinear
 ```
 
 ## Solving a Model

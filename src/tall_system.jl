@@ -72,7 +72,7 @@ end
     end
 end
 
-function build_tall_layout(problem::Model, unfixed, matrix_type::Symbol, max_dense_bytes::Int, robust::Symbol)
+function build_tall_layout(problem::Model, unfixed, matrix_type::Symbol, max_dense_bytes::Int)
     # 1. Validate cost types and variable indices
     for costvec in values(problem.costs)
         if !(eltype(costvec) <: AbstractResidual)
@@ -335,57 +335,38 @@ const WEIGHT_SCALE = 1      # scale rows by `scale` (sqrt of the kernel derivati
 const WEIGHT_CORRECTOR = 2  # second-order corrector: residual scale `scale / sqrt(1 + eps)`, plus a Jacobian projection
 const WEIGHT_NAN = 3        # non-finite values: fill with NaN
 
-# Returns (mode, cost, scale, eps, clamped count, error code, error value)
-function robust_weights(kernel, s, robust::Symbol)
-    if robust === :irls
-        c_cost, dc, _ = robustifydcost(kernel, s)
-        c_val = Float64(c_cost)
-        dc_val = Float64(dc)
-        if is_nonfinite(s) || is_nonfinite(c_val) || is_nonfinite(dc_val)
-            return WEIGHT_NAN, (is_finite(c_val) ? NaN : 0.5 * c_val), 0.0, 0.0, 0, 0, 0.0
-        end
-        if dc_val > 0.0
-            return WEIGHT_SCALE, 0.5 * c_val, sqrt(dc_val), 0.0, 0, 0, 0.0
-        elseif dc_val == 0.0
+# Returns (mode, cost, scale, eps, clamped count, error code, error value). The kernel's own derivatives decide: a zero second
+# derivative (or s == 0) scales the rows (IRLS), a non-zero one adds the Triggs correction, as on the normal-equations path.
+function robust_weights(kernel, s)
+    c_cost, dc, d2c = robustifydcost(kernel, s)
+    c_val = Float64(c_cost)
+    dc_val = Float64(dc)
+    d2c_val = Float64(d2c)
+    if is_nonfinite(s) || is_nonfinite(c_val) || is_nonfinite(dc_val) || is_nonfinite(d2c_val)
+        return WEIGHT_NAN, (is_finite(c_val) ? NaN : 0.5 * c_val), 0.0, 0.0, 0, 0, 0.0
+    end
+    if dc_val <= 0.0
+        if dc_val == 0.0 && (s == 0.0 || d2c_val <= 0.0)
             return WEIGHT_ZERO, 0.5 * c_val, 0.0, 0.0, 0, 0, 0.0
         end
         dc_tol = kernel_dc_tol(kernel)
-        if dc_val < -dc_tol
+        if dc_val < -dc_tol || (s > 0.0 && d2c_val * s > dc_tol)
             return WEIGHT_ZERO, 0.5 * c_val, 0.0, 0.0, 0, 1, dc_val
         end
-        return WEIGHT_ZERO, 0.5 * c_val, 0.0, 0.0, 1, 0, 0.0
-    elseif robust === :corrector
-        c_cost, dc, d2c = robustifydcost(kernel, s)
-        c_val = Float64(c_cost)
-        dc_val = Float64(dc)
-        d2c_val = Float64(d2c)
-        if is_nonfinite(s) || is_nonfinite(c_val) || is_nonfinite(dc_val) || is_nonfinite(d2c_val)
-            return WEIGHT_NAN, (is_finite(c_val) ? NaN : 0.5 * c_val), 0.0, 0.0, 0, 0, 0.0
-        end
-        if dc_val <= 0.0
-            if dc_val == 0.0 && (s == 0.0 || d2c_val <= 0.0)
-                return WEIGHT_ZERO, 0.5 * c_val, 0.0, 0.0, 0, 0, 0.0
-            end
-            dc_tol = kernel_dc_tol(kernel)
-            if dc_val < -dc_tol || (s > 0.0 && d2c_val * s > dc_tol)
-                return WEIGHT_ZERO, 0.5 * c_val, 0.0, 0.0, 0, 1, dc_val
-            end
-            return WEIGHT_ZERO, 0.5 * c_val, 0.0, 0.0, dc_val < 0.0 ? 1 : 0, 0, 0.0
-        end
-        if s == 0.0 || d2c_val == 0.0
-            return WEIGHT_SCALE, 0.5 * c_val, sqrt(dc_val), 0.0, 0, 0, 0.0
-        end
-        raw_eps = (2.0 * d2c_val * s) / dc_val
-        eps_i = raw_eps < -1.0/3.0 ? -1.0/3.0 : raw_eps
-        if is_nonfinite(eps_i)
-            return WEIGHT_NAN, NaN, 0.0, 0.0, 0, 0, 0.0
-        end
-        return WEIGHT_CORRECTOR, 0.5 * c_val, sqrt(dc_val), eps_i, 0, 0, 0.0
+        return WEIGHT_ZERO, 0.5 * c_val, 0.0, 0.0, dc_val < 0.0 ? 1 : 0, 0, 0.0
     end
-    throw(ArgumentError("Unknown robust mode: $robust"))
+    if s == 0.0 || d2c_val == 0.0
+        return WEIGHT_SCALE, 0.5 * c_val, sqrt(dc_val), 0.0, 0, 0, 0.0
+    end
+    raw_eps = (2.0 * d2c_val * s) / dc_val
+    eps_i = raw_eps < -1.0/3.0 ? -1.0/3.0 : raw_eps
+    if is_nonfinite(eps_i)
+        return WEIGHT_NAN, NaN, 0.0, 0.0, 0, 0, 0.0
+    end
+    return WEIGHT_CORRECTOR, 0.5 * c_val, sqrt(dc_val), eps_i, 0, 0, 0.0
 end
 
-function eval_single_res!(r, vars, cost, k::Int, layout::NLSTallLayout, robust::Symbol, status::NLSRobustStatus)
+function eval_single_res!(r, vars, cost, k::Int, layout::NLSTallLayout, status::NLSRobustStatus)
     vars_k = getvars(cost, vars)
     r_start = layout.resoffsets[k]
     m_k = layout.resblocksizes[k]
@@ -406,11 +387,6 @@ function eval_single_res!(r, vars, cost, k::Int, layout::NLSTallLayout, robust::
         return c_ret, 0, 0, 0.0
     end
 
-    if robust === :none
-        r[r_range] .= r_val
-        return 0.5 * s, 0, 0, 0.0
-    end
-
     if layout.all_linear || islinearkernel(kernel)
         w = layout.linear_weights[k]
         if w == 0.0
@@ -423,7 +399,7 @@ function eval_single_res!(r, vars, cost, k::Int, layout::NLSTallLayout, robust::
     end
 
     # Non-linear robust path
-    mode, c_ret, scale, eps_i, clamped, err, val = robust_weights(kernel, s, robust)
+    mode, c_ret, scale, eps_i, clamped, err, val = robust_weights(kernel, s)
     if mode == WEIGHT_ZERO
         r[r_range] .= 0.0
     elseif mode == WEIGHT_NAN
@@ -562,7 +538,7 @@ function scaled_jacobian(jac::AbstractMatrix, w)
     return out
 end
 
-function eval_single_resjac!(r, J, vars, cost, k::Int, layout::NLSTallLayout, robust::Symbol, status::NLSRobustStatus)
+function eval_single_resjac!(r, J, vars, cost, k::Int, layout::NLSTallLayout, status::NLSRobustStatus)
     vars_k = getvars(cost, vars)
     r_start = layout.resoffsets[k]
     m_k = layout.resblocksizes[k]
@@ -571,7 +547,7 @@ function eval_single_resjac!(r, J, vars, cost, k::Int, layout::NLSTallLayout, ro
     varflags = cost_varflags(layout.blockindices, cost)
     if varflags == 0
         # All variables are fixed
-        c, cl, err, val = eval_single_res!(r, vars, cost, k, layout, robust, status)
+        c, cl, err, val = eval_single_res!(r, vars, cost, k, layout, status)
         zero_cost_jacobian!(J, k, layout, cost)
         return c, cl, err, val
     end
@@ -597,12 +573,6 @@ function eval_single_resjac!(r, J, vars, cost, k::Int, layout::NLSTallLayout, ro
         return Inf, 0, 0, 0.0
     end
 
-    if robust === :none
-        r[r_range] .= res_k
-        scatter_cost_jacobian!(J, jac_k, k, layout, cost)
-        return 0.5 * s, 0, 0, 0.0
-    end
-
     if layout.all_linear || islinearkernel(kernel)
         w = layout.linear_weights[k]
         if w == 0.0
@@ -618,7 +588,7 @@ function eval_single_resjac!(r, J, vars, cost, k::Int, layout::NLSTallLayout, ro
     end
 
     # Non-linear robust path
-    mode, c_ret, scale, eps_i, clamped, err, val = robust_weights(kernel, s, robust)
+    mode, c_ret, scale, eps_i, clamped, err, val = robust_weights(kernel, s)
     if mode == WEIGHT_ZERO
         r[r_range] .= 0.0
         zero_cost_jacobian!(J, k, layout, cost)
@@ -700,7 +670,6 @@ struct NLSResidual{P, L, U, NT, TR}
     problem::P
     layout::L
     unfixed_inds::U
-    robust::Symbol
     status::NLSRobustStatus
     numthreads::NT
     min_work_per_thread::Int
@@ -711,7 +680,6 @@ struct NLSResJac{P, L, U, NT, TR}
     problem::P
     layout::L
     unfixed_inds::U
-    robust::Symbol
     status::NLSRobustStatus
     numthreads::NT
     min_work_per_thread::Int
@@ -729,6 +697,17 @@ function OptimizationVariableInterface.syncvars!(problem::Model, fn::Union{NLSRe
     sync_tall_vars!(problem, fn.unfixed_inds, x)
     return problem
 end
+
+"""
+    islinear(fn) -> Bool
+
+For the evaluators returned by [`optimvars_nls`](@ref) (`res!` or `resjac!`) or the named tuple returned by
+[`flat_optimvars_nls`](@ref): `true` when every cost is a non-adaptive residual with a linear kernel (`islinearkernel`).
+Then `r` is the true (constant-scaled) residual and the cost returned is exactly `½‖r‖²`, which solvers that derive the cost from
+`r` rely on. Otherwise some rows are reweighted and the cost is the robust cost, not `½‖r‖²`.
+"""
+islinear(fn::Union{NLSResidual, NLSResJac}) = fn.layout.all_linear
+islinear(flat::NamedTuple) = flat.layout_tall.all_linear
 
 clamped_count(fn::Union{NLSResidual, NLSResJac}) = fn.status.clamped_count
 reset_clamped_count!(fn::Union{NLSResidual, NLSResJac}) = (fn.status.clamped_count = 0; fn.status.warned_clamp = false; fn)
@@ -814,7 +793,6 @@ function (res!::NLSResidual)(r::AbstractVector{Float64}, vars)
 
     problem = res!.problem
     layout = res!.layout
-    robust = res!.robust
     status = res!.status
     numthreads = res!.numthreads
     min_work = res!.min_work_per_thread
@@ -822,7 +800,7 @@ function (res!::NLSResidual)(r::AbstractVector{Float64}, vars)
     full_vars = sync_tall_vars!(problem, res!.unfixed_inds, vars)
 
     return tall_eval!(
-        (c, k) -> eval_single_res!(r, full_vars, c, k, layout, robust, status),
+        (c, k) -> eval_single_res!(r, full_vars, c, k, layout, status),
         values(problem.costs), layout, status, res!.task_results, Int(dynamic(numthreads)), min_work, "res!")
 end
 
@@ -834,7 +812,6 @@ function (resjac!::NLSResJac)(r::AbstractVector{Float64}, J, vars; prezeroed::Bo
 
     problem = resjac!.problem
     layout = resjac!.layout
-    robust = resjac!.robust
     status = resjac!.status
     numthreads = resjac!.numthreads
     min_work = resjac!.min_work_per_thread
@@ -842,41 +819,37 @@ function (resjac!::NLSResJac)(r::AbstractVector{Float64}, J, vars; prezeroed::Bo
     full_vars = sync_tall_vars!(problem, resjac!.unfixed_inds, vars)
 
     return tall_eval!(
-        (c, k) -> eval_single_resjac!(r, J, full_vars, c, k, layout, robust, status),
+        (c, k) -> eval_single_resjac!(r, J, full_vars, c, k, layout, status),
         values(problem.costs), layout, status, resjac!.task_results, Int(dynamic(numthreads)), min_work, "resjac!")
 end
 
 """
-    optimvars_nls(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), min_work_per_thread=5000, robust=:none, matrix_type=:auto, max_dense_bytes=256*1024^2)
+    optimvars_nls(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), min_work_per_thread=5000, matrix_type=:auto, max_dense_bytes=256*1024^2)
 
 Constructs tall residual and Jacobian callable structs `(f, res!, resjac!, x0, J_proto)` for `problem`.
 Unlike `optimvars`, `unfixed` and `numthreads` are keyword arguments.
+
+There is no robust mode: each cost's kernel decides how its rows enter, as on the normal-equations path.
+
+| What the kernel returns from `robustifydcost` | Rows of that cost |
+|:---|:---|
+| a linear kernel (`islinearkernel`: `NoRobust`, a valid `Scaled`) | unweighted or scaled by a constant |
+| second derivative zero (e.g. `HuberKernel`) | IRLS: scaled by the square root of the first derivative |
+| second derivative non-zero (e.g. `Huber2oKernel`) | IRLS with the Triggs correction |
+
+So choosing first- or second-order treatment means choosing the kernel type. `resjac!(r, J, x)` returns the true cost
+`cost(model)` at `x`; this equals `½‖r‖²` only when [`islinear`](@ref)`(resjac!)` is true.
 """
 function optimvars_nls(
     problem::Model;
     unfixed = nothing,
     numthreads = StaticInt(Threads.nthreads()),
     min_work_per_thread::Int = 5000,
-    robust::Symbol = :none,
     matrix_type::Symbol = :auto,
     max_dense_bytes::Int = 256 * 1024^2,
 )
-    if !(robust in (:none, :irls, :corrector))
-        throw(ArgumentError("Unknown robust mode: $robust. Supported modes are :none, :irls, :corrector"))
-    end
-
-    if robust === :none
-        for costvec in values(problem.costs)
-            for c in costvec
-                if c isa AbstractAdaptiveResidual || !(robustkernel(c) isa NoRobust)
-                    throw(ArgumentError("optimvars_nls with robust=:none requires all costs to have NoRobust kernels; found $(typeof(c isa AbstractAdaptiveResidual ? c : robustkernel(c))). Pass robust=:irls or robust=:corrector instead."))
-                end
-            end
-        end
-    end
-
     conv_unfixed = convertunfixed(unfixed, problem)
-    layout, J_proto = build_tall_layout(problem, conv_unfixed, matrix_type, max_dense_bytes, robust)
+    layout, J_proto = build_tall_layout(problem, conv_unfixed, matrix_type, max_dense_bytes)
 
     if conv_unfixed isa Integer
         is_single = true
@@ -901,14 +874,14 @@ function optimvars_nls(
     task_results = [TaskResult(0.0, 0, 0, 0.0) for _ in 1:max(1, N_req)]
     status = NLSRobustStatus()
 
-    res! = NLSResidual(problem, layout, unfixed_inds, robust, status, static(numthreads), min_work_per_thread, task_results)
-    resjac! = NLSResJac(problem, layout, unfixed_inds, robust, status, static(numthreads), min_work_per_thread, task_results)
+    res! = NLSResidual(problem, layout, unfixed_inds, status, static(numthreads), min_work_per_thread, task_results)
+    resjac! = NLSResJac(problem, layout, unfixed_inds, status, static(numthreads), min_work_per_thread, task_results)
 
     return (f, res!, resjac!, x0, J_proto)
 end
 
 """
-    flat_optimvars_nls(problem::Model; unfixed=nothing, numthreads=static(1), min_work_per_thread=5000, robust=:none, matrix_type=:auto, max_dense_bytes=256*1024^2)
+    flat_optimvars_nls(problem::Model; unfixed=nothing, numthreads=static(1), min_work_per_thread=5000, matrix_type=:auto, max_dense_bytes=256*1024^2)
 
 Constructs a flat Euclidean vector wrapper around `optimvars_nls`.
 Returns a NamedTuple `(; f, res!, resjac!, jac!, x0, J_proto, layout, status)`.
@@ -919,7 +892,6 @@ function flat_optimvars_nls(
     unfixed = nothing,
     numthreads = static(1),
     min_work_per_thread::Int = 5000,
-    robust::Symbol = :none,
     matrix_type::Symbol = :auto,
     max_dense_bytes::Int = 256 * 1024^2,
 )
@@ -942,7 +914,6 @@ function flat_optimvars_nls(
         unfixed = unfixed,
         numthreads = numthreads,
         min_work_per_thread = min_work_per_thread,
-        robust = robust,
         matrix_type = matrix_type,
         max_dense_bytes = max_dense_bytes,
     )
@@ -989,6 +960,18 @@ function flat_optimvars_nls(
     )
 end
 
+# The error of the linear-kernel-only paths, naming the first offending cost
+function throw_nonlinear(name, problem)
+    for costvec in values(problem.costs)
+        for c in costvec
+            if c isa AbstractAdaptiveResidual || !islinearkernel(robustkernel(c))
+                throw(ArgumentError("$name only supports linear kernels (NoRobust or finite non-negative Scaled linear kernels) on non-adaptive residuals; found $(typeof(c isa AbstractAdaptiveResidual ? c : robustkernel(c)))"))
+            end
+        end
+    end
+    throw(ArgumentError("$name only supports linear kernels (NoRobust or finite non-negative Scaled linear kernels) on non-adaptive residuals"))
+end
+
 """
     nls_callbacks(problem::Model; unfixed=nothing, numthreads=static(1), min_work_per_thread=5000, matrix_type=:auto, max_dense_bytes=256*1024^2)
 
@@ -1005,24 +988,16 @@ function nls_callbacks(
     matrix_type::Symbol = :auto,
     max_dense_bytes::Int = 256 * 1024^2,
 )
-    for costvec in values(problem.costs)
-        for c in costvec
-            if c isa AbstractAdaptiveResidual || !islinearkernel(robustkernel(c))
-                throw(ArgumentError("nls_callbacks only supports linear kernels (NoRobust or finite non-negative Scaled linear kernels) on non-adaptive residuals; found $(typeof(c isa AbstractAdaptiveResidual ? c : robustkernel(c)))"))
-            end
-        end
-    end
-
-    robust_mode = all(c -> robustkernel(c) isa NoRobust, Iterators.flatten(values(problem.costs))) ? :none : :irls
     flat = flat_optimvars_nls(
         problem;
         unfixed = unfixed,
         numthreads = numthreads,
         min_work_per_thread = min_work_per_thread,
-        robust = robust_mode,
         matrix_type = matrix_type,
         max_dense_bytes = max_dense_bytes,
     )
+
+    islinear(flat) || throw_nonlinear("nls_callbacks", problem)
 
     N = flat.layout.n
     M = flat.layout_tall.M
