@@ -95,6 +95,36 @@ end
     return view(collection, chunk_indices(length(collection), N, taskid))
 end
 
+# Arguments of a `@batch` loop, passed by address. Polyester hands the threads an isbits value as it is, but boxes any
+# other captured value, one allocation per loop, even a mutable object or an array of mutable objects. `threadargs`
+# rewrites a value as an isbits one: a mutable object becomes its address, an immutable one the tuple of its fields so
+# rewritten. `fromthreadargs` rebuilds the value, of the same type, inside the loop. The caller keeps the original alive
+# with `GC.@preserve` for the duration of the loop.
+struct ByAddress{T}
+    p::Ptr{Cvoid}
+end
+struct ByFields{T, F<:Tuple}
+    fields::F
+end
+# Both are generated as one expression for the whole type, since inference widens a recursion through nested types. A
+# field of abstract type is passed as it is (boxed, so it allocates, but correct).
+function threadargs_expr(T, ex)
+    (isbitstype(T) || !isconcretetype(T)) && return ex, T
+    ismutabletype(T) && return :(ByAddress{$T}(pointer_from_objref($ex))), ByAddress{T}
+    parts = [threadargs_expr(fieldtype(T, i), :(getfield($ex, $i))) for i in 1:fieldcount(T)]
+    F = Tuple{last.(parts)...}
+    return :(ByFields{$T, $F}($(Expr(:tuple, first.(parts)...)))), ByFields{T, F}
+end
+function fromthreadargs_expr(A, ex)
+    A <: ByAddress && return :(unsafe_pointer_to_objref($ex.p)::$(A.parameters[1]))
+    A <: ByFields || return ex
+    T, F = A.parameters
+    fields = [fromthreadargs_expr(fieldtype(F, i), :(getfield(getfield($ex, :fields), $i))) for i in 1:fieldcount(F)]
+    return T <: Tuple ? Expr(:tuple, fields...) : Expr(:new, T, fields...)
+end
+@generated threadargs(x) = Expr(:block, Expr(:meta, :inline), first(threadargs_expr(x, :x)))
+@generated fromthreadargs(a) = Expr(:block, Expr(:meta, :inline), fromthreadargs_expr(a, :a))
+
 function cost_multithreaded(vars, costs::CostStruct, ::StaticInt{N}, threaded::Bool)::Float64 where {N}
     if !threaded
         return sum(bindleadingargs(computecost, vars), costs; init=0.0)
@@ -116,23 +146,28 @@ function costgradhess!(linsystem::LinearSystemShared{F, V, N}, vars::AbstractVec
         return linsystem.costs[1]
     end
 
-    # Phase 1: Parallel gradient & cost chunk evaluation across threads
-    @batch for taskid in 1:N
-        ls = LinearSystem(linsystem, taskid)
-        zero!(ls)
-        linsystem.costs[taskid] = costgradhess_chunk!(ls, vars, costs, N, taskid)
-    end
-
-    # Phase 2: Parallel tree reduction across the N buffers
-    n = N
-    while n > 1
-        n_ = (n + 1) >> 1
-        m = n - n_
-        @batch for taskid in 1:m
-            add!(linsystem.ls[taskid], linsystem.ls[taskid + n_])
-            linsystem.costs[taskid] += linsystem.costs[taskid + n_]
+    args = threadargs((linsystem, vars, costs))
+    GC.@preserve linsystem vars costs begin
+        # Phase 1: Parallel gradient & cost chunk evaluation across threads
+        @batch for taskid in 1:N
+            linsystem_, vars_, costs_ = fromthreadargs(args)
+            ls = LinearSystem(linsystem_, taskid)
+            zero!(ls)
+            linsystem_.costs[taskid] = costgradhess_chunk!(ls, vars_, costs_, N, taskid)
         end
-        n = n_
+
+        # Phase 2: Parallel tree reduction across the N buffers
+        n = N
+        while n > 1
+            n_ = (n + 1) >> 1
+            m = n - n_
+            @batch for taskid in 1:m
+                linsystem_ = fromthreadargs(args)[1]
+                add!(linsystem_.ls[taskid], linsystem_.ls[taskid + n_])
+                linsystem_.costs[taskid] += linsystem_.costs[taskid + n_]
+            end
+            n = n_
+        end
     end
 
     return linsystem.costs[1]

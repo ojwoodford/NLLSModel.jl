@@ -58,6 +58,25 @@ alloc_ephemeral(ls, ind) = @allocated NLLSModel.LinearSystem(ls, ind)
     @test NLLSModel.ithchunk(3, 2, coll) isa SubArray
     @test isempty(NLLSModel.ithchunk(3, 4, coll))
 
+    # threadargs: an isbits stand-in for the arguments of a `@batch` loop, which fromthreadargs turns back into the same
+    # objects. A field of abstract type is passed as it is.
+    @testset "threadargs" begin
+        mv, vv = MVector(1.0, 2.0), [zeros(2), ones(3)]
+        nested = (SVector(mv, mv), vv, (a=1, b=vv), 3.0)
+        a = NLLSModel.threadargs(nested)
+        @test isbits(a)
+        back = NLLSModel.fromthreadargs(a)
+        @test back === nested
+        @test back[1][1] === mv && back[2] === vv
+        @test (@allocated NLLSModel.threadargs(nested)) == 0
+        @test (@allocated NLLSModel.fromthreadargs(a)) == 0
+        abstractfield = (Any[1], Ref{Any}(2.0), Some{Any}(vv))
+        b = NLLSModel.threadargs(abstractfield)
+        @test !isbits(b) # Some{Any}'s field is passed as it is
+        @test NLLSModel.fromthreadargs(b) === abstractfield
+        @test NLLSModel.threadargs(5) === 5
+    end
+
     # cost_range
     vars_cr = [2.0]
     costs_cr = [MTTestScalarRes(k * 0.1, 1) for k in 1:100]

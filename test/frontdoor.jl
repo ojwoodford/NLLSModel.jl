@@ -252,9 +252,7 @@ issolved(model, targets, which=eachindex(targets); atol=1e-6) = all(k -> isappro
         fill!(internal, 7.0)
         c = fdf!(gd, Hd, x0)
         @test all(==(7.0), internal) # The direct branch never touches the internal storage
-        # Serial only: a shared system (nt > 1 on several Julia threads) allocates 240 bytes per call whatever the buffers,
-        # in the threaded linearization itself; recorded as a separate bug, not part of the prototype
-        nt == 1 && @test singlefdf_allocs(fdf!, gd, Hd, x0) == 0
+        @test singlefdf_allocs(fdf!, gd, Hd, x0) == 0 # Threaded too, when the suite runs on several threads
         # The fallback: buffers of another type than the system's
         gf, Hf = isstatic ? (zeros(n), zeros(n, n)) : (view(zeros(n), :), view(zeros(n, n), :, :))
         cf = fdf!(gf, Hf, x0)
