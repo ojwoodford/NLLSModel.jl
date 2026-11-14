@@ -35,7 +35,7 @@ Base.eltype(::NormResidual) = Float64
 
     # Build optimization variables via optimvars
     f, fdf!, x0, H = optimvars(problem)
-    @test H === nothing
+    @test H isa Matrix{Float64} && size(H) == (n, n) # One dynamic variable: a dense prototype
     @test x0 == zeros(n)
     @test f(x0) ≈ cost(problem)
 

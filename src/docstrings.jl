@@ -199,7 +199,15 @@ addcost!
 The normal way to solve a `Model` is `optimize!(model, options)` (needs `using SecondOrderOptimization`); `optimvars` is the
 advanced route, for custom outer loops, reusing a workspace, or other solvers.
 
-Constructs the objective function `f`, in-place gradient/Hessian evaluator `fdf!`, initial variable state `x0`, and Hessian template `H` (`nothing` for static/dense systems or a `SparseMatrixCSC` for sparse systems) for `problem`.
+Constructs the objective function `f`, in-place gradient/Hessian evaluator `fdf!`, initial variable state `x0`, and Hessian template `H` for `problem`.
+
+`H` is a prototype of the Hessian `fdf!(g, H, x)` fills, of the type the linear system stores it in:
+- one unfixed variable: an `MMatrix{N, N, Float64}` when its size `N` is static and at most 16, otherwise a
+  `Matrix{Float64}`, zero-filled. The gradient buffer `g` is the matching vector type, an `MVector{N, Float64}` or a
+  `Vector{Float64}`, which `zero(H[:, 1])` builds. Buffers of exactly these types (`deepcopy(H)` and `zero(H[:, 1])`)
+  are filled in place; any other `AbstractMatrix`/`AbstractVector` is filled through an internal copy on every call.
+- several variables: a `SchurBlockMatrix` when variables are eliminated, a `SparseMatrixCSC{Float64, Int}` for a sparse
+  system, and `nothing` for a dense one (pass a `Matrix{Float64}` and a `Vector{Float64}`).
 
 Wrap the returned 4-tuple in a `HessianObjective` and pass it to `SecondOrderOptimization.optimize!`, then write the
 solution back into the model:
