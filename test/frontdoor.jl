@@ -193,9 +193,9 @@ issolved(model, targets, which=eachindex(targets); atol=1e-6) = all(k -> isappro
         model, _ = singleproblem(V, n, 8)
         _, fdf!, x0, H = optimvars(model, nothing, static(1))
         ours = typeof(fdf!.linsystem.ls) <: NLLSModel.UniVariateLSstatic_ls
-        theirs = makelinearsystem(x0, H, :auto) isa SecondOrderOptimization.StaticLinearSystem
+        theirs = SecondOrderOptimization.makelinearsystem(x0, H, :auto) isa SecondOrderOptimization.StaticLinearSystem
         @test ours == theirs
-        @test ours == usesstaticsystem(x0) # SecondOrderOptimization's one statement of the rule (MAX_STATIC_SYSTEM = 16)
+        @test ours == SecondOrderOptimization.usesstaticsystem(x0) # SecondOrderOptimization's one statement of the rule (MAX_STATIC_SYSTEM = 16)
         @test ours == (V <: StaticVector && n <= 16)
     end
 

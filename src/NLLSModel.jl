@@ -7,14 +7,14 @@ using SIRBSDispatch
 using Static, StaticArrays, SparseArrays, LinearAlgebra
 
 import BlockLinearSystems:
-    SparseBlockLinearSystem, DenseBlockLinearSystem, TransposedPattern, BlockOffsets,
+    SparseBlockLinearSystem, DenseBlockLinearSystem, TransposedPattern,
     block, zero!, copy_structure,
-    symmetrifyfull, symmetrifyfull!, makesparseindices, sparse_with_map, copyto!,
+    symmetrifyfull, symmetrifyfull!, sparse_with_map, copyto!,
     block_sparse_nnz, computestartindices, find_diag_inds,
-    SchurStructure, SchurBlockMatrix, build_schur_pattern, sort_schur_blocks, fast_bAb
+    SchurStructure, SchurBlockMatrix, build_schur_pattern, sort_schur_blocks
 
 import OptimizationVariableInterface:
-    nvars, update, update!, syncvars!, iseliminable,
+    nvars, update, syncvars!,
     ZeroToInfScalar, ZeroToOneScalar
 
 import FastNorm: sqnorm

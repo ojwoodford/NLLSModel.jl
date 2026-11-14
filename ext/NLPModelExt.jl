@@ -8,7 +8,7 @@ using StaticArrays
 using Static
 using OptimizationVariableInterface
 import OptimizationVariableInterface: nvars, syncvars!
-import NLLSModel: islinearkernel, islinear, flat_optimvars_nls, sync_flat_vars!
+import NLLSModel: islinear, flat_optimvars_nls, sync_flat_vars!
 
 # Packing, copying and unpacking helpers are shared with the flat-variable code in NLLSModel (src/flatvars.jl)
 import NLLSModel: pack_single_var!, pack_var!, copy_var, copy_vars_list, unpack_single_var, unpack_var_elem

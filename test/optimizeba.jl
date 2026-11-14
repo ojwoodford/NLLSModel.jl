@@ -107,7 +107,7 @@ end
     # Check that linear system internal block sizes form a BlockRLE with exactly 2 runs: [2 => 6, 2 => 3]
     orig_A_int = NLLSModel.getA(fdf_int!.linsystem)
     @test orig_A_int.rowblocksizes isa NLLSModel.BlockRLE
-    @test NLLSModel.nruns(orig_A_int.rowblocksizes) == 2
+    @test BlockLinearSystems.nruns(orig_A_int.rowblocksizes) == 2
     @test orig_A_int.rowblocksizes.runlengths == [2, 2]
     @test orig_A_int.rowblocksizes.blocksizes == [6, 3]
 
@@ -207,8 +207,8 @@ end
 
     # Verify dense and sparse Schur Hessians match on quadratic form
     dx_rand = randn(tot_dim_ds)
-    val_dense = fast_bAb(H_ds, dx_rand)
-    val_sparse = fast_bAb(H_ss, dx_rand)
+    val_dense = dot(dx_rand, H_ds, dx_rand)
+    val_sparse = dot(dx_rand, H_ss, dx_rand)
     @test isapprox(val_dense, val_sparse; rtol=1e-12, atol=1e-12)
 
     # 5b. Retained-retained cost with no shared eliminated variable (B1): sparse and dense Schur agree
@@ -233,5 +233,5 @@ end
     @test fdf_rd!(g_rd, H_rd, x0_rd) ≈ fdf_rs!(g_rs, H_rs, x0_rs)
     @test g_rd ≈ g_rs
     dx_rr = randn(tot_rr)
-    @test fast_bAb(H_rd, dx_rr) ≈ fast_bAb(H_rs, dx_rr)
+    @test dot(dx_rr, H_rd, dx_rr) ≈ dot(dx_rr, H_rs, dx_rr)
 end

@@ -80,7 +80,7 @@ end
             @test fdf1!(g1, H1, x1) ≈ fdf4!(g4, H4, x4)
             @test g1 ≈ g4
             dx = randn(n)
-            @test BlockLinearSystems.fast_bAb(H1, dx) ≈ BlockLinearSystems.fast_bAb(H4, dx)
+            @test dot(dx, H1, dx) ≈ dot(dx, H4, dx)
         end
         @test f1(x1) ≈ f4(x4)
     end
