@@ -108,8 +108,7 @@ end
         @test NLLSModel.workestimates(p1, nothing).linearization >= NLLSModel.MIN_WORK_FOR_THREADED_LINEARIZATION
         f1, fdf1!, x1, H1 = optimvars(p1, nothing, static(1))
         f4, fdf4!, x4, H4 = optimvars(p4, nothing, static(4))
-        @test fdf4!.plan isa NLLSModel.BlockThreadPlan
-        @test fdf4!.linsystem isa NLLSModel.LinearSystem # No per-thread copies
+        @test fdf4!.linsystem isa NLLSModel.LinearSystemShared # One copy of the system per thread
         g1 = zeros(2n); g4 = zeros(2n)
         H1_ = H1 === nothing ? zeros(2n, 2n) : H1
         H4_ = H4 === nothing ? zeros(2n, 2n) : H4
@@ -126,9 +125,9 @@ end
     for _ in 2:300, i in 1:5
         addcost!(p, ChainRes{SVector{2, Float64}}(SVector(0.1i, -0.2), i, i + 1))
     end
-    @test optimvars(p, nothing, static(4))[2].plan isa NLLSModel.BlockThreadPlan
-    @test optimvars(p, nothing, static(4); min_work=10^9)[2].plan === nothing
-    @test optimvars(p, nothing, static(4); min_work=1)[2].plan isa NLLSModel.BlockThreadPlan
+    @test optimvars(p, nothing, static(4))[2].linsystem isa NLLSModel.LinearSystemShared
+    @test optimvars(p, nothing, static(4); min_work=10^9)[2].linsystem isa NLLSModel.LinearSystem
+    @test optimvars(p, nothing, static(4); min_work=1)[2].linsystem isa NLLSModel.LinearSystemShared
 end
 
 @testset "work-based thresholds for cost evaluation and the tall path" begin

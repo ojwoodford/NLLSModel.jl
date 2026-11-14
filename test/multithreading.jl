@@ -271,7 +271,11 @@ NLLSModel.ndeps(::WBARes) = static(2)
 NLLSModel.nres(::WBARes) = static(2)
 NLLSModel.varindices(r::WBARes) = SVector(r.cam, r.pt)
 NLLSModel.getvars(r::WBARes, vars::AbstractVector) = (vars[r.cam]::SVector{9, Float64}, vars[r.pt]::SVector{3, Float64})
-NLLSModel.computeresidual(r::WBARes, c, p) = SVector(c[1] * p[1] + sin(c[5]) * p[2] + c[9] * p[3]^2, c[2] * p[2] - c[3] * p[1] + c[7]) - r.meas
+const WBA_EVALS = Threads.Atomic{Int}(0) # residual evaluations, for counting how often a cost is linearized
+function NLLSModel.computeresidual(r::WBARes, c, p)
+    Threads.atomic_add!(WBA_EVALS, 1)
+    return SVector(c[1] * p[1] + sin(c[5]) * p[2] + c[9] * p[3]^2, c[2] * p[2] - c[3] * p[1] + c[7]) - r.meas
+end
 Base.eltype(::WBARes) = Float64
 
 function wbaproblem(ncams, npts)
@@ -388,7 +392,7 @@ wtuple(w) = (w.cost, w.tall, w.linearization)
         decisions(F) = begin
             f, fdf!, _, _ = optimvars(ba, nothing, static(4); min_work=F, min_work_cost=F)
             _, res!, _, _, _ = optimvars_nls(ba; numthreads=static(4), min_work_per_thread=F ÷ 2)
-            (f.work >= f.min_work, fdf!.plan !== nothing, res!.layout.work >= 2 * res!.min_work_per_thread)
+            (f.work >= f.min_work, fdf!.linsystem isa NLLSModel.LinearSystemShared, res!.layout.work >= 2 * res!.min_work_per_thread)
         end
         # (cost, linearization, tall) threaded, for one floor F in each unit (the tall floor is 2 * min_work_per_thread)
         @test decisions(1000) == (false, true, false)  # between tall and linearization: exactly the linearization
@@ -436,5 +440,25 @@ wtuple(w) = (w.cost, w.tall, w.linearization)
         @test forced[3] == serial[3] && forced[4] == serial[4]
         @test forced[2] ≈ serial[2] rtol=1e-13
         @test evaltall(4, 10^12) == serial
+    end
+
+    # Each cost is linearized once on several threads, as on one: a bipartite model where every cost spans the two sides
+    # (on 2 threads the old block-column plan gave one thread every camera and the other every point, and both linearized
+    # every cost)
+    @testset "each cost linearized once on $nt threads, $storage" for nt in (2, 4), storage in (:dense, :sparse)
+        p = storage === :dense ? wbaproblem(3, 10) : wbaproblem(6, 60)
+        evals(numthreads) = begin
+            _, fdf!, x, H = optimvars(p, nothing, static(numthreads); min_work=0)
+            n = Int(sum(v -> dynamic(NLLSModel.nvars(v)), p.variables))
+            g = zeros(n); Hb = H === nothing ? zeros(n, n) : H
+            (H === nothing) == (storage === :dense) || error("expected $storage storage")
+            fdf!(g, Hb, x) # warm
+            WBA_EVALS[] = 0
+            fdf!(g, Hb, x)
+            WBA_EVALS[]
+        end
+        serial = evals(1)
+        @test serial > 0
+        @test evals(nt) == serial
     end
 end

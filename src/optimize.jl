@@ -83,32 +83,44 @@ MultiVarCostFunc(problem, unfixed_inds, numthreads, min_work::Integer=MIN_WORK_F
     return cost(full_vars, f.problem.costs, f.numthreads, f.work >= f.min_work)
 end
 
-struct MultiVarDenseFDF{LS, P, U, PL}
+# On several threads `linsystem` is a `LinearSystemShared`: one copy of the system per thread, summed afterwards, so each
+# cost is linearized once, by one thread
+struct MultiVarDenseFDF{LS, P, U}
     linsystem::LS
     problem::P
     unfixed_inds::U
-    plan::PL # BlockThreadPlan when linearizing on several threads, otherwise nothing
 end
 @inline function (f::MultiVarDenseFDF)(g, H_mat::Matrix{Float64}, vars)
     full_vars = sync_unfixed_vars!(f.problem, f.unfixed_inds, vars)
     orig_A = getA(f.linsystem)
     bdm = DenseBlockLinearSystem{Float64, Matrix{Float64}}(H_mat, orig_A.rowblockoffsets, orig_A.columnblockoffsets, orig_A.rowblocksizes, orig_A.columnblocksizes)
-    target_ls = LinearSystem(f.linsystem.x, MultiVariateLSdense_ls(bdm, g))
-    c = block_threaded!(target_ls, f.plan, full_vars, f.problem.costs)
+    if f.linsystem isa LinearSystemShared
+        target = replace_first_ls(f.linsystem, MultiVariateLSdense_ls(bdm, g))
+        c = costgradhess!(target, full_vars, f.problem.costs)
+    else
+        target_ls = LinearSystem(f.linsystem.x, MultiVariateLSdense_ls(bdm, g))
+        zero!(target_ls)
+        c = costgradhess_nozero!(target_ls, full_vars, f.problem.costs)
+    end
     symmetrifyfull!(bdm)
     return c
 end
 
-struct MultiVarSparseFDF{LS, P, U, PL}
+struct MultiVarSparseFDF{LS, P, U}
     linsystem::LS
     problem::P
     unfixed_inds::U
-    plan::PL # BlockThreadPlan when linearizing on several threads, otherwise nothing
 end
 @inline function (f::MultiVarSparseFDF)(g, H_csc::SparseMatrixCSC{Float64, Int}, vars)
     full_vars = sync_unfixed_vars!(f.problem, f.unfixed_inds, vars)
-    target_ls = LinearSystem(f.linsystem.x, MultiVariateLSsparse_ls(f.linsystem.ls.A, g))
-    c = block_threaded!(target_ls, f.plan, full_vars, f.problem.costs)
+    if f.linsystem isa LinearSystemShared
+        target = replace_first_ls(f.linsystem, MultiVariateLSsparse_ls(f.linsystem.ls[1].A, g))
+        c = costgradhess!(target, full_vars, f.problem.costs)
+    else
+        target_ls = LinearSystem(f.linsystem.x, MultiVariateLSsparse_ls(f.linsystem.ls.A, g))
+        zero!(target_ls)
+        c = costgradhess_nozero!(target_ls, full_vars, f.problem.costs)
+    end
     copyto!(H_csc, getA(f.linsystem), f.linsystem.x.sparseindices)
     return c
 end
@@ -184,7 +196,10 @@ function optimvars_dispatch(problem::Model, unfixed::Integer, numthreads::Static
     ls_shared = sharedlinearsystem(ls, workestimates(problem, unfixed).linearization, numthreads, min_work)
     f = SingleVarCostFunc(problem, unfixed, numthreads, min_work_cost)
     fdf! = SingleVarCostGradHess(ls_shared, problem, unfixed)
-    return (f, fdf!, x0, nothing)
+    # The Hessian prototype has the type of the system's own storage (an MMatrix or a Matrix), so buffers built from it
+    # take fdf!'s direct-write branch
+    H = fill!(copy_structure(ls.ls).A, 0.0)
+    return (f, fdf!, x0, H)
 end
 
 function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads::StaticInt, reduction::Symbol=:auto, reduced::Symbol=:auto, min_work::Integer=MIN_WORK_FOR_THREADED_LINEARIZATION, min_work_cost::Integer=MIN_WORK_FOR_THREADED_COST)
@@ -285,13 +300,13 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
     if len >= 40 && sparse_dense_decision(len, sparsity, blocksizes)
         bsm = SparseBlockLinearSystem{Float64}(TransposedPattern(sparsity), blocksizes, blocksizes)
         lssparse = MultiVariateLSsparse(bsm, blockindices, true)
-        plan = blockthreadplan(problem, blockindices, length(blocksizes), numthreads, workestimates(problem, unfixed).linearization, min_work)
-        fdf! = MultiVarSparseFDF(lssparse, problem, unfixed_sync, plan)
+        ls_shared = sharedlinearsystem(lssparse, workestimates(problem, unfixed).linearization, numthreads, min_work)
+        fdf! = MultiVarSparseFDF(ls_shared, problem, unfixed_sync)
         return (f, fdf!, x0, lssparse.x.hessian)
     else
         lsdense = MultiVariateLSdense(blocksizes, blockindices)
-        plan = blockthreadplan(problem, blockindices, length(blocksizes), numthreads, workestimates(problem, unfixed).linearization, min_work)
-        fdf! = MultiVarDenseFDF(lsdense, problem, unfixed_sync, plan)
+        ls_shared = sharedlinearsystem(lsdense, workestimates(problem, unfixed).linearization, numthreads, min_work)
+        fdf! = MultiVarDenseFDF(ls_shared, problem, unfixed_sync)
         return (f, fdf!, x0, nothing)
     end
 end

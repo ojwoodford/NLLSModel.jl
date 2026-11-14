@@ -80,6 +80,9 @@ function mixedproblem()
     return model, targets
 end
 
+# Allocation of one fdf! call, after a warm-up call (in a function, so the measurement sees concrete types)
+singlefdf_allocs(fdf!, g, H, x) = (fdf!(g, H, x); @allocated fdf!(g, H, x))
+
 landmarkvec(v) = v isa OptLandmark ? v.p : v
 issolved(model, targets, which=eachindex(targets); atol=1e-6) = all(k -> isapprox(model.variables[k], targets[k]; atol=atol), which)
 
@@ -197,6 +200,37 @@ issolved(model, targets, which=eachindex(targets); atol=1e-6) = all(k -> isappro
         @test ours == theirs
         @test ours == SecondOrderOptimization.usesstaticsystem(x0) # SecondOrderOptimization's one statement of the rule (MAX_STATIC_SYSTEM = 16)
         @test ours == (V <: StaticVector && n <= 16)
+    end
+
+    # For one variable, the H that optimvars returns has the types of the linear system's own storage, so buffers built
+    # from it (H by deepcopy, g by `zero(H[:, 1])`) take fdf!'s direct-write branch: the costs accumulate straight into
+    # them, with no internal accumulation and no copy. Other buffer types take the fallback, with the same result.
+    @testset "single-variable prototype: $name" for (name, V, n, nt) in (
+            ("static 3", SVector{3, Float64}, 3, 1), ("static 16", SVector{16, Float64}, 16, 1),
+            ("static 3, shared", SVector{3, Float64}, 3, 4), ("static 17", SVector{17, Float64}, 17, 1),
+            ("dynamic 3", Vector{Float64}, 3, 1), ("dynamic 3, shared", Vector{Float64}, 3, 4))
+        model, _ = singleproblem(V, n, 11)
+        _, fdf!, x0, H = optimvars(model, nothing, static(nt); min_work=0) # min_work=0: share the system when nt > 1
+        @test (fdf!.linsystem isa NLLSModel.LinearSystemShared) == (nt > 1)
+        isstatic = V <: StaticVector && n <= 16
+        @test H isa (isstatic ? MMatrix{n, n, Float64, n * n} : Matrix{Float64})
+        @test size(H) == (n, n)
+        @test all(iszero, H)
+        Hd = deepcopy(H)
+        gd = zero(H[:, 1])
+        @test gd isa (isstatic ? MVector{n, Float64} : Vector{Float64})
+        internal = NLLSModel.getA(fdf!.linsystem)
+        fill!(internal, 7.0)
+        c = fdf!(gd, Hd, x0)
+        @test all(==(7.0), internal) # The direct branch never touches the internal storage
+        @test singlefdf_allocs(fdf!, gd, Hd, x0) == 0
+        # The fallback: buffers of another type than the system's
+        gf, Hf = isstatic ? (zeros(n), zeros(n, n)) : (view(zeros(n), :), view(zeros(n, n), :, :))
+        cf = fdf!(gf, Hf, x0)
+        @test !all(==(7.0), internal) # The fallback accumulates internally, then copies
+        @test cf == c
+        @test gf == gd
+        @test Hf == Hd
     end
 
     @testset "reduction and reduced" begin

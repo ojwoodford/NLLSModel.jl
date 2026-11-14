@@ -245,17 +245,7 @@ function updatesymlinearsystem!(linsystem::UniVariateLS, g, H, unusedargs...)
     getA(linsystem) .+= H
 end
 
-# Which block columns a thread may write. A block (i, j) of the lower triangle lies in column min(i, j), so threads that own
-# disjoint ranges of block columns write disjoint blocks, and no per-thread copy of the system is needed.
-struct AllBlocks end
-struct BlockRange
-    lo::Int
-    hi::Int
-end
-@inline owns(::AllBlocks, b) = true
-@inline owns(r::BlockRange, b) = r.lo <= b <= r.hi
-
-function updatesymA!(A, a, vars, varflags, blockindices, own=AllBlocks())
+function updatesymA!(A, a, vars, varflags, blockindices)
     # Update the blocks in the problem
     loffseti = static(0)
     @unroll for i in 1:MAX_ARGS
@@ -263,9 +253,7 @@ function updatesymA!(A, a, vars, varflags, blockindices, own=AllBlocks())
             nvi = nvars(vars[i])
             rangei = blockrange(loffseti + static(1), nvi)
             loffseti += nvi
-            if owns(own, @inbounds(blockindices[i]))
-                @inbounds block(A, blockindices[i], blockindices[i], nvi, nvi) .+= view(a, rangei, rangei)
-            end
+            @inbounds block(A, blockindices[i], blockindices[i], nvi, nvi) .+= view(a, rangei, rangei)
 
             loffsetj = static(0)
             @unroll for j in 1:i-1
@@ -274,10 +262,8 @@ function updatesymA!(A, a, vars, varflags, blockindices, own=AllBlocks())
                     rangej = blockrange(loffsetj + static(1), nvj)
                     loffsetj += nvj
                     if @inbounds blockindices[i] >= blockindices[j] # Make sure the block matrix is lower triangular
-                        if owns(own, @inbounds(blockindices[j]))
-                            @inbounds block(A, blockindices[i], blockindices[j], nvi, nvj) .+= view(a, rangei, rangej)
-                        end
-                    elseif owns(own, @inbounds(blockindices[i]))
+                        @inbounds block(A, blockindices[i], blockindices[j], nvi, nvj) .+= view(a, rangei, rangej)
+                    else
                         @inbounds block(A, blockindices[j], blockindices[i], nvj, nvi) .+= view(a, rangej, rangei)
                     end
                 end
@@ -286,15 +272,13 @@ function updatesymA!(A, a, vars, varflags, blockindices, own=AllBlocks())
     end
 end
 
-function updateb!(B, b, vars, varflags, boffsets, blockindices, own=AllBlocks())
+function updateb!(B, b, vars, varflags, boffsets, blockindices)
     # Update the blocks in the problem
     loffset = static(1)
     @unroll for i in 1:MAX_ARGS
         if i <= length(vars) && bitiset(varflags, i)
             nv = nvars(vars[i])
-            if owns(own, @inbounds(blockindices[i]))
-                @inbounds view(B, blockrange(boffsets[blockindices[i]], nv)) .+= view(b, blockrange(loffset, nv))
-            end
+            @inbounds view(B, blockrange(boffsets[blockindices[i]], nv)) .+= view(b, blockrange(loffset, nv))
             loffset += nv
         end
     end
