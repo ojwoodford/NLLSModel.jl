@@ -8,10 +8,10 @@ cost(vars::AbstractVector, costs::CostStruct)::Float64 = cost(vars, costs, stati
 cost(vars::AbstractVector, costs::CostStruct, ::StaticInt{1})::Float64 = cost_struct(vars, costs, static(1))
 cost(vars::AbstractVector, costs::CostStruct, numthreads::Integer)::Float64 = cost(vars, costs, static(numthreads))
 cost(vars::AbstractVector, costs::CostStruct, numthreads::StaticInt)::Float64 = cost_struct(vars, costs, numthreads)
-cost(vars::AbstractVector, costs::CostStruct, numthreads::StaticInt, threaded::Bool)::Float64 = cost_multithreaded(vars, costs, numthreads, threaded)
 
 cost_struct(vars, costs::CostStruct, ::StaticInt{1}) = sum(bindleadingargs(computecost, vars), costs; init=0.0)
-cost_struct(vars, costs::CostStruct, numthreads::StaticInt) = cost_multithreaded(vars, costs, numthreads, costestimate(costs) >= MIN_WORK_FOR_THREADED_COST)
+cost_struct(vars, costs::CostStruct, numthreads::StaticInt) =
+    cost_multithreaded(vars, costs, threadcount(costestimate(costs), MIN_WORK_FOR_THREADED_COST, dynamic(numthreads)))
 
 function cost_range(vars, costlist::AbstractVector, rng::AbstractUnitRange)::Float64
     tot = 0.0

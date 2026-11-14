@@ -100,8 +100,11 @@ const KW_ENTRY = (
     end
 
     @testset "numthreads defaults to every thread everywhere" begin
-        @test NLPLSModel(model).f.numthreads === static(Threads.nthreads())
-        @test optimvars(model)[1].numthreads === static(Threads.nthreads())
-        @test optimvars_nls(model)[2].numthreads === static(Threads.nthreads())
+        nt = Threads.nthreads()
+        decided(f) = f.nthreads == NLLSModel.threadcount(f.work, f.min_work, nt)
+        @test decided(NLPLSModel(model; min_work_cost=1).f) && NLPLSModel(model; min_work_cost=1).f.nthreads == nt
+        @test decided(optimvars(model; min_work_cost=1)[1]) && optimvars(model; min_work_cost=1)[1].nthreads == nt
+        res! = optimvars_nls(model; min_work=1)[2]
+        @test res!.nthreads == NLLSModel.threadcount(res!.layout.work, 1, nt) == nt
     end
 end

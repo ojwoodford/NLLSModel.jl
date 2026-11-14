@@ -2,15 +2,16 @@ using Polyester
 
 # Threading decisions. Each kind of work has its own estimate, the count of numbers it writes, summed over all costs, with
 # per cost `m` the residual length (1 for a general `AbstractCost`) and `n` the total dimension of its unfixed variables:
-#   cost evaluation                 m              (residual entries)                        floor `min_work_cost`
-#   tall residual and Jacobian fill m * (n + 1)    (Jacobian entries and the residual)       floor 2 * `min_work`
-#   normal-equations linearization  m * n * (n + 1) (Jacobian entries times columns, Gram)   floor `min_work`
+#   cost evaluation                 m              (residual entries)                        per-thread floor `min_work_cost`
+#   tall residual and Jacobian fill m * (n + 1)    (Jacobian entries and the residual)       per-thread floor `min_work`
+#   normal-equations linearization  m * n * (n + 1) (Jacobian entries times columns, Gram)   per-thread floor `min_work`
 # A general `AbstractCost` has a Hessian, so it counts as `m = 1` in the linearization form. The work of the residual
 # function itself is not estimated: the floors are calibrated on cheap residuals, so a costly one threads later than it
-# could, never earlier than it should. The estimates are computed once, at setup (`workestimates`); an evaluation compares
-# an integer. Problems with less work than the floor are evaluated on a single thread.
+# could, never earlier than it should. The estimates are computed once, at setup (`workestimates`), and each kind of work
+# is split over `threadcount(work, floor, numthreads)` threads, decided then too.
 #
-# The defaults are the break-evens of the families with cheap residuals (static variables, hand-sized residual code), on
+# The table below measures the break-even of the total estimate, before the floors were per thread. The defaults are the
+# break-evens of the families with cheap residuals (static variables, hand-sized residual code), on
 # 4 threads, measured on an Apple M1 Pro (8 performance and 2 efficiency cores), Julia 1.13.3, 2026-11-14, by timing the
 # serial and the threaded evaluation of each family over a range of sizes. Break-even as (lo, hi]: lo the largest
 # estimate at which the threaded evaluation was not faster, hi the next size measured.
@@ -135,16 +136,27 @@ end
 end
 @generated fromthreadargs(a::ThreadArgs{T}) where T = fromthreadargs_expr(T, :a, Ref(0))
 
-function cost_multithreaded(vars, costs::CostStruct, ::StaticInt{N}, threaded::Bool)::Float64 where {N}
-    if !threaded
+# The one threading rule, for every kind of work: the number of threads for an estimate `work` at a per-thread floor
+# `floor`. One thread below twice the floor, `work ÷ floor` threads above it, and never more than `numthreads`; a floor of
+# 0 uses every thread. Decided once, at setup, from the estimates of `workestimates`.
+function threadcount(work::Integer, floor::Integer, numthreads::Integer)
+    numthreads <= 1 && return 1
+    floor <= 0 && return Int(numthreads)
+    work < 2 * floor && return 1
+    return Int(clamp(work ÷ floor, 1, numthreads))
+end
+
+# The cost, summed over `nthreads` chunks of the costs, one per thread
+function cost_multithreaded(vars, costs::CostStruct, nthreads::Int)::Float64
+    if nthreads <= 1
         return sum(bindleadingargs(computecost, vars), costs; init=0.0)
     end
     tot = 0.0
     args = threadargs((vars, costs))
     GC.@preserve vars costs begin
-        @batch reduction=((+, tot),) for taskid in 1:N
+        @batch reduction=((+, tot),) for taskid in 1:nthreads
             vars_, costs_ = fromthreadargs(args)
-            tot += sumsubset(bindleadingargs(computecost, vars_), costs_, bindleadingargs(ithchunk, N, taskid); init=0.0)
+            tot += sumsubset(bindleadingargs(computecost, vars_), costs_, bindleadingargs(ithchunk, nthreads, taskid); init=0.0)
         end
     end
     return tot

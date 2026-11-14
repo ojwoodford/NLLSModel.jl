@@ -261,16 +261,19 @@ alloc_ephemeral(ls, ind) = @allocated NLLSModel.LinearSystem(ls, ind)
         @test Matrix(H_buf_s) ≈ Matrix(H_buf_m)
     end
 
-    # Threshold-based decision: the linearization estimate below the floor stays single-threaded, at or above it shares
+    # Threshold-based decision: a linearization estimate below twice the per-thread floor stays single-threaded; at
+    # exactly twice the default floor it shares two copies
     @test isa(NLLSModel.sharedlinearsystem(ls_static_single, NLLSModel.workestimates(prob_static, nothing).linearization, static(4)), NLLSModel.LinearSystem)
     prob_large = Model(Float64, MTTestScalarRes)
     addvariable!(prob_large, 2.0)
-    for k in 1:10000
+    for k in 1:NLLSModel.MIN_WORK_FOR_THREADED_LINEARIZATION
         addcost!(prob_large, MTTestScalarRes(k * 0.001, 1))
     end
     ls_large_single = NLLSModel.LinearSystem{NLLSModel.UniVariateLSstatic_x{1}, NLLSModel.UniVariateLSstatic_ls{1, 1}}((1,), ())
-    @test NLLSModel.workestimates(prob_large, nothing).linearization == 2 * 10000 # m = 1, n = 1 per cost
-    @test isa(NLLSModel.sharedlinearsystem(ls_large_single, NLLSModel.workestimates(prob_large, nothing).linearization, static(4)), NLLSModel.LinearSystemShared)
+    @test NLLSModel.workestimates(prob_large, nothing).linearization == 2 * NLLSModel.MIN_WORK_FOR_THREADED_LINEARIZATION # m = 1, n = 1 per cost
+    shared_large = NLLSModel.sharedlinearsystem(ls_large_single, NLLSModel.workestimates(prob_large, nothing).linearization, static(4))
+    @test shared_large isa NLLSModel.LinearSystemShared && length(shared_large.ls) == 2
+    @test NLLSModel.sharedlinearsystem(ls_large_single, NLLSModel.workestimates(prob_large, nothing).linearization - 1, static(4)) isa NLLSModel.LinearSystem
     f_ls, fdf_ls!, x0_ls, _ = optimvars(deepcopy(prob_large); numthreads=static(1))
     f_lm, fdf_lm!, x0_lm, _ = optimvars(deepcopy(prob_large); numthreads=static(4))
     @test f_ls(x0_ls) ≈ f_lm(x0_lm)
@@ -409,21 +412,77 @@ wtuple(w) = (w.cost, w.tall, w.linearization)
         @test a.linearization - b.linearization == 1 * (8 * 9 - 3 * 4) + 2 * (7 * 8 - 2 * 3)
     end
 
-    @testset "each decision uses its own estimate" begin
+    # The one rule: one thread below twice the floor, work ÷ floor between, numthreads above, every thread at floor 0
+    @testset "threadcount" begin
+        tc = NLLSModel.threadcount
+        @test tc(199, 100, 8) == 1 && tc(0, 100, 8) == 1
+        @test tc(200, 100, 8) == 2 && tc(299, 100, 8) == 2 && tc(300, 100, 8) == 3 && tc(799, 100, 8) == 7
+        @test tc(800, 100, 8) == 8 && tc(10^9, 100, 8) == 8
+        @test tc(0, 0, 8) == 8 && tc(5, 0, 3) == 3 && tc(5, -1, 3) == 3
+        @test tc(10^9, 1, 1) == 1 && tc(10^9, 0, 1) == 1
+    end
+
+    # Each kind of work decides on its own estimate, by the same rule: floors set for exactly 2 of 8 threads give 2
+    # per-thread copies of the linear system, 2 chunks of the tall fill and a 2-way cost sum
+    @testset "each kind of work uses the rule on its own estimate" begin
         ba = wbaproblem(3, 10) # cost 60, tall 780, linearization 9360
         w = NLLSModel.workestimates(ba, nothing)
         @test w.cost < w.tall < w.linearization
-        decisions(F) = begin
-            f, fdf!, _, _ = optimvars(ba; numthreads=static(4), min_work=F, min_work_cost=F)
-            _, res!, _, _, _ = optimvars_nls(ba; numthreads=static(4), min_work=F ÷ 2)
-            (f.work >= f.min_work, fdf!.linsystem isa NLLSModel.LinearSystemShared, res!.layout.work >= 2 * res!.min_work)
+        counts(Fcost, Flin, Ftall) = begin
+            f, fdf!, _, _ = optimvars(ba; numthreads=static(8), min_work=Flin, min_work_cost=Fcost)
+            _, res!, resjac!, _, _ = optimvars_nls(ba; numthreads=static(8), min_work=Ftall)
+            @test res!.nthreads == resjac!.nthreads
+            copies = fdf!.linsystem isa NLLSModel.LinearSystemShared ? length(fdf!.linsystem.ls) : 1
+            (f.nthreads, copies, res!.nthreads)
         end
-        # (cost, linearization, tall) threaded, for one floor F in each unit (the tall floor is 2 * min_work)
-        @test decisions(1000) == (false, true, false)  # between tall and linearization: exactly the linearization
-        @test decisions(100) == (false, true, true)    # between cost and tall
-        @test decisions(60) == (true, true, true)
-        @test decisions(10^5) == (false, false, false)
-        @test decisions(0) == (true, true, true)        # a floor of 0 forces threading
+        @test counts(w.cost ÷ 2, w.linearization ÷ 2, w.tall ÷ 2) == (2, 2, 2)
+        @test counts(w.cost ÷ 3, w.linearization ÷ 5, w.tall ÷ 4) == (3, 5, 4)
+        @test counts(w.cost, w.linearization, w.tall) == (1, 1, 1) # Below twice the floor
+        @test counts(1, 1, 1) == (8, 8, 8) && counts(0, 0, 0) == (8, 8, 8)
+        @test counts(10^9, 10^9, 10^9) == (1, 1, 1)
+        # One floor in each unit gives a different count for each kind of work
+        @test counts(30, 30, 30) == (2, 8, 8)
+        @test counts(400, 400, 400) == (1, 8, 1)
+        # numthreads bounds it
+        f, fdf!, _, _ = optimvars(ba; numthreads=static(3), min_work=1, min_work_cost=1)
+        @test f.nthreads == 3 && length(fdf!.linsystem.ls) == 3
+        # The standalone cost uses the default cost floor
+        @test NLLSModel.cost(ba.variables, ba.costs, static(4)) ≈ NLLSModel.cost(ba.variables, ba.costs, static(1)) rtol=1e-13
+    end
+
+    # Results agree between one thread and the count the rule chose, on every path (the Schur path is in optimization.jl)
+    @testset "one thread and the chosen count agree: $name" for (name, make, unfixed) in (
+            ("dense", () -> wbaproblem(3, 10), nothing), ("sparse", () -> wbaproblem(12, 40), nothing),
+            ("single variable", wdynproblem, 3), ("dynamic", wdynproblem, nothing))
+        p = make()
+        w = NLLSModel.workestimates(p, isnothing(unfixed) ? nothing : unfixed)
+        evalnormal(nt) = begin
+            m = deepcopy(p)
+            f, fdf!, x, H = optimvars(m; unfixed, numthreads=static(nt), min_work=w.linearization ÷ 2, min_work_cost=max(1, w.cost ÷ 2))
+            n = Int(sum(v -> dynamic(NLLSModel.nvars(v)), unfixed === nothing ? m.variables : [m.variables[unfixed]]))
+            g = H isa AbstractMatrix ? zero(H[:, 1]) : zeros(n)
+            Hb = H === nothing ? zeros(n, n) : deepcopy(H)
+            c = fdf!(g, Hb, x)
+            (f(x), c, Vector(g), Matrix(Hb)), (fdf!.linsystem isa NLLSModel.LinearSystemShared ? length(fdf!.linsystem.ls) : 1)
+        end
+        evaltall(nt) = begin
+            m = deepcopy(p)
+            f, res!, resjac!, x, J = optimvars_nls(m; unfixed, numthreads=static(nt), min_work=w.tall ÷ 2, min_work_cost=max(1, w.cost ÷ 2))
+            r = zeros(resjac!.layout.M)
+            c = resjac!(r, J, x)
+            (f(x), c, copy(r), Matrix(J)), resjac!.nthreads
+        end
+        (s, _), (t, copies) = evalnormal(1), evalnormal(8)
+        @test copies == 2
+        @test t[1] ≈ s[1] rtol=1e-13
+        @test t[2] ≈ s[2] rtol=1e-13
+        @test t[3] ≈ s[3] rtol=1e-12
+        @test t[4] ≈ s[4] rtol=1e-12
+        (s, _), (t, chunks) = evaltall(1), evaltall(8)
+        @test chunks == 2
+        @test t[3] == s[3] && t[4] == s[4]
+        @test t[1] ≈ s[1] rtol=1e-13
+        @test t[2] ≈ s[2] rtol=1e-13
     end
 
     @testset "Procrustes at d = 26 threads its linearization" begin

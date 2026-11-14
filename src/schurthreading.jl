@@ -81,8 +81,13 @@ function schur_thread_buffer(ls::MultiVariateLSSchur_ls)
 end
 
 # Like `sharedlinearsystem`, but the extra buffers carry no E and C storage
-function sharedschurlinearsystem(ls::LinearSystem{F, V}, work::Integer, numthreads::StaticInt{N}, min_work=MIN_WORK_FOR_THREADED_LINEARIZATION) where {F, V, N}
-    (N == 1 || work < min_work) && return ls
+# One buffer per thread of `threadcount`
+function sharedschurlinearsystem(ls::LinearSystem, work::Integer, numthreads::StaticInt, min_work=MIN_WORK_FOR_THREADED_LINEARIZATION)
+    n = threadcount(work, min_work, dynamic(numthreads))
+    n == 1 && return ls
+    return sharedschurlinearsystem(ls, static(n))
+end
+function sharedschurlinearsystem(ls::LinearSystem{F, V}, ::StaticInt{N}) where {F, V, N}
     buffers = SVector{N, V}(ntuple(i -> i == 1 ? ls.ls : schur_thread_buffer(ls.ls), Val(N)))
     return LinearSystemShared{F, V, N}(ls.x, buffers, MVector{N, Float64}(undef))
 end

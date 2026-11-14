@@ -671,23 +671,23 @@ end
 @inline sync_tall_vars!(::Model, ::Nothing, vars) = vars
 
 # Callable structs for optimvars_nls
-struct NLSResidual{P, L, U, NT, TR}
+struct NLSResidual{P, L, U, TR}
     problem::P
     layout::L
     unfixed_inds::U
     status::NLSRobustStatus
-    numthreads::NT
-    min_work::Int
+    min_work::Int # Per-thread floor
+    nthreads::Int # Threads the fill uses, `threadcount(layout.work, min_work, numthreads)`
     task_results::TR
 end
 
-struct NLSResJac{P, L, U, NT, TR}
+struct NLSResJac{P, L, U, TR}
     problem::P
     layout::L
     unfixed_inds::U
     status::NLSRobustStatus
-    numthreads::NT
-    min_work::Int
+    min_work::Int # Per-thread floor
+    nthreads::Int # Threads the fill uses, `threadcount(layout.work, min_work, numthreads)`
     task_results::TR
 end
 
@@ -774,13 +774,12 @@ function check_tall_status!(status, clamped_tot, err_code, err_val, fname)
 end
 
 # Serial or threaded evaluation of all costs with `evalone(cost, k)`, shared by the residual and residual+Jacobian evaluators
-function tall_eval!(evalone::F, costvecs, layout, status, task_results, N_req::Int, min_work::Int, fname) where F
-    if N_req <= 1 || layout.work < 2 * min_work
+function tall_eval!(evalone::F, costvecs, layout, status, task_results, N_chunks::Int, fname) where F
+    if N_chunks <= 1
         tot_cost, clamped_tot, err_code, err_val = eval_costvecs(evalone, costvecs, layout.costvec_start_idx, 1, 1, 1)
         check_tall_status!(status, clamped_tot, err_code, err_val, fname)
         return tot_cost
     end
-    N_chunks = min_work <= 0 ? N_req : min(N_req, layout.work ÷ min_work) # a floor of 0 forces every thread
     for t in 1:N_chunks
         task_results[t] = TaskResult(0.0, 0, 0, 0.0)
     end
@@ -809,14 +808,12 @@ function (res!::NLSResidual)(r::AbstractVector{Float64}, vars)
     problem = res!.problem
     layout = res!.layout
     status = res!.status
-    numthreads = res!.numthreads
-    min_work = res!.min_work
 
     full_vars = sync_tall_vars!(problem, res!.unfixed_inds, vars)
 
     return tall_eval!(
         (c, k) -> eval_single_res!(r, full_vars, c, k, layout, status),
-        values(problem.costs), layout, status, res!.task_results, Int(dynamic(numthreads)), min_work, "res!")
+        values(problem.costs), layout, status, res!.task_results, res!.nthreads, "res!")
 end
 
 # `prezeroed = true` says the structural zeros of the dense `J` are already in place (see `check_caller_jacobian!`): the optimizer
@@ -830,14 +827,12 @@ function (resjac!::NLSResJac)(r::AbstractVector{Float64}, J, vars; prezeroed::Bo
     problem = resjac!.problem
     layout = resjac!.layout
     status = resjac!.status
-    numthreads = resjac!.numthreads
-    min_work = resjac!.min_work
 
     full_vars = sync_tall_vars!(problem, resjac!.unfixed_inds, vars)
 
     return tall_eval!(
         (c, k) -> eval_single_resjac!(r, J, full_vars, c, k, layout, status),
-        values(problem.costs), layout, status, resjac!.task_results, Int(dynamic(numthreads)), min_work, "resjac!")
+        values(problem.costs), layout, status, resjac!.task_results, resjac!.nthreads, "resjac!")
 end
 
 """
@@ -892,12 +887,12 @@ function optimvars_nls(
         f = MultiVarCostFunc(problem, unfixed_inds, static(numthreads), min_work_cost)
     end
 
-    N_req = Int(dynamic(numthreads))
-    task_results = [TaskResult(0.0, 0, 0, 0.0) for _ in 1:max(1, N_req)]
+    nthreads = threadcount(layout.work, min_work, dynamic(numthreads))
+    task_results = [TaskResult(0.0, 0, 0, 0.0) for _ in 1:nthreads]
     status = NLSRobustStatus()
 
-    res! = NLSResidual(problem, layout, unfixed_inds, status, static(numthreads), Int(min_work), task_results)
-    resjac! = NLSResJac(problem, layout, unfixed_inds, status, static(numthreads), Int(min_work), task_results)
+    res! = NLSResidual(problem, layout, unfixed_inds, status, Int(min_work), nthreads, task_results)
+    resjac! = NLSResJac(problem, layout, unfixed_inds, status, Int(min_work), nthreads, task_results)
 
     return (f, res!, resjac!, x0, J_proto)
 end

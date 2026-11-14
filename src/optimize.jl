@@ -13,17 +13,18 @@ end
 convertunfixed(unfixed, problem) = unfixed
 
 # Single-variable objective and gradient/Hessian functors
-struct SingleVarCostFunc{P, U, NT}
+struct SingleVarCostFunc{P, U}
     problem::P
     unfixed::U
-    numthreads::NT
     work::Int     # Cost-evaluation estimate (see `workestimates`), computed at setup
-    min_work::Int # Floor below which the cost is evaluated on one thread
+    min_work::Int # Per-thread floor
+    nthreads::Int # Threads the cost is evaluated on, `threadcount(work, min_work, numthreads)`
 end
-SingleVarCostFunc(problem, unfixed, numthreads, min_work::Integer=MIN_WORK_FOR_THREADED_COST) = SingleVarCostFunc(problem, unfixed, numthreads, costestimate(problem.costs), Int(min_work))
+SingleVarCostFunc(problem, unfixed, numthreads, min_work::Integer=MIN_WORK_FOR_THREADED_COST) =
+    SingleVarCostFunc(problem, unfixed, costestimate(problem.costs), Int(min_work), threadcount(costestimate(problem.costs), min_work, dynamic(numthreads)))
 @inline function (f::SingleVarCostFunc)(x)
     @inbounds f.problem.variables[f.unfixed] = x
-    return cost(f.problem.variables, f.problem.costs, f.numthreads, f.work >= f.min_work)
+    return cost_multithreaded(f.problem.variables, f.problem.costs, f.nthreads)
 end
 
 struct SingleVarCostGradHess{LS, P, U}
@@ -70,17 +71,18 @@ end
     return problem.variables
 end
 
-struct MultiVarCostFunc{P, U, NT}
+struct MultiVarCostFunc{P, U}
     problem::P
     unfixed_inds::U
-    numthreads::NT
     work::Int     # Cost-evaluation estimate (see `workestimates`), computed at setup
-    min_work::Int # Floor below which the cost is evaluated on one thread
+    min_work::Int # Per-thread floor
+    nthreads::Int # Threads the cost is evaluated on, `threadcount(work, min_work, numthreads)`
 end
-MultiVarCostFunc(problem, unfixed_inds, numthreads, min_work::Integer=MIN_WORK_FOR_THREADED_COST) = MultiVarCostFunc(problem, unfixed_inds, numthreads, costestimate(problem.costs), Int(min_work))
+MultiVarCostFunc(problem, unfixed_inds, numthreads, min_work::Integer=MIN_WORK_FOR_THREADED_COST) =
+    MultiVarCostFunc(problem, unfixed_inds, costestimate(problem.costs), Int(min_work), threadcount(costestimate(problem.costs), min_work, dynamic(numthreads)))
 @inline function (f::MultiVarCostFunc)(vars)
     full_vars = sync_unfixed_vars!(f.problem, f.unfixed_inds, vars)
-    return cost(full_vars, f.problem.costs, f.numthreads, f.work >= f.min_work)
+    return cost_multithreaded(full_vars, f.problem.costs, f.nthreads)
 end
 
 # On several threads `linsystem` is a `LinearSystemShared`: one copy of the system per thread, summed afterwards, so each
@@ -282,7 +284,7 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
             ls_val = MultiVariateLSSchur_ls(H, b_vec)
             lsschur = LinearSystem(ls_x, ls_val)
             ls_shared = sharedschurlinearsystem(lsschur, workestimates(problem, partition.unfixed_inds).linearization, numthreads, min_work)
-            plan = ls_shared isa LinearSystemShared ? build_schur_thread_plan!(problem, blockindices, partition.nrblocks, partition.neblocks, dynamic(numthreads)) : nothing
+            plan = ls_shared isa LinearSystemShared ? build_schur_thread_plan!(problem, blockindices, partition.nrblocks, partition.neblocks, length(ls_shared.ls)) : nothing
 
             f = MultiVarCostFunc(problem, partition.unfixed_inds, numthreads, min_work_cost)
             fdf! = MultiVarSchurFDF(ls_shared, problem, partition.unfixed_inds, plan)
