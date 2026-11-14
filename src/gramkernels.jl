@@ -25,7 +25,7 @@ using LoopVectorization: @turbo
 # 2. static-column kernel: `J` is a `Matrix` of `Float32`/`Float64` and `r` an `SVector{M}` with `M <= MAX_STATIC_ROWS`;
 #    `J` is viewed as `n` static columns and the dot products are unrolled.
 # 3. plain loops when `J` has a single column (`n == 1`), whatever the types: a column of many rows is a single dot
-#    product, which the plain loop does 2 to 4 times faster than `@turbo` (benchmark/results).
+#    product, which the plain loop does 2 to 4 times faster than `@turbo` (measured on an Apple M1 Pro, 100 to 1000 rows).
 # 4. `@turbo` kernel: every array is a strided array of the same hardware float type (`Array`s and unit-range views of
 #    them): a `Vector` residual with a `Matrix` Jacobian, for instance. `@turbo` needs arrays with a memory address.
 # 5. plain loops (`@fastmath @inbounds @simd`) for anything else: an `Adjoint`, a non-contiguous view, another element type, and

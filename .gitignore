@@ -25,3 +25,6 @@ GEMINI.md
 
 # OS generated files
 .DS_Store
+
+# Working scripts and their output (rules.md 43)
+/scripts/

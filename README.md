@@ -124,7 +124,7 @@ static). Rows 2 to 4 are tried in order; the first that applies runs:
 | 5 | Plain loops (`@fastmath @inbounds @simd`) | anything `@turbo` cannot address: an `SVector` longer than `MAX_STATIC_ROWS`, or an `MVector` of any length, with a `Matrix` Jacobian (hand-written `computeresjac` only), an `Adjoint`, a strided view, mixed element types. Intended, not a gap: nothing is copied |
 
 On an Apple M1 Pro, `@turbo` was 1.2 to 2 times faster than the plain loops over most of the grid of 1 to 1000 rows and 1
-to 250 columns, and 22 to 34% faster on a linearization the kernels dominate; see `benchmark/results/`. The plain loops
+to 250 columns, and 22 to 34% faster on a linearization the kernels dominate. The plain loops
 carry a `NaN` or `Inf` in the Jacobian or residual through to the gradient and Hessian, as the optimizer's termination
 tests need.
 

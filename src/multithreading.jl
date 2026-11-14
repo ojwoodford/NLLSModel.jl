@@ -11,9 +11,9 @@ using Polyester
 # an integer. Problems with less work than the floor are evaluated on a single thread.
 #
 # The defaults are the break-evens of the families with cheap residuals (static variables, hand-sized residual code), on
-# 4 threads, measured on an Apple M1 Pro (8 performance and 2 efficiency cores), Julia 1.13.3, 2026-11-14, by
-# `benchmark/threading.jl`. Break-even as (lo, hi]: lo the largest estimate at which the threaded evaluation was not
-# faster, hi the next size measured.
+# 4 threads, measured on an Apple M1 Pro (8 performance and 2 efficiency cores), Julia 1.13.3, 2026-11-14, by timing the
+# serial and the threaded evaluation of each family over a range of sizes. Break-even as (lo, hi]: lo the largest
+# estimate at which the threaded evaluation was not faster, hi the next size measured.
 #
 #   kind           threads  bundle adjustment (2x12)  pose chain (6x12)   curve fit, dynamic (1x5)  Procrustes d=5/10/20
 #   cost             2       (84, 136]                 (132, 216]          (52, 84]*                 (30,50] (30,50] (0,20]
