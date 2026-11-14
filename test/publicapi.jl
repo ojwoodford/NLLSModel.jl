@@ -6,11 +6,14 @@ const PUBLIC_NAMES = sort([
     :AbstractAdaptiveResidual, :AbstractAdaptiveRobustifier, :AbstractCost, :AbstractResidual, :AbstractRobustifier,
     :ContaminatedGaussian, :GemanMcclure2oKernel, :GemanMcclureKernel, :Huber2oKernel, :HuberKernel,
     :Model, :NLLSModel, :NLLSNLSModel, :NLPLSModel, :NoRobust, :Scaled, :SimpleError2, :SimpleError3, :SimpleError4,
-    :addcost!, :addresidual!, :addvariable!, :computecost, :computecostgradhess, :computeresidual, :computeresjac,
+    :addcost!, :addvariable!, :computecost, :computecostgradhess, :computeresidual, :computeresjac,
     :cost, :flat_optimvars_nls, :generatemeasurement, :getvars, :islinear, :islinearkernel, :ndeps, :nres,
     :optimvars, :optimvars_nls, :robustify, :robustifydcost, :robustifydkernel, :robustkernel,
     :subproblem, :subproblem!, :syncvars!, :varindices,
 ])
+
+# Removed, not deprecated (rules.md 9)
+const REMOVED_NAMES = [:addresidual!]
 
 # Internal: still defined, no longer exported
 const INTERNAL_NAMES = [
@@ -19,8 +22,7 @@ const INTERNAL_NAMES = [
 ]
 
 # `Base.Docs.hasdoc` is not in Julia 1.10. A docstring is stored in the `meta` of the module that wrote it, under the
-# binding of the owning module (`syncvars!` belongs to OptimizationVariableInterface). `addresidual!` is a second name
-# for `addcost!` and shares its docstring.
+# binding of the owning module (`syncvars!` belongs to OptimizationVariableInterface).
 function hasdocstring(mod::Module, name::Symbol)
     candidates = [Base.Docs.Binding(mod, name)]
     obj = getfield(mod, name)
@@ -46,10 +48,14 @@ end
 
 @testset "Public API" begin
     @test sort(names(NLLSModel)) == PUBLIC_NAMES
+    @test length(PUBLIC_NAMES) == 43
     @testset "docstring: $name" for name in PUBLIC_NAMES
         @test hasdocstring(NLLSModel, name)
     end
     @test apireference_names(joinpath(dirname(@__DIR__), "docs", "src", "api.md")) == PUBLIC_NAMES
+    @testset "removed: $name" for name in REMOVED_NAMES
+        @test !isdefined(NLLSModel, name)
+    end
     @testset "internal: $name" for name in INTERNAL_NAMES
         @test isdefined(NLLSModel, name)
         @test name ∉ names(NLLSModel)

@@ -10,7 +10,6 @@ NLLSModel
 Model
 addvariable!
 addcost!
-addresidual!
 subproblem
 subproblem!
 cost

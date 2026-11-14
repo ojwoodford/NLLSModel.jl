@@ -31,7 +31,7 @@ import SIRBSDispatch: sirbsdispatch
 # Export NLLSModel public interface
 # Problem construction & evaluation
 export Model, NLPLSModel, NLLSNLSModel
-export addvariable!, addcost!, addresidual!, subproblem, subproblem!
+export addvariable!, addcost!, subproblem, subproblem!
 export cost, optimvars, optimvars_nls, flat_optimvars_nls, syncvars!
 export islinearkernel, islinear
 
@@ -88,7 +88,6 @@ const MAX_STATIC_ROWS = 16
 include("utils.jl")
 include("CostStruct.jl")
 include("problem.jl")
-const addresidual! = addcost!
 include("unroll.jl")
 include("linearsystem.jl")
 include("robust.jl")

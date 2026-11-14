@@ -182,7 +182,6 @@ addvariable!
 
 """
     addcost!(problem::Model, cost::AbstractCost)
-    addresidual!(problem::Model, res::AbstractResidual)
 
 Appends a cost or residual block to `problem`.
 
