@@ -42,9 +42,13 @@ mutable struct NLLSModelNLP{P, F, FDF, X0, H, VarsBuf, BSZ, HIdx, UInd} <: Abstr
     cache_valid::Base.RefValue{Bool}
 end
 
-function NLLSModel.NLPLSModel(problem::Model; unfixed=nothing, numthreads=static(1), name="NLPLSModel")
+function NLLSModel.NLPLSModel(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction::Symbol=:auto,
+        storage::Symbol=:auto, min_work::Integer=NLLSModel.MIN_WORK_FOR_THREADED_LINEARIZATION,
+        min_work_cost::Integer=NLLSModel.MIN_WORK_FOR_THREADED_COST, name="NLPLSModel")
     # Never use the Schur path here: the model works on the full (non-reduced) system
-    f, fdf!, x0, H_temp = optimvars(problem, unfixed, numthreads; reduction=:none)
+    NLLSModel.check_reduction(reduction)
+    reduction === :eliminate && throw(ArgumentError("NLPLSModel works on the full system: reduction = :eliminate is not supported; use :auto or :none."))
+    f, fdf!, x0, H_temp = optimvars(problem; unfixed, numthreads, reduction=:none, storage, min_work, min_work_cost)
     conv_unfixed = NLLSModel.convertunfixed(unfixed, problem)
 
     if conv_unfixed isa Integer
@@ -285,12 +289,13 @@ Concrete adapter exposing an `NLLSModel.Model` as an `NLPModels.AbstractNLSModel
 Enables native tall NLS solvers such as `JSOSolvers.trunk` and `JSOSolvers.tron`.
 Restricted to costs with a linear kernel (`NoRobust`, or `Scaled` with a finite non-negative height).
 """
-mutable struct NLLSModelNLS{P, L, RES, RESJAC, J} <: AbstractNLSModel{Float64, Vector{Float64}}
+mutable struct NLLSModelNLS{P, L, F, RES, RESJAC, J} <: AbstractNLSModel{Float64, Vector{Float64}}
     meta::NLPModelMeta{Float64, Vector{Float64}}
     nls_meta::NLSMeta{Float64, Vector{Float64}}
     counters::NLSCounters
     problem::P
     layout::L
+    f_flat::F
     res_flat!::RES
     resjac_flat!::RESJAC
     r_buf::Vector{Float64}
@@ -305,20 +310,15 @@ end
 function NLLSModel.NLLSNLSModel(
     problem::Model;
     unfixed = nothing,
-    numthreads = static(1),
-    min_work_per_thread::Int = NLLSModel.MIN_WORK_PER_THREAD,
-    matrix_type::Symbol = :auto,
-    max_dense_bytes::Int = 32 * 1024^2,
+    numthreads = StaticInt(Threads.nthreads()),
+    reduction::Symbol = :auto,
+    storage::Symbol = :auto,
+    max_dense_bytes::Integer = NLLSModel.MAX_DENSE_BYTES,
+    min_work::Integer = NLLSModel.MIN_WORK_PER_THREAD,
+    min_work_cost::Integer = NLLSModel.MIN_WORK_FOR_THREADED_COST,
     name::String = "NLLSNLSModel",
 )
-    flat = flat_optimvars_nls(
-        problem;
-        unfixed = unfixed,
-        numthreads = numthreads,
-        min_work_per_thread = min_work_per_thread,
-        matrix_type = matrix_type,
-        max_dense_bytes = max_dense_bytes,
-    )
+    flat = flat_optimvars_nls(problem; unfixed, numthreads, reduction, storage, max_dense_bytes, min_work, min_work_cost)
 
     islinear(flat) || NLLSModel.throw_nonlinear("NLLSNLSModel", problem)
 
@@ -339,6 +339,7 @@ function NLLSModel.NLLSNLSModel(
         counters,
         problem,
         flat.layout,
+        flat.f,
         flat.res!,
         flat.resjac!,
         r_buf,
@@ -434,9 +435,12 @@ function NLPModels.jtprod_residual!(nls::NLLSModelNLS, x::AbstractVector, v::Abs
     return Jtv
 end
 
+# The cost alone is the cost function's (threaded by `min_work_cost`); the residual is computed only when a residual,
+# a Jacobian or a gradient is asked for. Every kernel is linear, so the cost equals ½‖r‖².
 function NLPModels.obj(nls::NLLSModelNLS, x::AbstractVector)
     NLPModels.increment!(nls, :neval_obj)
-    return ensure_res!(nls, x)
+    x == nls.x_cached && nls.res_valid && return nls.last_cost
+    return nls.f_flat(x)
 end
 
 function NLPModels.grad!(nls::NLLSModelNLS, x::AbstractVector, g::AbstractVector)

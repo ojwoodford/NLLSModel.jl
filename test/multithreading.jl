@@ -248,8 +248,8 @@ alloc_ephemeral(ls, ind) = @allocated NLLSModel.LinearSystem(ls, ind)
 
     # optimvars single-threaded vs multi-threaded equivalence
     for prob in (prob_static, prob_dyn, prob_dense, prob_sparse)
-        f_s, fdf_s!, x0_s, H_s = optimvars(deepcopy(prob), nothing, static(1))
-        f_m, fdf_m!, x0_m, H_m = optimvars(deepcopy(prob), nothing, static(4))
+        f_s, fdf_s!, x0_s, H_s = optimvars(deepcopy(prob); numthreads=static(1))
+        f_m, fdf_m!, x0_m, H_m = optimvars(deepcopy(prob); numthreads=static(4))
         @test f_s(x0_s) ≈ f_m(x0_m)
         dim_x = dynamic(NLLSModel.nvars(x0_s))
         g_s = zeros(dim_x)
@@ -271,8 +271,8 @@ alloc_ephemeral(ls, ind) = @allocated NLLSModel.LinearSystem(ls, ind)
     ls_large_single = NLLSModel.LinearSystem{NLLSModel.UniVariateLSstatic_x{1}, NLLSModel.UniVariateLSstatic_ls{1, 1}}((1,), ())
     @test NLLSModel.workestimates(prob_large, nothing).linearization == 2 * 10000 # m = 1, n = 1 per cost
     @test isa(NLLSModel.sharedlinearsystem(ls_large_single, NLLSModel.workestimates(prob_large, nothing).linearization, static(4)), NLLSModel.LinearSystemShared)
-    f_ls, fdf_ls!, x0_ls, _ = optimvars(deepcopy(prob_large), nothing, static(1))
-    f_lm, fdf_lm!, x0_lm, _ = optimvars(deepcopy(prob_large), nothing, static(4))
+    f_ls, fdf_ls!, x0_ls, _ = optimvars(deepcopy(prob_large); numthreads=static(1))
+    f_lm, fdf_lm!, x0_lm, _ = optimvars(deepcopy(prob_large); numthreads=static(4))
     @test f_ls(x0_ls) ≈ f_lm(x0_lm)
     g_ls = zeros(MVector{1, Float64})
     g_lm = zeros(MVector{1, Float64})
@@ -384,7 +384,7 @@ wtuple(w) = (w.cost, w.tall, w.linearization)
         dy = wdynproblem()
         @test wtuple(NLLSModel.workestimates(dy, nothing)) == (4 + 1 + 2, 4 * 6 + 1 * 9 + 2 * 8, 4 * 5 * 6 + 1 * 8 * 9 + 2 * 7 * 8)
         # What setup stores is what the estimates say
-        f, fdf!, _, _ = optimvars(ba, nothing, static(4))
+        f, fdf!, _, _ = optimvars(ba; numthreads=static(4))
         @test f.work == NLLSModel.workestimates(ba, nothing).cost
         _, res!, resjac!, _, _ = optimvars_nls(ba; numthreads=static(4))
         @test res!.layout.work == resjac!.layout.work == NLLSModel.workestimates(ba, nothing).tall
@@ -414,11 +414,11 @@ wtuple(w) = (w.cost, w.tall, w.linearization)
         w = NLLSModel.workestimates(ba, nothing)
         @test w.cost < w.tall < w.linearization
         decisions(F) = begin
-            f, fdf!, _, _ = optimvars(ba, nothing, static(4); min_work=F, min_work_cost=F)
-            _, res!, _, _, _ = optimvars_nls(ba; numthreads=static(4), min_work_per_thread=F ÷ 2)
-            (f.work >= f.min_work, fdf!.linsystem isa NLLSModel.LinearSystemShared, res!.layout.work >= 2 * res!.min_work_per_thread)
+            f, fdf!, _, _ = optimvars(ba; numthreads=static(4), min_work=F, min_work_cost=F)
+            _, res!, _, _, _ = optimvars_nls(ba; numthreads=static(4), min_work=F ÷ 2)
+            (f.work >= f.min_work, fdf!.linsystem isa NLLSModel.LinearSystemShared, res!.layout.work >= 2 * res!.min_work)
         end
-        # (cost, linearization, tall) threaded, for one floor F in each unit (the tall floor is 2 * min_work_per_thread)
+        # (cost, linearization, tall) threaded, for one floor F in each unit (the tall floor is 2 * min_work)
         @test decisions(1000) == (false, true, false)  # between tall and linearization: exactly the linearization
         @test decisions(100) == (false, true, true)    # between cost and tall
         @test decisions(60) == (true, true, true)
@@ -432,7 +432,7 @@ wtuple(w) = (w.cost, w.tall, w.linearization)
         # floor of 10 000, so this did not thread; the linearization estimate is 26 * 325 * 326 * 20.
         @test 26 * 20 * 1^2 < NLLSModel.MIN_WORK_FOR_THREADED_LINEARIZATION
         @test NLLSModel.workestimates(pr, nothing).linearization >= NLLSModel.MIN_WORK_FOR_THREADED_LINEARIZATION
-        _, fdf!, _, _ = optimvars(pr, nothing, static(4))
+        _, fdf!, _, _ = optimvars(pr; numthreads=static(4))
         @test fdf!.linsystem isa NLLSModel.LinearSystemShared
     end
 
@@ -441,7 +441,7 @@ wtuple(w) = (w.cost, w.tall, w.linearization)
     @testset "same results threaded and not: $name" for (name, make) in (("bundle adjustment", () -> wbaproblem(3, 10)), ("Procrustes d = 26", () -> wprocrustes(26, 20)), ("dynamic", wdynproblem))
         evalnormal(nt, floor) = begin
             p = make()
-            f, fdf!, x, H = optimvars(p, nothing, static(nt); min_work=floor, min_work_cost=floor)
+            f, fdf!, x, H = optimvars(p; numthreads=static(nt), min_work=floor, min_work_cost=floor)
             n = Int(sum(v -> dynamic(NLLSModel.nvars(v)), p.variables))
             g = zeros(n); Hb = H === nothing ? zeros(n, n) : H
             c = fdf!(g, Hb, x)
@@ -449,7 +449,7 @@ wtuple(w) = (w.cost, w.tall, w.linearization)
         end
         evaltall(nt, floor) = begin
             p = make()
-            f, res!, resjac!, x, J = optimvars_nls(p; numthreads=static(nt), min_work_per_thread=floor)
+            f, res!, resjac!, x, J = optimvars_nls(p; numthreads=static(nt), min_work=floor)
             r = zeros(resjac!.layout.M)
             c = resjac!(r, J, x)
             (f(x), c, copy(r), Matrix(J))
@@ -464,7 +464,7 @@ wtuple(w) = (w.cost, w.tall, w.linearization)
         @test forced[3] == serial[3] && forced[4] == serial[4]
         @test forced[2] ≈ serial[2] rtol=1e-13
         # A very large floor makes the fill serial: bit-identical. The cost function f threads on its own estimate at the
-        # default cost floor, whatever min_work_per_thread is, so its sum may differ in the last bits.
+        # default cost floor, whatever min_work is, so its sum may differ in the last bits.
         onethread = evaltall(4, 10^12)
         @test onethread[2:4] == serial[2:4]
         @test onethread[1] ≈ serial[1] rtol=1e-13
@@ -476,7 +476,7 @@ wtuple(w) = (w.cost, w.tall, w.linearization)
     @testset "each cost linearized once on $nt threads, $storage" for nt in (2, 4), storage in (:dense, :sparse)
         p = storage === :dense ? wbaproblem(3, 10) : wbaproblem(6, 60)
         evals(numthreads) = begin
-            _, fdf!, x, H = optimvars(p, nothing, static(numthreads); min_work=0)
+            _, fdf!, x, H = optimvars(p; numthreads=static(numthreads), min_work=0)
             n = Int(sum(v -> dynamic(NLLSModel.nvars(v)), p.variables))
             g = zeros(n); Hb = H === nothing ? zeros(n, n) : H
             (H === nothing) == (storage === :dense) || error("expected $storage storage")

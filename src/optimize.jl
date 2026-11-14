@@ -179,13 +179,14 @@ function cholmod_symbolic_nnz(fac::SparseArrays.CHOLMOD.Factor, n::Integer)
     end
 end
 
-function optimvars(problem::Model, unfixed=nothing, numthreads=StaticInt(Threads.nthreads()); reduction::Symbol=:auto, reduced::Symbol=:auto, min_work::Integer=MIN_WORK_FOR_THREADED_LINEARIZATION, min_work_cost::Integer=MIN_WORK_FOR_THREADED_COST)
-    reduction in (:auto, :none, :eliminate) || throw(ArgumentError("Unknown reduction $(repr(reduction)); expected :auto, :none or :eliminate."))
-    reduced in (:auto, :dense, :sparse) || throw(ArgumentError("Unknown reduced $(repr(reduced)); expected :auto, :dense or :sparse."))
-    return optimvars_dispatch(problem, convertunfixed(unfixed, problem), static(numthreads), reduction, reduced, min_work, min_work_cost)
+function optimvars(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction::Symbol=:auto, storage::Symbol=:auto,
+        min_work::Integer=MIN_WORK_FOR_THREADED_LINEARIZATION, min_work_cost::Integer=MIN_WORK_FOR_THREADED_COST)
+    check_reduction(reduction)
+    check_storage(storage)
+    return optimvars_dispatch(problem, convertunfixed(unfixed, problem), static(numthreads), reduction, storage, min_work, min_work_cost)
 end
 
-function optimvars_dispatch(problem::Model, unfixed::Integer, numthreads::StaticInt, reduction::Symbol=:auto, reduced::Symbol=:auto, min_work::Integer=MIN_WORK_FOR_THREADED_LINEARIZATION, min_work_cost::Integer=MIN_WORK_FOR_THREADED_COST)
+function optimvars_dispatch(problem::Model, unfixed::Integer, numthreads::StaticInt, reduction::Symbol=:auto, storage::Symbol=:auto, min_work::Integer=MIN_WORK_FOR_THREADED_LINEARIZATION, min_work_cost::Integer=MIN_WORK_FOR_THREADED_COST)
     x0 = problem.variables[unfixed]
     varlen = nvars(x0)
     if dynamic(is_static(varlen)) && varlen <= 16
@@ -202,11 +203,11 @@ function optimvars_dispatch(problem::Model, unfixed::Integer, numthreads::Static
     return (f, fdf!, x0, H)
 end
 
-function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads::StaticInt, reduction::Symbol=:auto, reduced::Symbol=:auto, min_work::Integer=MIN_WORK_FOR_THREADED_LINEARIZATION, min_work_cost::Integer=MIN_WORK_FOR_THREADED_COST)
+function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads::StaticInt, reduction::Symbol=:auto, storage::Symbol=:auto, min_work::Integer=MIN_WORK_FOR_THREADED_LINEARIZATION, min_work_cost::Integer=MIN_WORK_FOR_THREADED_COST)
     @assert length(problem.variables) > 0
     nblocks = sum(unfixed)
     if nblocks == 1
-        return optimvars_dispatch(problem, findfirst(unfixed), numthreads, reduction, reduced, min_work, min_work_cost)
+        return optimvars_dispatch(problem, findfirst(unfixed), numthreads, reduction, storage, min_work, min_work_cost)
     end
 
     has_elims = any(v -> dynamic(OptimizationVariableInterface.iseliminable(typeof(v))), problem.variables)
@@ -217,14 +218,14 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
             structure = SchurStructure(partition.r_dims, partition.e_dims, partition.couplings; nchunks=dynamic(numthreads))
             
             # The pattern includes retained-retained pairs sharing a cost, not only those sharing an eliminated variable
-            pattern = reduced === :dense ? nothing : build_schur_pattern(structure; extra_blocks=partition.extra_blocks)
+            pattern = storage === :dense ? nothing : build_schur_pattern(structure; extra_blocks=partition.extra_blocks)
 
             # Decision Matrix: Dense vs. Sparse. When the symbolic analysis is run for the decision, it is kept and
             # handed on with the pattern, so the linear system does not analyse the same pattern again.
             analysed = nothing
-            is_dense = if reduced === :dense
+            is_dense = if storage === :dense
                 true
-            elseif reduced === :sparse
+            elseif storage === :sparse
                 false
             else
                 if structure.nr <= 2000

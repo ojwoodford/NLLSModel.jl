@@ -258,7 +258,7 @@ end
         addcost!(prob1, TestRosenbrock1())
         addcost!(prob1, TestRosenbrock2())
 
-        f_norm, fdf!_norm, x0_norm, _ = optimvars(prob1, nothing, static(1))
+        f_norm, fdf!_norm, x0_norm, _ = optimvars(prob1; numthreads=static(1))
         g_norm = zeros(2)
         H_norm = zeros(2, 2)
         c_norm = fdf!_norm(g_norm, H_norm, x0_norm)
@@ -276,7 +276,7 @@ end
         prob2 = Model(Float64, RobustWrapper{ScalarVarIndRes, HuberKernel{Float64, Static.False}})
         addvariable!(prob2, 5.0)
         addcost!(prob2, RobustWrapper(ScalarVarIndRes(), HuberKernel(1.0)))
-        _, fdf2, x02, _ = optimvars(prob2, nothing, static(1))
+        _, fdf2, x02, _ = optimvars(prob2; numthreads=static(1))
         g2 = zeros(1)
         H2 = zeros(1, 1)
         c2 = fdf2(g2, H2, x02)
@@ -293,7 +293,7 @@ end
             prob3 = Model(Float64, RobustWrapper{ScalarVarIndRes, HuberKernel{Float64, Static.True}})
             addvariable!(prob3, 5.0 * scale)
             addcost!(prob3, RobustWrapper(ScalarVarIndRes(), Huber2oKernel(2.0 * scale)))
-            _, fdf3, x03, _ = optimvars(prob3, nothing, static(1))
+            _, fdf3, x03, _ = optimvars(prob3; numthreads=static(1))
             g3 = zeros(1)
             H3 = zeros(1, 1)
             c3 = fdf3(g3, H3, x03)
@@ -314,7 +314,7 @@ end
         addvariable!(prob_zw, 10.0)
         addcost!(prob_zw, RobustWrapper(ScalarVarIndRes(), ZeroWeightKernel()))
 
-        flat = flat_optimvars_nls(prob_zw, matrix_type=:sparse)
+        flat = flat_optimvars_nls(prob_zw, storage=:sparse)
         J_reused = copy(flat.J_proto)
         fill!(J_reused.nzval, 999.0) # Pre-fill with non-zero garbage
         r = zeros(1)
@@ -392,7 +392,7 @@ end
         J1 = copy(J_proto1)
         c1 = resjac1(r1, J1, x01)
 
-        f4, res4, resjac4, x04, J_proto4 = optimvars_nls(prob, numthreads=static(4), min_work_per_thread=10)
+        f4, res4, resjac4, x04, J_proto4 = optimvars_nls(prob, numthreads=static(4), min_work=10)
         r4 = zeros(100)
         J4 = copy(J_proto4)
         c4 = resjac4(r4, J4, x04)
@@ -491,7 +491,7 @@ end
         prob_dense = Model(SVector{2, Float64}, TestRosenbrock1)
         addvariable!(prob_dense, SVector(1.0, 2.0))
         addcost!(prob_dense, TestRosenbrock1())
-        _, _, resjac_d, x0_d, _ = optimvars_nls(prob_dense, matrix_type=:dense)
+        _, _, resjac_d, x0_d, _ = optimvars_nls(prob_dense, storage=:dense)
         J_nan = fill(NaN, 1, 2)
         r_d = zeros(1)
         resjac_d(r_d, J_nan, x0_d)
@@ -610,7 +610,7 @@ end
         addcost!(prob_sp, RobustWrapper(TestPairDiff(i, i + 1, 1.0), Scaled(NoRobust(), 2.0)))
     end
 
-    cb_sp = NLLSModel.nls_callbacks(prob_sp; matrix_type=:sparse)
+    cb_sp = NLLSModel.nls_callbacks(prob_sp; storage=:sparse)
     @test cb_sp.J0 isa SparseMatrixCSC
 
     lsp_sp = LeastSquaresOptim.LeastSquaresProblem(

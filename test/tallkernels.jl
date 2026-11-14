@@ -21,10 +21,10 @@ import OptimizationVariableInterface
             for c in costlist(base)
                 addcost!(model, TlRob(c, kern))
             end
-            _, fdf!, xn, _ = optimvars(model, nothing, static(1))
+            _, fdf!, xn, _ = optimvars(model; numthreads=static(1))
             g = zeros(3); H = zeros(3, 3)
             c = fdf!(g, H, xn)
-            _, _, resjac!, xt, J = tlnls(model; numthreads=static(1), matrix_type=:dense)
+            _, _, resjac!, xt, J = tlnls(model; numthreads=static(1), storage=:dense)
             r = zeros(size(J, 1))
             ct = resjac!(r, J, xt)
             @test ct ≈ c rtol=1e-12
@@ -48,10 +48,10 @@ import OptimizationVariableInterface
         for (i, c) in enumerate(costlist(base))
             addcost!(model, TlRob(c, kernels[mod1(i, length(kernels))]))
         end
-        _, fdf!, xn, _ = optimvars(model, nothing, static(1))
+        _, fdf!, xn, _ = optimvars(model; numthreads=static(1))
         g = zeros(3); H = zeros(3, 3)
         c = fdf!(g, H, xn)
-        _, _, resjac!, xt, J = tlnls(model; numthreads=static(1), matrix_type=:dense)
+        _, _, resjac!, xt, J = tlnls(model; numthreads=static(1), storage=:dense)
         r = zeros(size(J, 1))
         @test resjac!(r, J, xt) ≈ c rtol=1e-12
         @test J' * r ≈ g rtol=1e-9

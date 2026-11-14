@@ -3,7 +3,7 @@ using SecondOrderOptimization
 import BlockLinearSystems
 import OptimizationVariableInterface
 
-# The front door: optimize!(model, options) and optimize(model, options) (the extension), and the `reduction` and `reduced`
+# The front door: optimize!(model, options) and optimize(model, options) (the extension), and the `reduction` and `storage`
 # keywords of optimvars. Needs optlandmark_problem from optimization.jl.
 
 # Pins a variable of any type to a target (nonlinear, with its minimum at the target)
@@ -129,21 +129,21 @@ issolved(model, targets, which=eachindex(targets); atol=1e-6) = all(k -> isappro
 
     @testset "variables hold the solution: several variables, $name" for (name, n) in (("dense", 5), ("sparse", 60))
         model, targets = chainproblem(n, 2, 2)
-        _, _, _, H = optimvars(model, nothing, static(1))
+        _, _, _, H = optimvars(model; numthreads=static(1))
         @test isnothing(H) == (name == "dense") # Check the storage the test is meant to exercise
         result = optimize!(model, FDOptions; numthreads=static(1))
         @test issolved(model, targets)
         @test NLLSModel.cost(model) ≈ result.bestcost atol=1e-12
     end
 
-    @testset "variables hold the solution: Schur, $reduced" for reduced in (:dense, :sparse)
+    @testset "variables hold the solution: Schur, $storage" for storage in (:dense, :sparse)
         Random.seed!(3)
         model = optlandmark_problem(4, 20)
-        _, _, _, H = optimvars(model, nothing, static(1); reduced)
+        _, _, _, H = optimvars(model; numthreads=static(1), storage)
         @test H isa BlockLinearSystems.SchurBlockMatrix
-        @test (H.R isa Matrix) == (reduced === :dense)
+        @test (H.R isa Matrix) == (storage === :dense)
         c0 = NLLSModel.cost(model)
-        result = optimize!(model, FDOptions; reduced)
+        result = optimize!(model, FDOptions; storage)
         @test NLLSModel.cost(model) ≈ result.bestcost atol=1e-12
         @test NLLSModel.cost(model) < 1e-3 * c0
     end
@@ -197,7 +197,7 @@ issolved(model, targets, which=eachindex(targets); atol=1e-6) = all(k -> isappro
         m2 = deepcopy(m1)
         traj1, traj2 = CostTrajectory(), CostTrajectory()
         r1 = optimize!(m1, FDOptions; numthreads=static(1), callback=storecostscallback(traj1))
-        f, fdf!, x0, H = optimvars(m2, nothing, static(1))
+        f, fdf!, x0, H = optimvars(m2; numthreads=static(1))
         obj = HessianObjective(f, fdf!; H)
         if OptimizationVariableInterface.ismutablevar(x0)
             r2 = optimize!(x0, obj, FDOptions; callback=storecostscallback(traj2))
@@ -223,7 +223,7 @@ issolved(model, targets, which=eachindex(targets); atol=1e-6) = all(k -> isappro
 
     @testset "static rule agrees with the optimizer: $name" for (name, V, n) in (("1", SVector{1, Float64}, 1), ("16", SVector{16, Float64}, 16), ("17", SVector{17, Float64}, 17), ("dynamic 3", Vector{Float64}, 3), ("dynamic 17", Vector{Float64}, 17))
         model, _ = singleproblem(V, n, 8)
-        _, fdf!, x0, H = optimvars(model, nothing, static(1))
+        _, fdf!, x0, H = optimvars(model; numthreads=static(1))
         ours = typeof(fdf!.linsystem.ls) <: NLLSModel.UniVariateLSstatic_ls
         theirs = SecondOrderOptimization.makelinearsystem(x0, H, :auto) isa SecondOrderOptimization.StaticLinearSystem
         @test ours == theirs
@@ -239,7 +239,7 @@ issolved(model, targets, which=eachindex(targets); atol=1e-6) = all(k -> isappro
             ("static 3, shared", SVector{3, Float64}, 3, 4), ("static 17", SVector{17, Float64}, 17, 1),
             ("dynamic 3", Vector{Float64}, 3, 1), ("dynamic 3, shared", Vector{Float64}, 3, 4))
         model = linsingleproblem(V, n, 11)
-        _, fdf!, x0, H = optimvars(model, nothing, static(nt); min_work=0) # min_work=0: share the system when nt > 1
+        _, fdf!, x0, H = optimvars(model; numthreads=static(nt), min_work=0) # min_work=0: share the system when nt > 1
         @test (fdf!.linsystem isa NLLSModel.LinearSystemShared) == (nt > 1)
         isstatic = V <: StaticVector && n <= 16
         @test H isa (isstatic ? MMatrix{n, n, Float64, n * n} : Matrix{Float64})
@@ -262,21 +262,21 @@ issolved(model, targets, which=eachindex(targets); atol=1e-6) = all(k -> isappro
         @test Hf == Hd
     end
 
-    @testset "reduction and reduced" begin
+    @testset "reduction and storage" begin
         Random.seed!(9)
         ba = optlandmark_problem(4, 20) # Has eliminable variables
         plain, _ = chainproblem(5, 2, 9) # Has none
-        issch(model; kwargs...) = optimvars(model, nothing, static(1); kwargs...)[4] isa BlockLinearSystems.SchurBlockMatrix
+        issch(model; kwargs...) = optimvars(model; numthreads=static(1), kwargs...)[4] isa BlockLinearSystems.SchurBlockMatrix
 
         @testset "each reduction value" begin
             @test issch(ba) && issch(ba; reduction=:auto) && issch(ba; reduction=:eliminate)
             @test !issch(ba; reduction=:none)
             @test !issch(plain) && !issch(plain; reduction=:auto) && !issch(plain; reduction=:none)
-            @test_throws ArgumentError optimvars(plain, nothing, static(1); reduction=:eliminate)
-            @test_throws ArgumentError optimvars(ba, nothing, static(1); reduction=:project)
-            @test_throws ArgumentError optimvars(ba, nothing, static(1); reduction=:schur)
-            @test_throws ArgumentError optimvars(ba, nothing, static(1); reduced=:both)
-            @test_throws ArgumentError optimvars(plain, 1, static(1); reduction=:project) # Even for a single variable
+            @test_throws ArgumentError optimvars(plain; numthreads=static(1), reduction=:eliminate)
+            @test_throws ArgumentError optimvars(ba; numthreads=static(1), reduction=:project)
+            @test_throws ArgumentError optimvars(ba; numthreads=static(1), reduction=:schur)
+            @test_throws ArgumentError optimvars(ba; numthreads=static(1), storage=:both)
+            @test_throws ArgumentError optimvars(plain; unfixed=1, numthreads=static(1), reduction=:project) # Even for a single variable
             # Each one solves, and elimination gives the same optimum as none
             costs = map((:auto, :none, :eliminate)) do reduction
                 model = deepcopy(ba)
@@ -286,39 +286,39 @@ issolved(model, targets, which=eachindex(targets); atol=1e-6) = all(k -> isappro
             @test all(c -> c < 1e-6, costs)
         end
 
-        @testset "reduced storage" begin
-            _, _, _, Hd = optimvars(ba, nothing, static(1); reduced=:dense)
-            _, _, _, Hs = optimvars(ba, nothing, static(1); reduced=:sparse)
+        @testset "storage of the reduced system" begin
+            _, _, _, Hd = optimvars(ba; numthreads=static(1), storage=:dense)
+            _, _, _, Hs = optimvars(ba; numthreads=static(1), storage=:sparse)
             @test Hd.R isa Matrix{Float64}
             @test Hs.R isa BlockLinearSystems.SparseBlockLinearSystem
             md, ms = deepcopy(ba), deepcopy(ba)
-            optimize!(md, FDOptions; reduced=:dense)
-            optimize!(ms, FDOptions; reduced=:sparse)
+            optimize!(md, FDOptions; storage=:dense)
+            optimize!(ms, FDOptions; storage=:sparse)
             @test NLLSModel.cost(md) ≈ NLLSModel.cost(ms) atol=1e-8
             @test all(k -> isapprox(landmarkvec(md.variables[k]), landmarkvec(ms.variables[k]); atol=1e-5), eachindex(md.variables))
         end
 
-        @testset "reduced is silently ignored without elimination, $reduced" for reduced in (:dense, :sparse)
+        @testset "storage is silently ignored without elimination, $storage" for storage in (:dense, :sparse)
             for (model, reduction) in ((ba, :none), (plain, :auto), (plain, :none))
-                @test_nowarn optimvars(model, nothing, static(1); reduction, reduced)
-                _, _, _, Hr = optimvars(model, nothing, static(1); reduction, reduced)
-                _, _, _, Ha = optimvars(model, nothing, static(1); reduction)
+                @test_nowarn optimvars(model; numthreads=static(1), reduction, storage)
+                _, _, _, Hr = optimvars(model; numthreads=static(1), reduction, storage)
+                _, _, _, Ha = optimvars(model; numthreads=static(1), reduction)
                 @test typeof(Hr) == typeof(Ha)
                 trajr, traja = CostTrajectory(), CostTrajectory()
                 mr, ma = deepcopy(model), deepcopy(model)
-                @test_nowarn optimize!(mr, FDOptions; reduction, reduced, numthreads=static(1), callback=storecostscallback(trajr))
+                @test_nowarn optimize!(mr, FDOptions; reduction, storage, numthreads=static(1), callback=storecostscallback(trajr))
                 optimize!(ma, FDOptions; reduction, numthreads=static(1), callback=storecostscallback(traja))
                 @test trajr.costs == traja.costs
                 @test mr.variables == ma.variables
             end
             # A single variable has nothing to eliminate either
             single, _ = singleproblem(Vector{Float64}, 5, 1)
-            @test_nowarn optimvars(single, nothing, static(1); reduced)
+            @test_nowarn optimvars(single; numthreads=static(1), storage)
         end
 
         @testset "the linsolver keyword is gone" begin
-            @test_throws MethodError optimvars(ba, nothing, static(1); linsolver=:schur)
-            @test_throws MethodError optimvars(plain, nothing, static(1); linsolver=:cholesky)
+            @test_throws MethodError optimvars(ba; numthreads=static(1), linsolver=:schur)
+            @test_throws MethodError optimvars(plain; numthreads=static(1), linsolver=:cholesky)
             @test_throws MethodError optimize!(deepcopy(plain), FDOptions; linsolver=:schur)
         end
     end

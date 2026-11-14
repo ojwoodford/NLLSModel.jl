@@ -132,7 +132,7 @@ end
         end
         # Without it the model would be left on the last point evaluated: run the optimizer on the evaluators directly
         m = posemodel()
-        f, _, resjac!, x0, J = tlnls(m; unfixed=[1, 3], numthreads=static(1), matrix_type=:dense)
+        f, _, resjac!, x0, J = tlnls(m; unfixed=[1, 3], numthreads=static(1), storage=:dense)
         obj = JacobianObjective(f, TallExt.TallResJac(resjac!), J)
         result = SecondOrderOptimization.optimize!(x0, obj, TallOptions)
         resjac!(zeros(size(J, 1)), J, update!(deepcopy(x0), x0, fill(0.3, 4))) # A rejected trial, the last thing evaluated
@@ -142,12 +142,12 @@ end
         # Each unfixed layout: one variable, a list, and all
         for unfixed in (3, 2, [1, 4], nothing)
             m = posemodel()
-            f, res!, resjac!, x0, J = tlnls(m; unfixed, numthreads=static(1), matrix_type=:dense)
+            f, res!, resjac!, x0, J = tlnls(m; unfixed, numthreads=static(1), storage=:dense)
             x = update!(deepcopy(x0), x0, fill(0.1, size(J, 2)))
             for ev in (res!, resjac!)
                 resjac!(zeros(size(J, 1)), J, x0) # The model holds x0
                 syncvars!(m, ev, x)
-                f2, = tlnls(m; unfixed, numthreads=static(1), matrix_type=:dense)
+                f2, = tlnls(m; unfixed, numthreads=static(1), storage=:dense)
                 @test f2(x) ≈ f(x)
                 @test NLLSModel.cost(m) ≈ f(x)
             end
@@ -181,8 +181,8 @@ end
     @testset "keywords: used by :tall" begin
         model = curvefit()
         # numthreads
-        a, _ = optimize(model, TallOptions; formulation=:tall, numthreads=static(1), min_work_per_thread=1)
-        b, _ = optimize(model, TallOptions; formulation=:tall, numthreads=static(4), min_work_per_thread=1)
+        a, _ = optimize(model, TallOptions; formulation=:tall, numthreads=static(1), min_work=1)
+        b, _ = optimize(model, TallOptions; formulation=:tall, numthreads=static(4), min_work=1)
         @test NLLSModel.cost(a) ≈ NLLSModel.cost(b) rtol=1e-10
         # callback
         calls = Ref(0)
@@ -191,15 +191,15 @@ end
         @test calls[] > 0
         # workspace: built for the same objective and reused
         m = deepcopy(model)
-        f, _, resjac!, x0, J = tlnls(m; numthreads=static(1), matrix_type=:dense)
+        f, _, resjac!, x0, J = tlnls(m; numthreads=static(1), storage=:dense)
         obj = JacobianObjective(f, TallExt.TallResJac(resjac!), J)
         ws = OptimizationWorkspace(x0, obj, TallOptions)
         r1 = optimize!(deepcopy(model), TallOptions; formulation=:tall, numthreads=static(1), workspace=ws)
         r2 = optimize!(deepcopy(model), TallOptions; formulation=:tall, numthreads=static(1), workspace=ws)
         @test r1.bestcost == r2.bestcost
         @test r1.bestcost ≈ optimize(model, TallOptions; formulation=:tall, numthreads=static(1))[2].bestcost rtol=1e-10
-        # min_work_per_thread: the same answer however it is split
-        c, _ = optimize(model, TallOptions; formulation=:tall, numthreads=static(1), min_work_per_thread=10^9)
+        # min_work: the same answer however it is split
+        c, _ = optimize(model, TallOptions; formulation=:tall, numthreads=static(1), min_work=10^9)
         @test NLLSModel.cost(c) ≈ NLLSModel.cost(a) rtol=1e-10
     end
 
@@ -241,24 +241,26 @@ end
         Threads.nthreads() > 1 && @test offthread(() -> cb0.f([0.3])) && !offthread(() -> cbbig.f([0.3]))
         # optimize!: the residual and Jacobian fill held serial, so only the cost function can thread
         model = spymodel(400)
-        solve(min_work_cost) = optimize(model, TallOptions; formulation=:tall, numthreads=static(4), min_work_per_thread=10^9, min_work_cost)
+        solve(min_work_cost) = optimize(model, TallOptions; formulation=:tall, numthreads=static(4), min_work=10^9, min_work_cost)
         @test NLLSModel.cost(solve(0)[1]) ≈ NLLSModel.cost(solve(10^9)[1]) rtol=1e-10
         if Threads.nthreads() > 1
             @test offthread(() -> solve(0)) && !offthread(() -> solve(10^9))
         end
     end
 
-    @testset "keywords: ignored by :tall are accepted silently" begin
+    @testset "keywords: storage on :tall, which needs a dense Jacobian" begin
         model = curvefit()
-        @test_logs optimize!(deepcopy(model), TallOptions; formulation=:tall, numthreads=static(1), reduced=:sparse, min_work=1)
-        @test_logs optimize!(deepcopy(model), TallOptions; formulation=:tall, numthreads=static(1), reduced=:dense)
+        @test_logs optimize!(deepcopy(model), TallOptions; formulation=:tall, numthreads=static(1), storage=:dense)
+        @test_logs optimize!(deepcopy(model), TallOptions; formulation=:tall, numthreads=static(1), storage=:auto)
+        err = try optimize!(deepcopy(model), TallOptions; formulation=:tall, numthreads=static(1), storage=:sparse); nothing catch e e end
+        @test err isa ArgumentError && occursin("dense", err.msg)
     end
 
     @testset "keywords: ignored by :normal are accepted silently" begin
         model = curvefit()
         ref, rr = optimize(model, TallOptions; numthreads=static(1))
-        @test_logs (out = optimize(model, TallOptions; numthreads=static(1), min_work_per_thread=3, max_dense_bytes=1))
-        out, rout = optimize(model, TallOptions; numthreads=static(1), min_work_per_thread=3, max_dense_bytes=1)
+        @test_logs (out = optimize(model, TallOptions; numthreads=static(1), min_work=3, max_dense_bytes=1))
+        out, rout = optimize(model, TallOptions; numthreads=static(1), min_work=3, max_dense_bytes=1)
         @test out.variables == ref.variables # Nothing changed
         @test rout.bestcost == rr.bestcost
     end
@@ -386,15 +388,15 @@ end
 
     @testset "threads: the same result however many" begin
         model = posemodel()
-        a, ra = optimize(model, TallOptions; formulation=:tall, numthreads=static(1), min_work_per_thread=1)
-        b, rb = optimize(model, TallOptions; formulation=:tall, numthreads=static(Threads.nthreads()), min_work_per_thread=1)
+        a, ra = optimize(model, TallOptions; formulation=:tall, numthreads=static(1), min_work=1)
+        b, rb = optimize(model, TallOptions; formulation=:tall, numthreads=static(Threads.nthreads()), min_work=1)
         @test NLLSModel.cost(a) ≈ NLLSModel.cost(b) rtol=1e-10
         @test samevars(a, b; atol=1e-8)
     end
 
     @testset "the optimizer's own types satisfy the evaluator (T3)" begin
         model = posemodel()
-        f, _, resjac!, x0, J = tlnls(model; numthreads=static(1), matrix_type=:dense)
+        f, _, resjac!, x0, J = tlnls(model; numthreads=static(1), storage=:dense)
         w = TallExt.TallResJac(resjac!)
         m = size(J, 1)
         @test J isa Matrix{Float64}

@@ -1,0 +1,95 @@
+using NLLSModel, Test, Static, StaticArrays, LinearAlgebra
+using NLPModels, SecondOrderOptimization
+
+# One keyword set for every way of building or optimizing a model (K1). Needs spymodel and offthread from
+# tallformulation.jl.
+
+const KW_OPTIONS = OptimizationOptions(iterator=:levenbergmarquardt, maxiters=50)
+
+# Every keyword of the set, at a valid value, for each entry point
+const KW_NORMAL = (unfixed=nothing, numthreads=static(2), reduction=:none, storage=:auto, min_work=100, min_work_cost=100)
+const KW_TALL = (KW_NORMAL..., max_dense_bytes=10^8)
+const KW_ENTRY = (
+    ("optimvars", (m; kw...) -> optimvars(m; kw...), KW_NORMAL),
+    ("optimvars_nls", (m; kw...) -> optimvars_nls(m; kw...), KW_TALL),
+    ("flat_optimvars_nls", (m; kw...) -> flat_optimvars_nls(m; kw...), KW_TALL),
+    ("optimize!, normal", (m; kw...) -> optimize!(deepcopy(m), KW_OPTIONS; kw...), KW_TALL),
+    ("optimize!, tall", (m; kw...) -> optimize!(deepcopy(m), KW_OPTIONS; formulation=:tall, kw...), KW_TALL),
+    ("NLPLSModel", (m; kw...) -> NLPLSModel(m; kw...), KW_NORMAL),
+    ("NLLSNLSModel", (m; kw...) -> NLLSNLSModel(m; kw...), KW_TALL),
+)
+
+@testset "keywords.jl" begin
+    model = spymodel(400, 2)
+
+    @testset "every keyword of the set: $name" for (name, entry, kw) in KW_ENTRY
+        @test entry(model; kw...) !== nothing
+        # Old names are gone, not deprecated
+        for old in (:reduced, :matrix_type, :min_work_per_thread)
+            @test_throws MethodError entry(model; NamedTuple{(old,)}((old === :min_work_per_thread ? 100 : :auto,))...)
+        end
+    end
+
+    @testset "unfixed and numthreads are not positional" begin
+        @test_throws MethodError optimvars(model, nothing)
+        @test_throws MethodError optimvars(model, nothing, static(1))
+        @test_throws MethodError optimvars(model, 1)
+    end
+
+    @testset "unknown values are an ArgumentError" begin
+        for (name, entry, _) in KW_ENTRY
+            @test_throws ArgumentError entry(model; reduction=:schur)
+            @test_throws ArgumentError entry(model; storage=:banded)
+        end
+    end
+
+    @testset "reduction on the tall path: :auto means :none, :eliminate is not implemented" begin
+        err = try optimvars_nls(model; reduction=:eliminate); nothing catch e e end
+        @test err isa ArgumentError && occursin("not implemented", err.msg)
+        @test_throws ArgumentError flat_optimvars_nls(model; reduction=:eliminate)
+        @test_throws ArgumentError NLLSNLSModel(model; reduction=:eliminate)
+        x = [0.3, 0.1]
+        r_auto, r_none = zeros(400), zeros(400)
+        _, res_auto!, _, _, _ = optimvars_nls(model; reduction=:auto)
+        _, res_none!, _, _, _ = optimvars_nls(model; reduction=:none)
+        @test res_auto!(r_auto, x) == res_none!(r_none, x)
+        @test r_auto == r_none
+        # And from the front door, raised by optimvars_nls
+        err = try optimize!(deepcopy(model), KW_OPTIONS; formulation=:tall, reduction=:eliminate); nothing catch e e end
+        @test err isa ArgumentError && occursin("tall", err.msg) && occursin("not implemented", err.msg)
+    end
+
+    @testset "NLPLSModel works on the full system" begin
+        @test_throws ArgumentError NLPLSModel(model; reduction=:eliminate)
+        @test NLPLSModel(model; reduction=:auto).fdf! isa NLLSModel.MultiVarDenseFDF
+    end
+
+    # The two NLPModels wrappers pass the floors on: a floor of 0 threads, a huge floor does not
+    @testset "the NLPModels wrappers pass the floors on" begin
+        x = [0.3, 0.1]
+        nlp(floor) = NLPLSModel(model; numthreads=static(4), min_work=floor, min_work_cost=floor)
+        nls(floor) = NLLSNLSModel(model; numthreads=static(4), min_work=floor, min_work_cost=floor)
+        @test obj(nlp(0), x) ≈ obj(nlp(10^9), x) rtol=1e-13
+        @test grad(nlp(0), x) ≈ grad(nlp(10^9), x) rtol=1e-12
+        @test obj(nls(0), x) ≈ obj(nls(10^9), x) rtol=1e-13
+        @test residual(nls(0), x) == residual(nls(10^9), x)
+        if Threads.nthreads() > 1
+            for (make, eval) in ((nlp, m -> obj(m, x)), (nlp, m -> grad(m, x)), (nls, m -> obj(m, x)), (nls, m -> residual(m, x)))
+                @test offthread(() -> eval(make(0))) && !offthread(() -> eval(make(10^9)))
+            end
+        end
+        # obj alone evaluates the cost function, not the residual
+        m = nls(10^9)
+        obj(m, x)
+        @test !m.res_valid
+        residual(m, x)
+        @test m.res_valid
+        @test obj(m, x) ≈ 0.5 * sum(abs2, residual(m, x)) rtol=1e-13
+    end
+
+    @testset "numthreads defaults to every thread everywhere" begin
+        @test NLPLSModel(model).f.numthreads === static(Threads.nthreads())
+        @test optimvars(model)[1].numthreads === static(Threads.nthreads())
+        @test optimvars_nls(model)[2].numthreads === static(Threads.nthreads())
+    end
+end

@@ -3,7 +3,7 @@ using Polyester
 # Threading decisions. Each kind of work has its own estimate, the count of numbers it writes, summed over all costs, with
 # per cost `m` the residual length (1 for a general `AbstractCost`) and `n` the total dimension of its unfixed variables:
 #   cost evaluation                 m              (residual entries)                        floor `min_work_cost`
-#   tall residual and Jacobian fill m * (n + 1)    (Jacobian entries and the residual)       floor 2 * `min_work_per_thread`
+#   tall residual and Jacobian fill m * (n + 1)    (Jacobian entries and the residual)       floor 2 * `min_work`
 #   normal-equations linearization  m * n * (n + 1) (Jacobian entries times columns, Gram)   floor `min_work`
 # A general `AbstractCost` has a Hessian, so it counts as `m = 1` in the linearization form. The work of the residual
 # function itself is not estimated: the floors are calibrated on cheap residuals, so a costly one threads later than it

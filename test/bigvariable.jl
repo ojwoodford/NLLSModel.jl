@@ -83,7 +83,7 @@ end
     @test length(problem.variables[1]) == 256
 
     # It can be optimized on its own, and the single variable system does not use blocks
-    f, fdf!, x0, H = optimvars(problem, 1, static(1))
+    f, fdf!, x0, H = optimvars(problem; unfixed=1, numthreads=static(1))
     @test H isa Matrix{Float64} && size(H) == (256, 256)
     res = optimize!(x0, HessianObjective(f, fdf!; H), OptimizationOptions(iterator=:levenbergmarquardt, maxiters=20))
     x = x0
@@ -104,17 +104,17 @@ end
         msg = err isa ArgumentError ? err.msg : ""
         @test occursin("Variable 1", msg) && occursin("256", msg) && occursin("1 to 255", msg) && occursin("on its own", msg)
     end
-    checkerror(() -> optimvars(problem, nothing, static(1); reduction=:none)) # Dense
-    checkerror(() -> optimvars(bigproblem(256, 40), nothing, static(1); reduction=:none)) # Sparse (large enough to be chosen)
-    for reduced in (:dense, :sparse, :auto) # Schur (the default chooses it for eliminable variables)
-        checkerror(() -> optimvars(schurproblem(256), nothing, static(1); reduced))
+    checkerror(() -> optimvars(problem; numthreads=static(1), reduction=:none)) # Dense
+    checkerror(() -> optimvars(bigproblem(256, 40); numthreads=static(1), reduction=:none)) # Sparse (large enough to be chosen)
+    for storage in (:dense, :sparse, :auto) # Schur (the default chooses it for eliminable variables)
+        checkerror(() -> optimvars(schurproblem(256); numthreads=static(1), storage))
     end
 
     # A variable of 255 dimensions still works as a block, including in a Schur system
-    f, fdf!, x0, H = optimvars(schurproblem(255), nothing, static(1); reduced=:dense)
+    f, fdf!, x0, H = optimvars(schurproblem(255); numthreads=static(1), storage=:dense)
     @test f(x0) > 0
     problem = bigproblem(255)
-    f, fdf!, x0, H = optimvars(problem, nothing, static(1))
+    f, fdf!, x0, H = optimvars(problem; numthreads=static(1))
     c0 = f(x0)
     optimize!(x0, HessianObjective(f, fdf!; H), OptimizationOptions(iterator=:levenbergmarquardt, maxiters=50))
     @test f(x0) < c0

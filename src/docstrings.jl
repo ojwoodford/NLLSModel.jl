@@ -193,7 +193,7 @@ addcost!(problem, my_residual)
 addcost!
 
 """
-    optimvars(problem::Model, unfixed=nothing, numthreads=StaticInt(Threads.nthreads()); reduction=:auto, reduced=:auto, min_work=$MIN_WORK_FOR_THREADED_LINEARIZATION, min_work_cost=$MIN_WORK_FOR_THREADED_COST) -> (f, fdf!, x0, H)
+    optimvars(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, min_work=$MIN_WORK_FOR_THREADED_LINEARIZATION, min_work_cost=$MIN_WORK_FOR_THREADED_COST) -> (f, fdf!, x0, H)
 
 The normal way to solve a `Model` is `optimize!(model, options)` (needs `using SecondOrderOptimization`); `optimvars` is the
 advanced route, for custom outer loops, reusing a workspace, or other solvers.
@@ -218,20 +218,11 @@ syncvars!(model, fdf!, x0)
 (`optimize!` needs a mutable `x0`; for a single variable of static size use `optimize`, which returns `(x, result)`, and
 sync `x`.)
 
-# Arguments
-- `problem::Model`: The nonlinear least squares problem.
-- `unfixed`: Optional variable index (`Integer`), variable type (`DataType`), or boolean mask specifying which variables to optimize (defaults to `nothing`, optimizing all variables).
-- `numthreads`: Number of threads to use for parallel cost and derivative evaluation (`StaticInt` or `Integer`).
-- `reduction`: whether eliminable variables are eliminated (Schur complement). `:auto` (default) eliminates when the model has `iseliminable` variables and the structure fits, and falls back to no elimination otherwise; `:eliminate` eliminates or throws an `ArgumentError`; `:none` never eliminates. Any other value is an `ArgumentError`. The returned `H` is a `SchurBlockMatrix` exactly when elimination happens, and the optimizer eliminates exactly when it is handed one.
-- `reduced`: storage of the reduced system when elimination happens: `:auto` (default; chosen from the predicted fill of a Cholesky factor), `:dense` or `:sparse`. It is silently ignored (no error, no warning) when no elimination happens, that is with `reduction = :none`, or with `:auto` on a model that does not eliminate.
-- `min_work`: Linearization is threaded only if its estimated work is at least this. The unit is one number written in
-  forming the normal equations: per cost, `m * n * (n + 1)`, with `m` the residual length (1 for a general
-  [`AbstractCost`](@ref)) and `n` the total dimension of the cost's unfixed variables, summed over all costs.
-- `min_work_cost`: Evaluating the cost alone is threaded only if its estimated work is at least this. The unit is one
-  residual entry: per cost `m`, summed over all costs; it does not depend on the variables.
+`reduction` and `storage` together decide `H`: it is a `SchurBlockMatrix` exactly when elimination happens, and the
+optimizer eliminates exactly when it is handed one. Under elimination, `storage = :auto` chooses the reduced system's
+storage from the predicted fill of a Cholesky factor.
 
-Both estimates are computed once, here; the work of the residual functions themselves is not estimated.
-"""
+$KEYWORDS_DOC"""
 optimvars
 
 """
@@ -411,7 +402,7 @@ without BLAS; the arrays returned alias per-task buffers and are valid until the
 function computecostgradhess end
 
 """
-    NLPLSModel(problem::Model; unfixed=nothing, numthreads=1, name="NLPLSModel")
+    NLPLSModel(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, min_work=$MIN_WORK_FOR_THREADED_LINEARIZATION, min_work_cost=$MIN_WORK_FOR_THREADED_COST, name="NLPLSModel")
 
 Wraps a [`Model`](@ref) as an `NLPModels.AbstractNLPModel` for use with general
 nonlinear programming solvers such as `JSOSolvers`, `Ipopt`, and `Optim`.
@@ -425,21 +416,20 @@ nlp = NLPLSModel(problem)
 # Arguments
 - `problem::Model`: The nonlinear least-squares problem to wrap.
 
-# Keyword Arguments
-- `unfixed = nothing`: Boolean mask, integer, or vector indicating which variables are unfixed (optimized).
-- `numthreads = 1`: Number of threads for cost and gradient/Hessian evaluation.
-- `name = "NLPLSModel"`: Name string assigned to the model metadata.
+It works on the full system: `reduction = :auto` means `:none`, and `:eliminate` is an `ArgumentError`. `name` is the name
+given to the model's metadata (default `"NLPLSModel"`).
 
 # Features
 - Automatically selects dense or block-sparse Hessian representations based on problem structure.
 - Implements `obj`, `grad!`, `objgrad!`, `hess_structure!`, `hess_coord!`, and `hprod!`.
 - Caches cost, gradient, and Gauss-Newton Hessian evaluations across queries at the same point.
 - Transfers solution vectors back to `problem.variables` via [`syncvars!`](@ref).
-"""
+
+$KEYWORDS_DOC"""
 NLPLSModel
 
 """
-    NLLSNLSModel(problem::Model; unfixed=nothing, numthreads=static(1), min_work_per_thread=$MIN_WORK_PER_THREAD, matrix_type=:auto, max_dense_bytes=32*1024^2, name="NLLSNLSModel")
+    NLLSNLSModel(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work=$MIN_WORK_PER_THREAD, min_work_cost=$MIN_WORK_FOR_THREADED_COST, name="NLLSNLSModel")
 
 Wraps a [`Model`](@ref) as an `NLPModels.AbstractNLSModel{Float64, Vector{Float64}}`, which exposes the residual vector and
 its Jacobian, for nonlinear least-squares solvers that work on them directly, such as `JSOSolvers.trunk` and
@@ -455,16 +445,13 @@ Every cost must be a non-adaptive [`AbstractResidual`](@ref) with a linear kerne
 cost is exactly `½‖r‖²`, which these solvers derive from `r`; otherwise it throws an `ArgumentError`. Every unfixed
 variable must update by plain addition and pack into a flat `Float64` vector (as for [`flat_optimvars_nls`](@ref)).
 
-# Keyword Arguments
-- `unfixed = nothing`: Boolean mask, integer, or vector indicating which variables are unfixed (optimized).
-- `numthreads = static(1)`, `min_work_per_thread = $MIN_WORK_PER_THREAD`: threading of the residual and Jacobian evaluation, as for
-  [`optimvars_nls`](@ref). The cost is taken from the residual, so the cost function's floor `min_work_cost` does not apply.
-- `matrix_type = :auto`, `max_dense_bytes = 32 * 1024^2`: the Jacobian storage, as for [`optimvars_nls`](@ref). The
-  default limit is lower than there (32 MB), to keep the solver's coordinate arrays below about 96 MB.
-- `name = "NLLSNLSModel"`: Name string assigned to the model metadata.
+It is built on the tall path ([`optimvars_nls`](@ref)): `reduction = :auto` means `:none`. The cost alone (`obj`) is
+evaluated by the cost function, threaded by `min_work_cost`; the residual and Jacobian by the tall fill, threaded by
+`min_work`. `name` is the name given to the model's metadata (default `"NLLSNLSModel"`).
 
 The solution is transferred back to `problem.variables` with [`syncvars!`](@ref).
-"""
+
+$KEYWORDS_DOC"""
 NLLSNLSModel
 
 """

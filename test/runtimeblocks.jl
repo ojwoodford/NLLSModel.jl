@@ -28,8 +28,8 @@ end
     for n in (6, 60) # dense and sparse linear systems
         ps = chainproblem(SVector{2, Float64}, n)
         pd = chainproblem(Vector{Float64}, n)
-        fs, fdfs!, xs, Hs = optimvars(ps, nothing, static(1))
-        fd, fdfd!, xd, Hd = optimvars(pd, nothing, static(1))
+        fs, fdfs!, xs, Hs = optimvars(ps; numthreads=static(1))
+        fd, fdfd!, xd, Hd = optimvars(pd; numthreads=static(1))
         @test (Hs === nothing) == (Hd === nothing)
         @test reduce(vcat, xs) ≈ reduce(vcat, xd)
         @test fs(xs) ≈ fd(xd)
@@ -46,7 +46,7 @@ end
     # Assembly of a single cost's blocks
     for V in (SVector{2, Float64}, Vector{Float64})
         problem = chainproblem(V, 6)
-        _, fdf!, x, _ = optimvars(problem, nothing, static(1))
+        _, fdf!, x, _ = optimvars(problem; numthreads=static(1))
         ls = fdf!.linsystem
         A = NLLSModel.getA(ls)
         b_vec = NLLSModel.getb(ls)
@@ -106,8 +106,8 @@ end
         end
         p1, p4 = build(), build()
         @test NLLSModel.workestimates(p1, nothing).linearization >= NLLSModel.MIN_WORK_FOR_THREADED_LINEARIZATION
-        f1, fdf1!, x1, H1 = optimvars(p1, nothing, static(1))
-        f4, fdf4!, x4, H4 = optimvars(p4, nothing, static(4))
+        f1, fdf1!, x1, H1 = optimvars(p1; numthreads=static(1))
+        f4, fdf4!, x4, H4 = optimvars(p4; numthreads=static(4))
         @test fdf4!.linsystem isa NLLSModel.LinearSystemShared # One copy of the system per thread
         g1 = zeros(2n); g4 = zeros(2n)
         H1_ = H1 === nothing ? zeros(2n, 2n) : H1
@@ -125,9 +125,9 @@ end
     for _ in 2:300, i in 1:5
         addcost!(p, ChainRes{SVector{2, Float64}}(SVector(0.1i, -0.2), i, i + 1))
     end
-    @test optimvars(p, nothing, static(4))[2].linsystem isa NLLSModel.LinearSystemShared
-    @test optimvars(p, nothing, static(4); min_work=10^9)[2].linsystem isa NLLSModel.LinearSystem
-    @test optimvars(p, nothing, static(4); min_work=1)[2].linsystem isa NLLSModel.LinearSystemShared
+    @test optimvars(p; numthreads=static(4))[2].linsystem isa NLLSModel.LinearSystemShared
+    @test optimvars(p; numthreads=static(4), min_work=10^9)[2].linsystem isa NLLSModel.LinearSystem
+    @test optimvars(p; numthreads=static(4), min_work=1)[2].linsystem isa NLLSModel.LinearSystemShared
 end
 
 @testset "work-based thresholds for cost evaluation and the tall path" begin
@@ -136,14 +136,14 @@ end
         addcost!(p, ChainRes{SVector{2, Float64}}(SVector(0.1i, -0.2), i, i + 1))
     end
     # Cost evaluation: the floor is an option and the result does not depend on it
-    f_default, _, x, _ = optimvars(p, nothing, static(4))
-    f_always, _, _, _ = optimvars(p, nothing, static(4); min_work_cost=1)
-    f_never, _, _, _ = optimvars(p, nothing, static(4); min_work_cost=10^9)
+    f_default, _, x, _ = optimvars(p; numthreads=static(4))
+    f_always, _, _, _ = optimvars(p; numthreads=static(4), min_work_cost=1)
+    f_never, _, _, _ = optimvars(p; numthreads=static(4), min_work_cost=10^9)
     @test f_always.min_work == 1 && f_never.min_work == 10^9
     @test f_default(x) ≈ f_always(x) ≈ f_never(x)
     # Tall path: work (not cost count) decides whether the evaluators thread, and the layout records it
     _, res1, _, x1, _ = optimvars_nls(p; numthreads=static(1))
-    _, res4, _, x4, _ = optimvars_nls(p; numthreads=static(4), min_work_per_thread=10)
+    _, res4, _, x4, _ = optimvars_nls(p; numthreads=static(4), min_work=10)
     @test res4.layout.work == NLLSModel.workestimates(p, nothing).tall
     r1 = zeros(res1.layout.M); r4 = zeros(res4.layout.M)
     @test res1(r1, x1) ≈ res4(r4, x4)

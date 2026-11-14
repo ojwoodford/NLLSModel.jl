@@ -23,10 +23,10 @@ islinear
 
 With `using SecondOrderOptimization`, a package extension adds two methods to its functions:
 
-- `optimize!(model::Model, options = OptimizationOptions(); formulation = :normal, unfixed, numthreads, callback, workspace, reduction = :auto, reduced = :auto, min_work, min_work_cost, min_work_per_thread, max_dense_bytes) -> result` solves the model and writes the solution into `model.variables`. `formulation = :tall` solves from the residual and a dense Jacobian (see the home page).
+- `optimize!(model::Model, options = OptimizationOptions(); formulation = :normal, callback, workspace, unfixed, numthreads, reduction = :auto, storage = :auto, max_dense_bytes, min_work, min_work_cost) -> result` solves the model and writes the solution into `model.variables`. `formulation = :tall` solves from the residual and a dense Jacobian (see the home page).
 - `optimize(model::Model, options = OptimizationOptions(); kwargs...) -> (model_copy, result)` does the same on a copy.
 
-`reduction` (`:auto`, `:none`, `:eliminate`) and `reduced` (`:auto`, `:dense`, `:sparse`) are described under [`optimvars`](@ref) and in
+The keywords after `workspace` are the set every entry point takes, described under [`optimvars`](@ref) and in
 [Linear Solvers & Sparsity](@ref). For custom outer loops use [`optimvars`](@ref) and `HessianObjective` directly.
 
 ## Cost & Residual Interface

@@ -9,7 +9,7 @@ import OptimizationVariableInterface: nvars, update, update!, copyvars
         for name in ("Huber", "Huber, mixed variables")
             for kernel in (true, :second)
                 model = name == "Huber" ? curvefit(huber=kernel, outliers=5) : posemodel(huber=kernel)
-                f, _, resjac!, x0, J = tlnls(model; numthreads=static(1), matrix_type=:dense)
+                f, _, resjac!, x0, J = tlnls(model; numthreads=static(1), storage=:dense)
                 m, n = size(J)
                 r = zeros(m)
                 c = resjac!(r, J, x0)
@@ -26,7 +26,7 @@ import OptimizationVariableInterface: nvars, update, update!, copyvars
         end
         # With no robust kernel, the cost is half the squared norm of the residual
         model = posemodel()
-        f, _, resjac!, x0, J = tlnls(model; numthreads=static(1), matrix_type=:dense)
+        f, _, resjac!, x0, J = tlnls(model; numthreads=static(1), storage=:dense)
         r = zeros(size(J, 1))
         c = resjac!(r, J, x0)
         @test c ≈ 0.5 * sum(abs2, r)
@@ -47,7 +47,7 @@ import OptimizationVariableInterface: nvars, update, update!, copyvars
             ("an SVector alone", () -> posemodel(), 3),
             ("a rotation and a Vector of 3", () -> posemodel(), [1, 2]))
         model = make()
-        f, res!, resjac!, x0, J = tlnls(model; unfixed, numthreads=static(1), matrix_type=:dense)
+        f, res!, resjac!, x0, J = tlnls(model; unfixed, numthreads=static(1), storage=:dense)
         m, n = size(J)
         nx = x0 isa AbstractVector && !(x0 isa Vector{Float64} && length(x0) == n && !(eltype(x0) <: AbstractVector)) ? sum(v -> Int(dynamic(nvars(v))), x0) : Int(dynamic(nvars(x0)))
         @test n == nx
@@ -79,8 +79,8 @@ import OptimizationVariableInterface: nvars, update, update!, copyvars
             ("all four variables", h -> posemodel(huber=h, width=1e8), h -> posemodel(huber=h), nothing),
             ("a list", h -> posemodel(huber=h, width=1e8), h -> posemodel(huber=h), [4, 1, 2]))
         for mode in (:irls, :corrector)
-            _, _, rjp, x0p, Jp = tlnls(plain(mode === :irls ? true : :second); unfixed, numthreads=static(1), matrix_type=:dense)
-            _, _, rjr, x0r, Jr = tlnls(robustmodel(mode === :irls ? true : :second); unfixed, numthreads=static(1), matrix_type=:dense)
+            _, _, rjp, x0p, Jp = tlnls(plain(mode === :irls ? true : :second); unfixed, numthreads=static(1), storage=:dense)
+            _, _, rjr, x0r, Jr = tlnls(robustmodel(mode === :irls ? true : :second); unfixed, numthreads=static(1), storage=:dense)
             rp, rr = zeros(size(Jp, 1)), zeros(size(Jr, 1))
             rjp(rp, Jp, x0p)
             rjr(rr, Jr, x0r)
@@ -106,7 +106,7 @@ import OptimizationVariableInterface: nvars, update, update!, copyvars
             ("Vectors", () -> first(chainproblem(4, 3, 6))),
             ("mixed, with a rotation", () -> posemodel()))
         model = make()
-        _, res!, resjac!, x0, J = optimvars_nls(model; numthreads=static(1), matrix_type=:dense)
+        _, res!, resjac!, x0, J = optimvars_nls(model; numthreads=static(1), storage=:dense)
         @test x0 === model.variables
         snapshot = deepcopy(x0)
         m, n = size(J)
@@ -123,7 +123,7 @@ import OptimizationVariableInterface: nvars, update, update!, copyvars
         # and the evaluation was at y: the residual matches a model built at y
         other = deepcopy(model)
         other.variables .= y
-        _, _, rj2, x2, J2 = optimvars_nls(other; numthreads=static(1), matrix_type=:dense)
+        _, _, rj2, x2, J2 = optimvars_nls(other; numthreads=static(1), storage=:dense)
         r2 = zeros(m)
         rj2(r2, J2, x2)
         resjac!(r, J, y)
@@ -132,7 +132,7 @@ import OptimizationVariableInterface: nvars, update, update!, copyvars
 
     @testset "Z3: evaluating at x0 itself works and copies nothing" begin
         for model in (staticmodel(), first(chainproblem(4, 3, 6)))
-            f, res!, resjac!, x0, J = optimvars_nls(model; numthreads=static(1), matrix_type=:dense)
+            f, res!, resjac!, x0, J = optimvars_nls(model; numthreads=static(1), storage=:dense)
             r = zeros(size(J, 1))
             c = resjac!(r, J, x0)
             @test c ≈ f(x0) && c ≈ NLLSModel.cost(model)
@@ -148,7 +148,7 @@ import OptimizationVariableInterface: nvars, update, update!, copyvars
 
     @testset "Z3: a subset or a single variable is still merged into the model, $name" for (name, unfixed) in (("a list", [1, 3]), ("a mask", Bool[1, 0, 1, 1]), ("an index", 2), ("a type", Vector{Float64}))
         model = posemodel()
-        _, res!, resjac!, x0, J = optimvars_nls(model; unfixed, numthreads=static(1), matrix_type=:dense)
+        _, res!, resjac!, x0, J = optimvars_nls(model; unfixed, numthreads=static(1), storage=:dense)
         @test x0 !== model.variables
         fixed = [k for k in 1:4 if !(NLLSModel.convertunfixed(unfixed, model) isa Integer ? k == unfixed : NLLSModel.convertunfixed(unfixed, model)[k])]
         before = deepcopy(model.variables)
@@ -190,7 +190,7 @@ import OptimizationVariableInterface: nvars, update, update!, copyvars
             ("a weight that is zero at one point and not at the next", () -> cutoffmodel(), nothing, (0.0, 0.4, 0.0, -0.3, 0.9, 0.0)),
             ("non-finite, then finite, then non-finite", () -> nanmodel(), nothing, (0.0, 9.0, 0.0, 9.0, 9.0, 0.0)))
         model = make()
-        _, _, resjac!, x0, J = optimvars_nls(model; unfixed, numthreads=static(1), matrix_type=:dense)
+        _, _, resjac!, x0, J = optimvars_nls(model; unfixed, numthreads=static(1), storage=:dense)
         m, n = size(J)
         @test all(iszero, J) # The prototype is zeros: the structural zeros are in place
         if name == "non-finite, then finite, then non-finite"
@@ -221,7 +221,7 @@ import OptimizationVariableInterface: nvars, update, update!, copyvars
 
     @testset "Z1: a weight that is zero at one point and non-zero at the next, and the reverse" begin
         model = cutoffmodel()
-        _, _, resjac!, x0, J = optimvars_nls(model; numthreads=static(1), matrix_type=:dense)
+        _, _, resjac!, x0, J = optimvars_nls(model; numthreads=static(1), storage=:dense)
         m, n = size(J)
         weights(x) = (r = zeros(m); Jt = zeros(m, n); resjac!(r, Jt, x); count(iszero, r))
         # Two points with different sets of zero weights, both mixed
@@ -243,7 +243,7 @@ import OptimizationVariableInterface: nvars, update, update!, copyvars
     @testset "Z1: optimvars_nls's dense prototype is all zeros, $name" for (name, make, unfixed) in (
             ("curve fit", () -> curvefit(), nothing), ("mixed", () -> posemodel(), nothing), ("a subset", () -> posemodel(), [2, 4]),
             ("static blocks", staticmodel, nothing))
-        _, _, _, _, J = optimvars_nls(make(); unfixed, matrix_type=:dense)
+        _, _, _, _, J = optimvars_nls(make(); unfixed, storage=:dense)
         @test J isa Matrix{Float64}
         @test all(iszero, J)
         _, _, _, _, Ja = optimvars_nls(make(); unfixed) # :auto picks dense for these small models

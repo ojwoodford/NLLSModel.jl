@@ -37,9 +37,9 @@ end
 warmallocs_fdf(fdf!, g, H, x) = (fdf!(g, H, x); @allocated fdf!(g, H, x))
 warmallocs_f(f, x) = (f(x); @allocated f(x))
 
-function solve(problem; iterator=:levenbergmarquardt, reduction=:auto, reduced=:auto, maxiters=100)
+function solve(problem; iterator=:levenbergmarquardt, reduction=:auto, storage=:auto, maxiters=100)
     c0 = NLLSModel.cost(problem)
-    res = optimize!(problem, OptimizationOptions(iterator=iterator, maxiters=maxiters); numthreads=static(1), reduction, reduced)
+    res = optimize!(problem, OptimizationOptions(iterator=iterator, maxiters=maxiters); numthreads=static(1), reduction, storage)
     return c0, NLLSModel.cost(problem), res
 end
 
@@ -54,9 +54,9 @@ end
         end
     end
 
-    @testset "Schur, $reduced, $iterator" for reduced in (:dense, :sparse), iterator in (:levenbergmarquardt, :levenbergmarquardt_dtd)
+    @testset "Schur, $storage, $iterator" for storage in (:dense, :sparse), iterator in (:levenbergmarquardt, :levenbergmarquardt_dtd)
         problem = optlandmark_problem(4, 20)
-        c0, c1, _ = solve(problem; iterator=iterator, reduction=:eliminate, reduced=reduced)
+        c0, c1, _ = solve(problem; iterator=iterator, reduction=:eliminate, storage=storage)
         @test c1 < 1e-3 * c0
     end
 
@@ -64,18 +64,18 @@ end
     Random.seed!(4)
     p1 = optlandmark_problem(4, 20)
     p2 = deepcopy(p1)
-    _, c_dense, _ = solve(p1; reduction=:eliminate, reduced=:dense)
-    _, c_sparse, _ = solve(p2; reduction=:eliminate, reduced=:sparse)
+    _, c_dense, _ = solve(p1; reduction=:eliminate, storage=:dense)
+    _, c_sparse, _ = solve(p2; reduction=:eliminate, storage=:sparse)
     @test c_dense ≈ c_sparse atol=1e-8
 
     # Threaded Schur linearization (disjoint landmark ownership, shared C and E) matches the serial result
-    @testset "threaded Schur, $reduced" for reduced in (:dense, :sparse)
+    @testset "threaded Schur, $storage" for storage in (:dense, :sparse)
         Random.seed!(5)
         p_serial = optlandmark_problem(30, 120)
         p_threads = deepcopy(p_serial)
         @test NLLSModel.workestimates(p_serial, nothing).linearization >= NLLSModel.MIN_WORK_FOR_THREADED_LINEARIZATION
-        f1, fdf1!, x1, H1 = optimvars(p_serial, nothing, static(1); reduction=:eliminate, reduced)
-        f4, fdf4!, x4, H4 = optimvars(p_threads, nothing, static(4); reduction=:eliminate, reduced)
+        f1, fdf1!, x1, H1 = optimvars(p_serial; numthreads=static(1), reduction=:eliminate, storage)
+        f4, fdf4!, x4, H4 = optimvars(p_threads; numthreads=static(4), reduction=:eliminate, storage)
         @test fdf4!.linsystem isa NLLSModel.LinearSystemShared
         @test fdf4!.plan isa NLLSModel.SchurThreadPlan
         n = H1.structure.nr + sum(H1.structure.e_dims)
@@ -97,12 +97,12 @@ end
 @testset "Schur pattern is handed to the linear system" begin
     Random.seed!(6)
     prob = optlandmark_problem(4, 20)
-    _, _, _, H = optimvars(prob, nothing, static(1); reduction=:eliminate, reduced=:sparse)
+    _, _, _, H = optimvars(prob; numthreads=static(1), reduction=:eliminate, storage=:sparse)
     @test H.pattern !== nothing
     @test size(H.pattern.S_sparse, 1) == H.structure.nr
-    _, _, _, Hd = optimvars(prob, nothing, static(1); reduction=:eliminate, reduced=:dense)
+    _, _, _, Hd = optimvars(prob; numthreads=static(1), reduction=:eliminate, storage=:dense)
     @test Hd.pattern === nothing
     # The solver accepts it and optimizes
-    c0, c1, _ = solve(optlandmark_problem(4, 20); reduction=:eliminate, reduced=:sparse)
+    c0, c1, _ = solve(optlandmark_problem(4, 20); reduction=:eliminate, storage=:sparse)
     @test c1 < 1e-3 * c0
 end

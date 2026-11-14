@@ -4,7 +4,7 @@ using NLLSModel
 using SecondOrderOptimization
 using OptimizationVariableInterface
 using Static
-import NLLSModel: MIN_WORK_FOR_THREADED_LINEARIZATION, MIN_WORK_FOR_THREADED_COST, MIN_WORK_PER_THREAD, nresiduals
+import NLLSModel: MIN_WORK_FOR_THREADED_LINEARIZATION, MIN_WORK_FOR_THREADED_COST, MIN_WORK_PER_THREAD, MAX_DENSE_BYTES, KEYWORDS_DOC, nresiduals
 
 # Hands `resjac!` to the optimizer with `prezeroed = true`: the structural zeros of `J` are already in place (the optimizer
 # allocates `J` as zeros and, from SecondOrderOptimization's Z1, neither re-zeroes it nor writes anything but this evaluator's
@@ -16,9 +16,9 @@ end
 (w::TallResJac)(r, J, x) = w.resjac!(r, J, x; prezeroed=true)
 
 # The tall formulation: the residual vector and a dense Jacobian, solved through QR of the Jacobian.
-function optimize_tall!(model::Model, options; unfixed, numthreads, callback, workspace, reduction, min_work_per_thread, min_work_cost, max_dense_bytes)
-    reduction in (:auto, :none, :eliminate) || throw(ArgumentError("Unknown reduction $(repr(reduction)); expected :auto, :none or :eliminate."))
-    reduction === :eliminate && throw(ArgumentError("formulation = :tall does not support reduction = :eliminate (elimination of variables on the Jacobian path is not implemented); use :auto or :none."))
+function optimize_tall!(model::Model, options; unfixed, numthreads, callback, workspace, reduction, storage, max_dense_bytes, min_work, min_work_cost)
+    # The optimizer solves through QR of a dense J
+    storage === :sparse && throw(ArgumentError("formulation = :tall needs a dense Jacobian (the optimizer solves through QR of a dense J); storage = :sparse is not supported, use :auto or :dense."))
 
     # Refuse before anything is allocated: the tall formulation holds the whole Jacobian
     mask = NLLSModel.convertunfixed(unfixed, model)
@@ -29,7 +29,7 @@ function optimize_tall!(model::Model, options; unfixed, numthreads, callback, wo
     end
 
     f, _, resjac!, x0, J = try
-        optimvars_nls(model; unfixed, numthreads, min_work_per_thread=Int(min_work_per_thread), min_work_cost, matrix_type=:dense, max_dense_bytes=Int(max_dense_bytes))
+        optimvars_nls(model; unfixed, numthreads, reduction, storage=:dense, max_dense_bytes, min_work, min_work_cost)
     catch err
         err isa ArgumentError ? throw(ArgumentError("formulation = :tall: " * err.msg)) : rethrow()
     end
@@ -48,7 +48,7 @@ end
 # through `optimize` (which returns the solution); everything else is updated in place by `optimize!`. Either way the
 # solution is written back with `syncvars!`, which knows the block order and the Schur partition.
 """
-    optimize!(model::Model, options = OptimizationOptions(); formulation=:normal, unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), callback=nullcallback, workspace=nothing, reduction=:auto, reduced=:auto, min_work, min_work_cost, min_work_per_thread=$MIN_WORK_PER_THREAD, max_dense_bytes=256*1024^2) -> OptimizationResult
+    optimize!(model::Model, options = OptimizationOptions(); formulation=:normal, callback=nullcallback, workspace=nothing, unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work, min_work_cost=$MIN_WORK_FOR_THREADED_COST) -> OptimizationResult
 
 Solve `model` and write the solution back into `model.variables`. This is the normal way to solve a `Model`; it is defined when
 `SecondOrderOptimization` is loaded (`using SecondOrderOptimization`).
@@ -59,39 +59,28 @@ Solve `model` and write the solution back into `model.variables`. This is the no
   `SecondOrderOptimization.optimize!` (or `optimize` when the variable to optimize is immutable, a single variable of static
   size) and writes the solution back with [`syncvars!`](@ref).
 - `:tall`: the residual vector and a dense Jacobian (a `JacobianObjective`), solved through QR of the Jacobian, with any
-  iterator except gradient descent. Calls [`optimvars_nls`](@ref) with a dense Jacobian. Each cost's kernel decides how its rows enter; there is no robust
+  iterator except gradient descent. Calls [`optimvars_nls`](@ref) with `storage = :dense`. Each cost's kernel decides how its rows enter; there is no robust
   keyword. This first version needs `linsolver = :auto` or `:qr` (the optimizer throws `ArgumentError` for gradient
-  descent and for other solvers), a dense Jacobian (an `ArgumentError`, before allocating, if it would exceed `max_dense_bytes`), only non-adaptive
-  `AbstractResidual` costs and no unfixed adaptive kernels (errors from `optimvars_nls` are rethrown prefixed `formulation = :tall:`),
-  and no elimination.
+  descent and for other solvers), a dense Jacobian (`storage = :sparse` is an `ArgumentError`, and so is a Jacobian larger
+  than `max_dense_bytes`, before allocating), only non-adaptive `AbstractResidual` costs and no unfixed adaptive kernels
+  (errors from `optimvars_nls` are rethrown prefixed `formulation = :tall:`), and no elimination.
 
 `formulation` is a keyword here only: it is not a field of `OptimizationOptions` and is not inferred from `options.linsolver`. Any
-other value is an `ArgumentError`.
+other value is an `ArgumentError`. `callback` and `workspace` are passed to the optimizer. The default of `min_work` is the
+formulation's ($MIN_WORK_FOR_THREADED_LINEARIZATION for `:normal`, $MIN_WORK_PER_THREAD for `:tall`).
 
-| Keyword | `:normal` | `:tall` |
-|:---|:---|:---|
-| `unfixed`, `numthreads`, `callback`, `workspace` | used | used |
-| `reduction` | `:auto`, `:none`, `:eliminate` | `:auto` or `:none`; `:eliminate` is an `ArgumentError` |
-| `min_work_cost` | used | used |
-| `reduced`, `min_work` | used | ignored |
-| `min_work_per_thread`, `max_dense_bytes` | ignored | used |
-
-- `unfixed`: which variables to optimize: an index, a type, a Boolean mask or a list of indices (default: all). The others are left untouched.
-- `numthreads`: threading of the evaluation.
-- `callback`, `workspace`: passed to the optimizer.
-- `reduction`, `reduced`, `min_work`: layout and threading of the normal-equations system, as for [`optimvars`](@ref).
-- `min_work_cost`: threading of the cost evaluation, as for [`optimvars`](@ref) and [`optimvars_nls`](@ref).
-- `min_work_per_thread`, `max_dense_bytes`: threading and the size limit of the dense Jacobian, as for [`optimvars_nls`](@ref).
-"""
+$KEYWORDS_DOC"""
 function SecondOrderOptimization.optimize!(model::Model, options::OptimizationOptions=OptimizationOptions();
-        formulation::Symbol=:normal,
-        unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), callback=nullcallback, workspace=nothing,
-        reduction::Symbol=:auto, reduced::Symbol=:auto,
-        min_work::Integer=MIN_WORK_FOR_THREADED_LINEARIZATION, min_work_cost::Integer=MIN_WORK_FOR_THREADED_COST,
-        min_work_per_thread::Integer=MIN_WORK_PER_THREAD, max_dense_bytes::Integer=256 * 1024^2)
+        formulation::Symbol=:normal, callback=nullcallback, workspace=nothing,
+        unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction::Symbol=:auto, storage::Symbol=:auto,
+        max_dense_bytes::Integer=MAX_DENSE_BYTES,
+        min_work::Integer=(formulation === :tall ? MIN_WORK_PER_THREAD : MIN_WORK_FOR_THREADED_LINEARIZATION),
+        min_work_cost::Integer=MIN_WORK_FOR_THREADED_COST)
     formulation in (:normal, :tall) || throw(ArgumentError("Unknown formulation $(repr(formulation)); expected :normal or :tall."))
-    formulation === :tall && return optimize_tall!(model, options; unfixed, numthreads, callback, workspace, reduction, min_work_per_thread, min_work_cost, max_dense_bytes)
-    f, fdf!, x0, H = optimvars(model, unfixed, numthreads; reduction, reduced, min_work, min_work_cost)
+    NLLSModel.check_reduction(reduction)
+    NLLSModel.check_storage(storage)
+    formulation === :tall && return optimize_tall!(model, options; unfixed, numthreads, callback, workspace, reduction, storage, max_dense_bytes, min_work, min_work_cost)
+    f, fdf!, x0, H = optimvars(model; unfixed, numthreads, reduction, storage, min_work, min_work_cost)
     obj = HessianObjective(f, fdf!; H)
     if ismutablevar(x0)
         result = SecondOrderOptimization.optimize!(x0, obj, options; callback, workspace)

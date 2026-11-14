@@ -376,7 +376,7 @@ end
         for _ in 1:4
             addcost!(problem, GramRes{M, typeof(kernel)}(randn(rng, M == 0 ? 9 : M), kernel))
         end
-        _, fdf!, x0, _ = optimvars(problem, nothing, static(1))
+        _, fdf!, x0, _ = optimvars(problem; numthreads=static(1))
         g = zeros(24); H = zeros(24, 24)
         c = fdf!(g, H, x0)
         _, _, resjac!, xt, J0 = optimvars_nls(problem; numthreads=static(1))

@@ -15,7 +15,7 @@ Nonlinear Least Squares (NLLS) and factor-graph modeling in Julia.
 - **Robust M-Estimators**: Built-in `HuberKernel`, `GemanMcclureKernel`, `Scaled`, and adaptive `ContaminatedGaussian`.
 - **Block-Dense & Block-Sparse Linear Systems**: Uses `DenseBlockLinearSystem` and `SparseBlockLinearSystem` from `BlockLinearSystems.jl` for fast, zero-allocation Hessian assembly.
 - **One-Call Solving**: `optimize!(model, options)` solves a `Model` with `SecondOrderOptimization.jl` and writes the solution back into it (load `SecondOrderOptimization`).
-- **Optimizer-Agnostic Problem Interface**: For advanced use, extract `(f, fdf!, x0, H) = optimvars(problem, unfixed, numthreads)` for integration with other second order optimizers, such as `Optim.jl`.
+- **Optimizer-Agnostic Problem Interface**: For advanced use, extract `(f, fdf!, x0, H) = optimvars(problem; unfixed=unfixed, numthreads=numthreads)` for integration with other second order optimizers, such as `Optim.jl`.
 - **NLPModels.jl Ecosystem**: Load `NLPModels` to wrap any `Model` as an `AbstractNLPModel` via `NLPLSModel(problem)` and solve with `JSOSolvers.jl` (`trunk`, `tron`), `Ipopt.jl`, or `Optim.jl`.
 
 ## Quick Start
@@ -44,9 +44,11 @@ problem.variables[v] # The solution
 
 `optimize!(model, options)` is provided by a package extension, so it needs `using SecondOrderOptimization` (`BlockLinearSystems`
 is already a dependency of NLLSModel). `optimize(model, options)` leaves `model` alone and returns `(model_copy, result)`.
-Keywords: `unfixed` (an index, a type, a mask or a list of indices), `numthreads`, `callback`, `workspace`, and the layout
-choices `reduction` (`:auto`, `:none`, `:eliminate`: whether eliminable variables are eliminated by a Schur complement) and
-`reduced` (`:auto`, `:dense`, `:sparse`: storage of the reduced system, ignored when nothing is eliminated).
+Besides `formulation`, `callback` and `workspace`, it takes the keywords that `optimvars`, `optimvars_nls`,
+`flat_optimvars_nls`, `NLPLSModel` and `NLLSNLSModel` take too, with the same names, meanings and defaults: `unfixed` (an
+index, a type, a mask or a list of indices), `numthreads`, the layout choices `reduction` (`:auto`, `:none`, `:eliminate`:
+whether eliminable variables are eliminated by a Schur complement), `storage` (`:auto`, `:dense`, `:sparse`: storage of the
+matrix the solver receives) and `max_dense_bytes`, and the threading floors `min_work` and `min_work_cost`.
 
 ### Tall formulation
 
@@ -61,12 +63,12 @@ result = optimize!(problem, OptimizationOptions(iterator = :levenbergmarquardt);
 
 In this first version:
 
-- the Jacobian is **dense**. If it would exceed `max_dense_bytes` (default 256 MB) an `ArgumentError` gives its size, before
-  anything is allocated; raise the limit or use `formulation = :normal`;
+- the Jacobian is **dense** (`storage = :sparse` is an `ArgumentError`). If it would exceed `max_dense_bytes` (default 256 MB)
+  an `ArgumentError` gives its size, before anything is allocated; raise the limit or use `formulation = :normal`;
 - any iterator except gradient descent works (`:levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg`, `:newton`), with
   `linsolver = :auto` or `:qr`; `:gradientdescent` and the other solvers (for example `:cholesky`) throw the optimizer's `ArgumentError`;
-- `reduction = :eliminate` is an `ArgumentError` (use `:auto` or `:none`); `reduced`, `min_work` and `min_work_cost` are ignored,
-  and `min_work_per_thread` and `max_dense_bytes` are used only here;
+- `reduction = :eliminate` is an `ArgumentError` (use `:auto` or `:none`); `min_work` is the floor of the residual and
+  Jacobian fill, in its own work estimate, with its own default;
 - every cost must be a non-adaptive `AbstractResidual`, and no adaptive kernel variable may be unfixed. Otherwise the error
   from `optimvars_nls` is rethrown with the prefix `formulation = :tall:`;
 - there is no robust-mode keyword: each cost's kernel decides how its rows enter (see the robust-kernel tutorial), so

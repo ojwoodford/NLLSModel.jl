@@ -40,7 +40,7 @@ end
 
     # Test optimvars with unfixed mask (optimizing only variables 2 and 3)
     unfixed = SVector(1, 2, 3) .> 1
-    f_sub, fdf_sub!, x0_sub, H_sub = optimvars(problem, unfixed)
+    f_sub, fdf_sub!, x0_sub, H_sub = optimvars(problem; unfixed=unfixed)
     @test length(x0_sub) == 2
     @test H_sub === nothing
     g = zeros(2)

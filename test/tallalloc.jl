@@ -20,8 +20,8 @@ staticplain(; n=4) = (rng = MersenneTwister(5); m = Model(SVector{2, Float64}, T
     foreach(k -> addcost!(m, Tgt(randn(rng, SVector{2, Float64}), k)), 1:n); m)
 
 # Warm, then the allocations of one call of each evaluator
-function warmallocs(model; unfixed=nothing, numthreads=static(1), min_work_per_thread=5000)
-    f, res!, resjac!, x0, J = optimvars_nls(model; unfixed, numthreads, min_work_per_thread, matrix_type=:dense)
+function warmallocs(model; unfixed=nothing, numthreads=static(1), min_work=5000)
+    f, res!, resjac!, x0, J = optimvars_nls(model; unfixed, numthreads, min_work, storage=:dense)
     r = zeros(size(J, 1))
     for _ in 1:3
         resjac!(r, J, x0); res!(r, x0); f(x0)
@@ -58,8 +58,8 @@ end
         nt = Threads.nthreads()
         bigmodel(n) = (rng = MersenneTwister(3); m = Model(Vector{Float64}, TlHand{typeof(Huber2oKernel(0.3))});
             addvariable!(m, randn(rng, 12)); foreach(_ -> addcost!(m, TlHand(randn(rng, 9), 12, Huber2oKernel(0.3), 1)), 1:n); m)
-        @test warmallocs(bigmodel(200); numthreads=static(nt), min_work_per_thread=100) == (0, 0, 0)
-        @test warmallocs(bigmodel(800); numthreads=static(nt), min_work_per_thread=100) == (0, 0, 0)
+        @test warmallocs(bigmodel(200); numthreads=static(nt), min_work=100) == (0, 0, 0)
+        @test warmallocs(bigmodel(800); numthreads=static(nt), min_work=100) == (0, 0, 0)
     end
 
     # A whole solve: per iteration, the tall path allocates no more than the normal equations do on the same model
@@ -70,10 +70,10 @@ end
             function run(n)
                 m = make()
                 if formulation === :tall
-                    f, _, rj, x0, J = optimvars_nls(m; numthreads=static(1), matrix_type=:dense)
+                    f, _, rj, x0, J = optimvars_nls(m; numthreads=static(1), storage=:dense)
                     obj = JacobianObjective(f, AllocExt.TallResJac(rj), J)
                 else
-                    f, fdf!, x0, H = optimvars(m, nothing, static(1))
+                    f, fdf!, x0, H = optimvars(m; numthreads=static(1))
                     obj = HessianObjective(f, fdf!; H)
                 end
                 ws = OptimizationWorkspace(x0, obj, opts(n))

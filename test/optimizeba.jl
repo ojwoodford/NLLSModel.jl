@@ -65,7 +65,7 @@ end
     @test allocd == 0
 
     # Test optimvars on dense BA problem
-    f_dense, fdf_dense!, x0_dense, H_dense = optimvars(problem, nothing, static(1))
+    f_dense, fdf_dense!, x0_dense, H_dense = optimvars(problem; numthreads=static(1))
     @test H_dense === nothing
     @test f_dense(x0_dense) ≈ costbefore
     dim_dense = nvars(x0_dense)
@@ -76,7 +76,7 @@ end
 
     # Test optimvars on sparse BA problem (zero-allocation f and fdf!)
     problem_sp = perturb_ba_problem(create_ba_problem(10, 50, 0.3), 0.001, 0.001)
-    f_sp, fdf_sp!, x0_sp, H_sp = optimvars(problem_sp, nothing, static(1))
+    f_sp, fdf_sp!, x0_sp, H_sp = optimvars(problem_sp; numthreads=static(1))
     @test H_sp isa SparseMatrixCSC{Float64, Int}
     dim_sp = nvars(x0_sp)
     @test size(H_sp) == (dim_sp, dim_sp)
@@ -98,7 +98,7 @@ end
     addcost!(problem_interleaved, SimpleError2{SVector{6, Float64}, SVector{3, Float64}}(NLLSModel.generatemeasurement(problem_interleaved.variables[c2], problem_interleaved.variables[p2]), c2, p2))
     addcost!(problem_interleaved, SimpleError2{SVector{6, Float64}, SVector{3, Float64}}(NLLSModel.generatemeasurement(problem_interleaved.variables[c1], problem_interleaved.variables[p2]), c1, p2))
 
-    f_int, fdf_int!, x0_int, _ = optimvars(problem_interleaved, nothing, static(1))
+    f_int, fdf_int!, x0_int, _ = optimvars(problem_interleaved; numthreads=static(1))
     # Verify that x0_int is grouped by block dimension: 2 cameras of size 6, then 2 points of size 3
     @test nvars(x0_int[1]) == 6
     @test nvars(x0_int[2]) == 6
@@ -179,7 +179,7 @@ end
     # A2) With automatic solver selection the same problem falls back to a non-Schur solver (B6)
     @test isnothing(NLLSModel.partition_schur_problem(prob_bad, trues(length(prob_bad.variables)), false))
     @test isnothing(NLLSModel.partition_schur_problem(prob_bad, trues(length(prob_bad.variables))))
-    _, _, _, H_bad = optimvars(prob_bad, nothing, static(1))
+    _, _, _, H_bad = optimvars(prob_bad; numthreads=static(1))
     @test !(H_bad isa BlockLinearSystems.SchurBlockMatrix)
 
     # B) Calling with no eliminable variables when reduction=:eliminate throws ArgumentError
@@ -187,7 +187,7 @@ end
     @test_throws ArgumentError NLLSModel.partition_schur_problem(prob_no_elim, trues(length(prob_no_elim.variables)), true)
 
     # 4. Dense Schur Solver (optimvars)
-    f_ds, fdf_ds!, x0_ds, H_ds = optimvars(prob_schur, nothing, static(1); reduction=:eliminate, reduced=:dense)
+    f_ds, fdf_ds!, x0_ds, H_ds = optimvars(prob_schur; numthreads=static(1), reduction=:eliminate, storage=:dense)
     @test H_ds isa BlockLinearSystems.SchurBlockMatrix
     @test H_ds.R isa Matrix{Float64}
     tot_dim_ds = H_ds.structure.nr + sum(H_ds.structure.e_dims)
@@ -197,7 +197,7 @@ end
     @test (@allocated fdf_ds!(g_ds, H_ds, x0_ds)) == 0
 
     # 5. Sparse Schur Solver (optimvars)
-    f_ss, fdf_ss!, x0_ss, H_ss = optimvars(prob_schur, nothing, static(1); reduction=:eliminate, reduced=:sparse)
+    f_ss, fdf_ss!, x0_ss, H_ss = optimvars(prob_schur; numthreads=static(1), reduction=:eliminate, storage=:sparse)
     @test H_ss isa BlockLinearSystems.SchurBlockMatrix
     @test H_ss.R isa BlockLinearSystems.SparseBlockLinearSystem
     g_ss = zeros(tot_dim_ds)
@@ -226,8 +226,8 @@ end
     end
     addcost!(prob_rr, SimpleError2{SVector{6, Float64}, SVector{6, Float64}}(randn(SVector{2, Float64}), 2, 3)) # relative-pose cost
     @test NLLSModel.partition_schur_problem(prob_rr, trues(7), true).extra_blocks == [(2, 3)]
-    f_rd, fdf_rd!, x0_rd, H_rd = optimvars(prob_rr, nothing, static(1); reduction=:eliminate, reduced=:dense)
-    f_rs, fdf_rs!, x0_rs, H_rs = optimvars(prob_rr, nothing, static(1); reduction=:eliminate, reduced=:sparse)
+    f_rd, fdf_rd!, x0_rd, H_rd = optimvars(prob_rr; numthreads=static(1), reduction=:eliminate, storage=:dense)
+    f_rs, fdf_rs!, x0_rs, H_rs = optimvars(prob_rr; numthreads=static(1), reduction=:eliminate, storage=:sparse)
     tot_rr = H_rd.structure.nr + sum(H_rd.structure.e_dims)
     g_rd = zeros(tot_rr); g_rs = zeros(tot_rr)
     @test fdf_rd!(g_rd, H_rd, x0_rd) ≈ fdf_rs!(g_rs, H_rs, x0_rs)

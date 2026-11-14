@@ -33,7 +33,7 @@ struct NLSTallLayout
     is_dense::Bool
     linear_weights::Vector{Float64} # Precomputed sqrt(w) for linear kernels
     all_linear::Bool
-    work::Int                       # Tall-fill estimate, sum of m * (n + 1) (see `workestimates`), compared with min_work_per_thread
+    work::Int                       # Tall-fill estimate, sum of m * (n + 1) (see `workestimates`), compared with min_work
 end
 
 # Call `f(cost, k)` for every cost, with `k` its running index across all cost vectors. Recursing over the tuple of cost
@@ -72,7 +72,7 @@ end
     end
 end
 
-function build_tall_layout(problem::Model, unfixed, matrix_type::Symbol, max_dense_bytes::Int)
+function build_tall_layout(problem::Model, unfixed, storage::Symbol, max_dense_bytes::Int)
     # 1. Validate cost types and variable indices
     for costvec in values(problem.costs)
         if !(eltype(costvec) <: AbstractResidual)
@@ -272,9 +272,9 @@ function build_tall_layout(problem::Model, unfixed, matrix_type::Symbol, max_den
     active_entries = sum(b -> varblocksizes[b] * col_heights[b], 1:nblocks; init=0)
     fill_fraction = active_entries / max(1, M * N)
     is_dense = false
-    if matrix_type === :dense
+    if storage === :dense
         is_dense = true
-    elseif matrix_type === :sparse
+    elseif storage === :sparse
         is_dense = false
     else # :auto
         if (M * N * 8 <= max_dense_bytes) && (M * N <= 100_000 || fill_fraction >= 0.5 || (N <= 100 && fill_fraction >= 0.25))
@@ -671,7 +671,7 @@ struct NLSResidual{P, L, U, NT, TR}
     unfixed_inds::U
     status::NLSRobustStatus
     numthreads::NT
-    min_work_per_thread::Int
+    min_work::Int
     task_results::TR
 end
 
@@ -681,7 +681,7 @@ struct NLSResJac{P, L, U, NT, TR}
     unfixed_inds::U
     status::NLSRobustStatus
     numthreads::NT
-    min_work_per_thread::Int
+    min_work::Int
     task_results::TR
 end
 
@@ -804,7 +804,7 @@ function (res!::NLSResidual)(r::AbstractVector{Float64}, vars)
     layout = res!.layout
     status = res!.status
     numthreads = res!.numthreads
-    min_work = res!.min_work_per_thread
+    min_work = res!.min_work
 
     full_vars = sync_tall_vars!(problem, res!.unfixed_inds, vars)
 
@@ -825,7 +825,7 @@ function (resjac!::NLSResJac)(r::AbstractVector{Float64}, J, vars; prezeroed::Bo
     layout = resjac!.layout
     status = resjac!.status
     numthreads = resjac!.numthreads
-    min_work = resjac!.min_work_per_thread
+    min_work = resjac!.min_work
 
     full_vars = sync_tall_vars!(problem, resjac!.unfixed_inds, vars)
 
@@ -835,10 +835,9 @@ function (resjac!::NLSResJac)(r::AbstractVector{Float64}, J, vars; prezeroed::Bo
 end
 
 """
-    optimvars_nls(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), min_work_per_thread=$MIN_WORK_PER_THREAD, min_work_cost=$MIN_WORK_FOR_THREADED_COST, matrix_type=:auto, max_dense_bytes=256*1024^2)
+    optimvars_nls(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work=$MIN_WORK_PER_THREAD, min_work_cost=$MIN_WORK_FOR_THREADED_COST)
 
 Constructs tall residual and Jacobian callable structs `(f, res!, resjac!, x0, J_proto)` for `problem`.
-Unlike `optimvars`, `unfixed` and `numthreads` are keyword arguments.
 
 There is no robust mode: each cost's kernel decides how its rows enter, as on the normal-equations path.
 
@@ -851,25 +850,22 @@ There is no robust mode: each cost's kernel decides how its rows enter, as on th
 So choosing first- or second-order treatment means choosing the kernel type. `resjac!(r, J, x)` returns the true cost
 `cost(model)` at `x`; this equals `½‖r‖²` only when [`islinear`](@ref)`(resjac!)` is true.
 
-`min_work_per_thread`: the residual and Jacobian fill is threaded only if its estimated work is at least twice this,
-and then on at most `work ÷ min_work_per_thread` threads. The unit is one entry of `r` or `J` written: per cost
-`m * (n + 1)`, with `m` the residual length and `n` the total dimension of the cost's unfixed variables, summed over all
-costs, computed once, here.
-
-`min_work_cost`: the cost function `f` is threaded only if the total residual length is at least this, as for
-[`optimvars`](@ref).
-"""
+$KEYWORDS_DOC"""
 function optimvars_nls(
     problem::Model;
     unfixed = nothing,
     numthreads = StaticInt(Threads.nthreads()),
-    min_work_per_thread::Int = MIN_WORK_PER_THREAD,
+    reduction::Symbol = :auto,
+    storage::Symbol = :auto,
+    max_dense_bytes::Integer = MAX_DENSE_BYTES,
+    min_work::Integer = MIN_WORK_PER_THREAD,
     min_work_cost::Integer = MIN_WORK_FOR_THREADED_COST,
-    matrix_type::Symbol = :auto,
-    max_dense_bytes::Int = 256 * 1024^2,
 )
+    check_reduction(reduction)
+    reduction === :eliminate && throw(ArgumentError("optimvars_nls does not support reduction = :eliminate (elimination of variables on the Jacobian path is not implemented); use :auto or :none."))
+    check_storage(storage)
     conv_unfixed = convertunfixed(unfixed, problem)
-    layout, J_proto = build_tall_layout(problem, conv_unfixed, matrix_type, max_dense_bytes)
+    layout, J_proto = build_tall_layout(problem, conv_unfixed, storage, Int(max_dense_bytes))
 
     if conv_unfixed isa Integer
         is_single = true
@@ -894,14 +890,14 @@ function optimvars_nls(
     task_results = [TaskResult(0.0, 0, 0, 0.0) for _ in 1:max(1, N_req)]
     status = NLSRobustStatus()
 
-    res! = NLSResidual(problem, layout, unfixed_inds, status, static(numthreads), min_work_per_thread, task_results)
-    resjac! = NLSResJac(problem, layout, unfixed_inds, status, static(numthreads), min_work_per_thread, task_results)
+    res! = NLSResidual(problem, layout, unfixed_inds, status, static(numthreads), Int(min_work), task_results)
+    resjac! = NLSResJac(problem, layout, unfixed_inds, status, static(numthreads), Int(min_work), task_results)
 
     return (f, res!, resjac!, x0, J_proto)
 end
 
 """
-    flat_optimvars_nls(problem::Model; unfixed=nothing, numthreads=static(1), min_work_per_thread=$MIN_WORK_PER_THREAD, min_work_cost=$MIN_WORK_FOR_THREADED_COST, matrix_type=:auto, max_dense_bytes=256*1024^2)
+    flat_optimvars_nls(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work=$MIN_WORK_PER_THREAD, min_work_cost=$MIN_WORK_FOR_THREADED_COST)
 
 Constructs a flat Euclidean vector wrapper around `optimvars_nls`.
 Returns a NamedTuple `(; f, res!, resjac!, jac!, x0, J_proto, layout, status)`.
@@ -909,15 +905,17 @@ Accepts any unfixed variable whose update is plain addition, `update(v, δ) ≈ 
 `Float64` vector: a number, or an `AbstractVector` of numbers that can be built from a vector of its values (`Float64`,
 `SVector{N, Float64}`, `Vector{Float64}`, or a type of your own). Nothing needs declaring: each variable type is checked
 numerically, once, here. A type that cannot be packed, or whose update is not addition, is an `ArgumentError` saying which.
-"""
+
+$KEYWORDS_DOC"""
 function flat_optimvars_nls(
     problem::Model;
     unfixed = nothing,
-    numthreads = static(1),
-    min_work_per_thread::Int = MIN_WORK_PER_THREAD,
+    numthreads = StaticInt(Threads.nthreads()),
+    reduction::Symbol = :auto,
+    storage::Symbol = :auto,
+    max_dense_bytes::Integer = MAX_DENSE_BYTES,
+    min_work::Integer = MIN_WORK_PER_THREAD,
     min_work_cost::Integer = MIN_WORK_FOR_THREADED_COST,
-    matrix_type::Symbol = :auto,
-    max_dense_bytes::Int = 256 * 1024^2,
 )
     conv_unfixed = convertunfixed(unfixed, problem)
 
@@ -928,10 +926,11 @@ function flat_optimvars_nls(
         problem;
         unfixed = unfixed,
         numthreads = numthreads,
-        min_work_per_thread = min_work_per_thread,
-        min_work_cost = min_work_cost,
-        matrix_type = matrix_type,
+        reduction = reduction,
+        storage = storage,
         max_dense_bytes = max_dense_bytes,
+        min_work = min_work,
+        min_work_cost = min_work_cost,
     )
 
     x0 = Vector{Float64}(undef, layout.n)
@@ -989,7 +988,7 @@ function throw_nonlinear(name, problem)
 end
 
 """
-    nls_callbacks(problem::Model; unfixed=nothing, numthreads=static(1), min_work_per_thread=$MIN_WORK_PER_THREAD, min_work_cost=$MIN_WORK_FOR_THREADED_COST, matrix_type=:auto, max_dense_bytes=256*1024^2)
+    nls_callbacks(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work=$MIN_WORK_PER_THREAD, min_work_cost=$MIN_WORK_FOR_THREADED_COST)
 
 Lightweight callback helper for `LeastSquaresOptim.jl`.
 Accepts any non-adaptive `AbstractResidual` problem in which every cost has a linear kernel (`NoRobust`, or `Scaled` with a finite non-negative height).
@@ -999,20 +998,22 @@ Returns `(; x0, r0, J0, nequ, nvar, f, res!, jac!, reset!)`.
 function nls_callbacks(
     problem::Model;
     unfixed = nothing,
-    numthreads = static(1),
-    min_work_per_thread::Int = MIN_WORK_PER_THREAD,
+    numthreads = StaticInt(Threads.nthreads()),
+    reduction::Symbol = :auto,
+    storage::Symbol = :auto,
+    max_dense_bytes::Integer = MAX_DENSE_BYTES,
+    min_work::Integer = MIN_WORK_PER_THREAD,
     min_work_cost::Integer = MIN_WORK_FOR_THREADED_COST,
-    matrix_type::Symbol = :auto,
-    max_dense_bytes::Int = 256 * 1024^2,
 )
     flat = flat_optimvars_nls(
         problem;
         unfixed = unfixed,
         numthreads = numthreads,
-        min_work_per_thread = min_work_per_thread,
-        min_work_cost = min_work_cost,
-        matrix_type = matrix_type,
+        reduction = reduction,
+        storage = storage,
         max_dense_bytes = max_dense_bytes,
+        min_work = min_work,
+        min_work_cost = min_work_cost,
     )
 
     islinear(flat) || throw_nonlinear("nls_callbacks", problem)
