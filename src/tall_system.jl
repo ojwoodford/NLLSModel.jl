@@ -538,6 +538,11 @@ function scaled_jacobian(jac::AbstractMatrix, w)
     return out
 end
 
+# The kernel, the variables the residual takes, how many of them, and which are unfixed. For an adaptive residual the first
+# variable is the kernel's own parameters.
+@inline split_kernel(cost::AbstractAdaptiveResidual, vars_k, varflags) = (vars_k[1], Base.tail(vars_k), ndeps(cost) - static(1), varflags >> 1)
+@inline split_kernel(cost, vars_k, varflags) = (robustkernel(cost), vars_k, ndeps(cost), varflags)
+
 function eval_single_resjac!(r, J, vars, cost, k::Int, layout::NLSTallLayout, status::NLSRobustStatus)
     vars_k = getvars(cost, vars)
     r_start = layout.resoffsets[k]
@@ -552,17 +557,9 @@ function eval_single_resjac!(r, J, vars, cost, k::Int, layout::NLSTallLayout, st
         return c, cl, err, val
     end
 
-    if cost isa AbstractAdaptiveResidual
-        kernel = vars_k[1]
-        vars_for_res = vars_k[2:end]
-        varflags_res = varflags >> 1
-        nvars_deps = ndeps(cost) - static(1)
-    else
-        kernel = robustkernel(cost)
-        vars_for_res = vars_k
-        varflags_res = varflags
-        nvars_deps = ndeps(cost)
-    end
+    # Each of these is assigned once: a variable assigned in two branches and captured by the closure below is boxed
+    # (`Core.Box`), which makes everything downstream inferred as `Any` and allocates on every call.
+    kernel, vars_for_res, nvars_deps, varflags_res = split_kernel(cost, vars_k, varflags)
 
     res_k, jac_k = dispatch_computeresjac(vflags -> computeresjac(vflags, cost, vars_for_res...), nvars_deps, varflags_res)
     s = safe_sqnorm(res_k)

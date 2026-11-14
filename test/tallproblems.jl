@@ -171,3 +171,44 @@ NLLSModel.varindices(r::TlNan) = r.i
 NLLSModel.getvars(r::TlNan, vars::AbstractVector) = (vars[r.i]::Vector{Float64},)
 NLLSModel.computeresidual(::TlNan, x) = x[1] > 5 ? SVector(NaN, x[2]) : SVector(x[1] - 1, x[2] + x[1])
 Base.eltype(::TlNan) = Float64
+
+# A residual on Vector variable `i` with a hand-written Jacobian in buffers it owns, as a user with dynamic variables who wants
+# no allocation would write it (autodiff of a Vector variable allocates in `update`, in either formulation): r_k = x_k x_{k+1} - meas_k
+struct TlHand{K} <: NLLSModel.AbstractResidual
+    meas::Vector{Float64}
+    res::Vector{Float64}
+    jac::Matrix{Float64}
+    kernel::K
+    i::Int
+end
+TlHand(meas, n, kernel, i) = TlHand(meas, zeros(length(meas)), zeros(length(meas), n), kernel, i)
+NLLSModel.ndeps(::TlHand) = static(1)
+NLLSModel.nres(r::TlHand) = length(r.meas)
+NLLSModel.varindices(r::TlHand) = r.i
+NLLSModel.getvars(r::TlHand, vars::AbstractVector) = (vars[r.i]::Vector{Float64},)
+NLLSModel.robustkernel(r::TlHand) = r.kernel
+Base.eltype(::TlHand) = Float64
+function NLLSModel.computeresidual(r::TlHand, x)
+    for k in eachindex(r.meas)
+        r.res[k] = x[k] * x[k+1] - r.meas[k]
+    end
+    return r.res
+end
+function NLLSModel.computeresjac(varflags, r::TlHand, x)
+    NLLSModel.computeresidual(r, x)
+    fill!(r.jac, 0.0)
+    for k in eachindex(r.meas)
+        r.jac[k, k] = x[k+1]
+        r.jac[k, k+1] = x[k]
+    end
+    return r.res, r.jac
+end
+
+# Two Vector variables of length 12, each with a hand-written residual of 9 rows, kernels `k1` and `k2`
+function handmodel(k1, k2; seed=12)
+    rng = MersenneTwister(seed)
+    m = Model(Vector{Float64}, Union{TlHand{typeof(k1)}, TlHand{typeof(k2)}})
+    addvariable!(m, randn(rng, 12)); addvariable!(m, randn(rng, 12))
+    addcost!(m, TlHand(randn(rng, 9), 12, k1, 1)); addcost!(m, TlHand(randn(rng, 9), 12, k2, 2))
+    return m
+end
