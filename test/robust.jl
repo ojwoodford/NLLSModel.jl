@@ -23,6 +23,13 @@ function testrobustifier(kernel, costs, expected, firstorder=false)
 end
 
 @testset "robust.jl" begin
+    # islinearkernel (internal): NoRobust, and Scaled of a linear kernel with a finite non-negative height
+    @test NLLSModel.islinearkernel(NoRobust())
+    @test NLLSModel.islinearkernel(Scaled(NoRobust(), 2.0)) && NLLSModel.islinearkernel(Scaled(NoRobust(), 0.0))
+    @test NLLSModel.islinearkernel(Scaled(Scaled(NoRobust(), 2.0), 3.0))
+    @test !NLLSModel.islinearkernel(Scaled(NoRobust(), -1.0)) && !NLLSModel.islinearkernel(Scaled(NoRobust(), Inf))
+    @test !NLLSModel.islinearkernel(HuberKernel(1.0)) && !NLLSModel.islinearkernel(Scaled(HuberKernel(1.0), 2.0))
+    @test !(:islinearkernel in names(NLLSModel)) && (:islinear in names(NLLSModel))
     costs = SVector(0.0, 0.1, 0.3, 0.7, 1.3, 2.0, 5.0) .^ 2
 
     # No robustifier

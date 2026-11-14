@@ -17,7 +17,6 @@ optimvars
 optimvars_nls
 flat_optimvars_nls
 islinear
-islinearkernel
 ```
 
 ## Solving a Model

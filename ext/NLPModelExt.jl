@@ -283,7 +283,7 @@ OptimizationVariableInterface.syncvars!(::Model, nlp::NLLSModelNLP, x::AbstractV
 
 Concrete adapter exposing an `NLLSModel.Model` as an `NLPModels.AbstractNLSModel`.
 Enables native tall NLS solvers such as `JSOSolvers.trunk` and `JSOSolvers.tron`.
-Restricted to linear robust kernels (`islinearkernel`).
+Restricted to costs with a linear kernel (`NoRobust`, or `Scaled` with a finite non-negative height).
 """
 mutable struct NLLSModelNLS{P, L, RES, RESJAC, J} <: AbstractNLSModel{Float64, Vector{Float64}}
     meta::NLPModelMeta{Float64, Vector{Float64}}

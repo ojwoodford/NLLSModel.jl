@@ -7,7 +7,7 @@ const PUBLIC_NAMES = sort([
     :ContaminatedGaussian, :GemanMcclure2oKernel, :GemanMcclureKernel, :Huber2oKernel, :HuberKernel,
     :Model, :NLLSModel, :NLLSNLSModel, :NLPLSModel, :NoRobust, :Scaled, :SimpleError2, :SimpleError3, :SimpleError4,
     :addcost!, :addvariable!, :computecost, :computecostgradhess, :computeresidual, :computeresjac,
-    :cost, :flat_optimvars_nls, :generatemeasurement, :getvars, :islinear, :islinearkernel, :ndeps, :nres,
+    :cost, :flat_optimvars_nls, :generatemeasurement, :getvars, :islinear, :ndeps, :nres,
     :optimvars, :optimvars_nls, :robustify, :robustifydcost, :robustifydkernel, :robustkernel,
     :subproblem, :subproblem!, :syncvars!, :varindices,
 ])
@@ -17,7 +17,7 @@ const REMOVED_NAMES = [:addresidual!, :isadditive]
 
 # Internal: still defined, no longer exported
 const INTERNAL_NAMES = [
-    :partition_schur_problem, :clamped_count, :reset_clamped_count!, :nresiduals, :nls_callbacks,
+    :partition_schur_problem, :clamped_count, :reset_clamped_count!, :nresiduals, :nls_callbacks, :islinearkernel,
     :MAX_STATIC_VAR, :MAX_STATIC_JAC, :MAX_STATIC_ROWS,
 ]
 
@@ -48,7 +48,7 @@ end
 
 @testset "Public API" begin
     @test sort(names(NLLSModel)) == PUBLIC_NAMES
-    @test length(PUBLIC_NAMES) == 43
+    @test length(PUBLIC_NAMES) == 42
     @testset "docstring: $name" for name in PUBLIC_NAMES
         @test hasdocstring(NLLSModel, name)
     end

@@ -451,7 +451,7 @@ using NLLSModel, NLPModels
 nls = NLLSNLSModel(problem)
 ```
 
-Every cost must be a non-adaptive [`AbstractResidual`](@ref) with a linear kernel ([`islinearkernel`](@ref)), so that the
+Every cost must be a non-adaptive [`AbstractResidual`](@ref) with a linear kernel (`NoRobust`, or `Scaled` with a finite non-negative height), so that the
 cost is exactly `½‖r‖²`, which these solvers derive from `r`; otherwise it throws an `ArgumentError`. Every unfixed
 variable must update by plain addition and pack into a flat `Float64` vector (as for [`flat_optimvars_nls`](@ref)).
 
@@ -466,18 +466,6 @@ variable must update by plain addition and pack into a flat `Float64` vector (as
 The solution is transferred back to `problem.variables` with [`syncvars!`](@ref).
 """
 NLLSNLSModel
-
-"""
-    islinearkernel(kernel::AbstractRobustifier) -> Bool
-
-`true` when `kernel` leaves a residual's cost quadratic, so the cost is `½‖r‖²` scaled by a non-negative constant: for
-[`NoRobust`](@ref), and for [`Scaled`](@ref) of a linear kernel with a finite, non-negative height. `false` for every
-other kernel, including user-defined ones. A query, not an extension point: a custom kernel is treated as robust.
-
-The tall evaluators of [`optimvars_nls`](@ref) take an unweighted (or constant-scaled) row for a cost with a linear
-kernel, and [`islinear`](@ref) reports whether every cost has one.
-"""
-islinearkernel
 
 """
     syncvars!(nlp, x::AbstractVector) -> Model

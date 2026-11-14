@@ -20,6 +20,9 @@ function robustifydcost(kernel::Scaled, cost)
     return c * kernel.height, d1 * kernel.height, d2 * kernel.height
 end
 
+# `true` when `kernel` leaves a residual's cost quadratic, so the cost is `½‖r‖²` scaled by a non-negative constant: for
+# `NoRobust`, and for `Scaled` of a linear kernel with a finite, non-negative height. `false` for every other kernel,
+# including user-defined ones: a query, not an extension point, so a custom kernel is treated as robust.
 islinearkernel(::NoRobust) = true
 function islinearkernel(k::Scaled)
     h = Float64(dynamic(k.height))

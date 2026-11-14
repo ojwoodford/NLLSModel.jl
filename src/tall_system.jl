@@ -707,7 +707,7 @@ end
     islinear(fn) -> Bool
 
 For the evaluators returned by [`optimvars_nls`](@ref) (`res!` or `resjac!`) or the named tuple returned by
-[`flat_optimvars_nls`](@ref): `true` when every cost is a non-adaptive residual with a linear kernel (`islinearkernel`).
+[`flat_optimvars_nls`](@ref): `true` when every cost is a non-adaptive residual with a linear kernel (`NoRobust`, or `Scaled` with a finite non-negative height).
 Then `r` is the true (constant-scaled) residual and the cost returned is exactly `½‖r‖²`, which solvers that derive the cost from
 `r` rely on. Otherwise some rows are reweighted and the cost is the robust cost, not `½‖r‖²`.
 """
@@ -840,7 +840,7 @@ There is no robust mode: each cost's kernel decides how its rows enter, as on th
 
 | What the kernel returns from `robustifydcost` | Rows of that cost |
 |:---|:---|
-| a linear kernel (`islinearkernel`: `NoRobust`, a valid `Scaled`) | unweighted or scaled by a constant |
+| a linear kernel (`NoRobust`, or `Scaled` with a finite non-negative height) | unweighted or scaled by a constant |
 | second derivative zero (e.g. `HuberKernel`) | IRLS: scaled by the square root of the first derivative |
 | second derivative non-zero (e.g. `Huber2oKernel`) | IRLS with the Triggs correction |
 
@@ -988,7 +988,7 @@ end
     nls_callbacks(problem::Model; unfixed=nothing, numthreads=static(1), min_work_per_thread=$MIN_WORK_PER_THREAD, min_work_cost=$MIN_WORK_FOR_THREADED_COST, matrix_type=:auto, max_dense_bytes=256*1024^2)
 
 Lightweight callback helper for `LeastSquaresOptim.jl`.
-Accepts any non-adaptive `AbstractResidual` problem with linear kernels (`islinearkernel`).
+Accepts any non-adaptive `AbstractResidual` problem in which every cost has a linear kernel (`NoRobust`, or `Scaled` with a finite non-negative height).
 Caches `r` and `cost` at `x_cached` while writing `J` directly into caller's matrix.
 Returns `(; x0, r0, J0, nequ, nvar, f, res!, jac!, reset!)`.
 """

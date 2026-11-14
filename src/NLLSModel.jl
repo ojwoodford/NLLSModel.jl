@@ -33,7 +33,7 @@ import SIRBSDispatch: sirbsdispatch
 export Model, NLPLSModel, NLLSNLSModel
 export addvariable!, addcost!, subproblem, subproblem!
 export cost, optimvars, optimvars_nls, flat_optimvars_nls, syncvars!
-export islinearkernel, islinear
+export islinear
 
 # Cost and residual types & definition interface
 export AbstractCost, AbstractResidual, AbstractAdaptiveResidual
