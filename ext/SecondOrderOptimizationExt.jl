@@ -31,9 +31,6 @@ function optimize_tall!(model::Model, options; unfixed, numthreads, callback, wo
     catch err
         err isa ArgumentError ? throw(ArgumentError("formulation = :tall: " * err.msg)) : rethrow()
     end
-    # With every variable unfixed and in natural order, x0 *is* model.variables. The evaluators copy each point they evaluate into
-    # the model, which would overwrite the optimizer's current point with a trial, so the optimizer gets its own copy.
-    x0 === model.variables && (x0 = copyvars(x0))
     obj = JacobianObjective(f, PrezeroedResJac(resjac!), J)
     if ismutablevar(x0)
         result = SecondOrderOptimization.optimize!(x0, obj, options; callback, workspace)

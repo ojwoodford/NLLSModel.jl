@@ -149,7 +149,7 @@ end
 
 # optimvars_nls with every variable unfixed returns x0 *as* model.variables, and the evaluators copy each point they evaluate into
 # the model, so evaluating anywhere else overwrites x0. optimize! takes a copy; so do the tests that evaluate by hand.
-tlnls(model; kwargs...) = (t = optimvars_nls(model; kwargs...); (t[1], t[2], t[3], copyvars(t[4]), t[5]))
+tlnls(model; kwargs...) = optimvars_nls(model; kwargs...)
 costlist(model) = collect(Iterators.flatten(values(model.costs)))
 samevars(a, b; atol=1e-5) = all(isapprox(u, v; atol=atol) for (u, v) in zip(a.variables, b.variables))
 

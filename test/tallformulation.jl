@@ -76,11 +76,12 @@ end
     @testset "write-back (T2): the model holds the best point, not the last evaluated" begin
         # The evaluators copy every point they evaluate into the model. A Levenberg-Marquardt run in practice ends on an accepted
         # trial, so a rejected last evaluation is simulated: a callback that, like an evaluator at a rejected trial, leaves a
-        # worse point in the model after every iteration. Whatever it leaves, optimize! must put the best point in.
+        # worse point in the model after every iteration. Whatever it leaves, optimize! must put the best point in. (With every variable
+        # of several unfixed the evaluators write nothing into the model, x0 being model.variables itself: nothing to simulate.)
         junk(v::Vector{Float64}) = v .+ 0.5
         junk(v::SVector) = v .+ 0.5
         junk(v::TlRot) = update(v, [0.3, -0.2, 0.1])
-        for (name, make, unfixed) in (("one variable", () -> curvefit(huber=true, outliers=3), nothing), ("all unfixed", () -> posemodel(), nothing), ("a list", () -> posemodel(), [1, 3, 4]), ("a rotation", () -> posemodel(), 2))
+        for (name, make, unfixed) in (("one variable", () -> curvefit(huber=true, outliers=3), nothing), ("a list", () -> posemodel(), [1, 3, 4]), ("a rotation", () -> posemodel(), 2))
             for maxiters in (1, 2, 3, 200)
                 model = make()
                 lastjunk = Ref{Any}(nothing)
@@ -264,12 +265,39 @@ end
 
     @testset "rejected by the optimizer" begin
         model = curvefit()
-        for options in (OptimizationOptions(iterator=:gradientdescent), OptimizationOptions(iterator=:newton), OptimizationOptions(iterator=:levenbergmarquardt, linsolver=:cholesky))
+        for options in (OptimizationOptions(iterator=:gradientdescent), OptimizationOptions(iterator=:levenbergmarquardt, linsolver=:cholesky))
             err = try optimize!(deepcopy(model), options; formulation=:tall, numthreads=static(1)); nothing catch e e end
             @test err isa ArgumentError
         end
         # They are fine for the normal equations
         @test optimize!(deepcopy(model), OptimizationOptions(iterator=:gradientdescent); numthreads=static(1)) isa OptimizationResult
+    end
+
+    # Z3: iterators that linearize at the first trial evaluate resjac! at a point that may then be rejected; with the optimizer's
+    # current point being model.variables itself, that must not disturb it
+    @testset "rejected trials with $iterator reach the optimum of :normal" for (iterator, expect_rejection) in ((:levenbergmarquardt, true), (:levenbergmarquardt_dtd, true), (:dogleg, true), (:newton, false))
+        make() = (m = curvefit(outliers=2); m.variables[1] = [0.1, 6.0, -4.0]; m)
+        options = OptimizationOptions(iterator=iterator, maxiters=300)
+        normal, rn = optimize(make(), options; numthreads=static(1))
+        model = make()
+        start = deepcopy(model.variables)
+        tall, rt = optimize(model, options; formulation=:tall, numthreads=static(1))
+        # A trial that is evaluated by f rather than by the first-trial linearization has been rejected once
+        expect_rejection && @test rt.costcomputations > 0
+        @test model.variables == start
+        @test NLLSModel.cost(tall) ≈ rt.bestcost rtol=1e-12
+        @test NLLSModel.cost(tall) ≈ NLLSModel.cost(normal) rtol=1e-8
+        # With the variable alone in a list of variables (so x0 is model.variables) and the normal one
+        multi = Model(Vector{Float64}, Union{TlExp, Tgt{Vector{Float64}}})
+        base = make()
+        addvariable!(multi, base.variables[1]); addvariable!(multi, [0.7])
+        foreach(c -> addcost!(multi, TlExp(c.t, c.y, 1)), costlist(base))
+        addcost!(multi, Tgt([0.2], 2))
+        nn, _ = optimize(multi, options; numthreads=static(1))
+        rr = optimize!(multi, options; formulation=:tall, numthreads=static(1))
+        @test NLLSModel.cost(multi) ≈ rr.bestcost rtol=1e-12
+        @test NLLSModel.cost(multi) ≈ NLLSModel.cost(nn) rtol=1e-8
+        expect_rejection && @test rr.costcomputations > 0
     end
 
     @testset "optimize leaves the original model unchanged" begin

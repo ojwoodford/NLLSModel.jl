@@ -658,12 +658,10 @@ end
     return problem.variables
 end
 
-@inline function sync_tall_vars!(problem::Model, ::Nothing, vars)
-    if vars !== problem.variables
-        copyto!(problem.variables, vars)
-    end
-    return problem.variables
-end
+# Every variable unfixed: `vars` is a complete set of variables and is evaluated as it is. It is not copied into the model:
+# `vars` may be the optimizer's current point, which is `problem.variables` itself, and a trial must not overwrite it.
+# (The same rule as `sync_unfixed_vars!` on the normal-equations path.)
+@inline sync_tall_vars!(::Model, ::Nothing, vars) = vars
 
 # Callable structs for optimvars_nls
 struct NLSResidual{P, L, U, NT, TR}
@@ -690,11 +688,17 @@ end
     syncvars!(problem::Model, res!::Union{NLSResidual, NLSResJac}, x_opt) -> Model
 
 Write the solution `x_opt` found for the evaluators returned by [`optimvars_nls`](@ref) back into `problem.variables`.
-The evaluators copy every point they are evaluated at into the model, so after an optimizer returns the model holds the
-last point *evaluated*, which may be a rejected trial. This sets the solution.
+With a subset or a single variable unfixed, the evaluators copy every point they evaluate into the unfixed slots of the model,
+so after an optimizer returns the model may hold the last point *evaluated*, which may be a rejected trial. With every variable
+unfixed they evaluate the point given and copy nothing, so the model changes only when the optimizer updates `x0` in place.
+Either way this sets the solution.
 """
 function OptimizationVariableInterface.syncvars!(problem::Model, fn::Union{NLSResidual, NLSResJac}, x)
-    sync_tall_vars!(problem, fn.unfixed_inds, x)
+    if isnothing(fn.unfixed_inds)
+        x === problem.variables || copyto!(problem.variables, x)
+    else
+        sync_tall_vars!(problem, fn.unfixed_inds, x)
+    end
     return problem
 end
 

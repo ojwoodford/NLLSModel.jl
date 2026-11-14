@@ -21,7 +21,6 @@ import OptimizationVariableInterface: nvars, update, update!, copyvars
                 x1 = update!(deepcopy(x0), x0, 0.05 .* ones(n))
                 c1 = resjac!(r, J, x1)
                 @test c1 ≈ f(x1)
-                @test c1 ≈ NLLSModel.cost(model)
                 @test abs(c1 - 0.5 * sum(abs2, r)) > 1e-8 * c1
             end
         end
@@ -96,5 +95,73 @@ import OptimizationVariableInterface: nvars, update, update!, copyvars
                 @test all(isfinite, Jr)
             end
         end
+    end
+
+    # Z3: with every variable unfixed, x0 *is* model.variables. Evaluating at another point must not overwrite it.
+    staticmodel() = (rng = MersenneTwister(5); m = Model(SVector{2, Float64}, Tgt{SVector{2, Float64}});
+        foreach(k -> addvariable!(m, randn(rng, SVector{2, Float64})), 1:3);
+        foreach(k -> addcost!(m, Tgt(randn(rng, SVector{2, Float64}), k)), 1:3); m)
+    @testset "Z3: evaluating at another point leaves x0 alone, $name" for (name, make) in (
+            ("static blocks", staticmodel),
+            ("Vectors", () -> first(chainproblem(4, 3, 6))),
+            ("mixed, with a rotation", () -> posemodel()))
+        model = make()
+        _, res!, resjac!, x0, J = optimvars_nls(model; numthreads=static(1), matrix_type=:dense)
+        @test x0 === model.variables
+        snapshot = deepcopy(x0)
+        m, n = size(J)
+        y = update!(deepcopy(x0), x0, 0.1 .* ones(n))
+        @test y != x0
+        r = zeros(m)
+        resjac!(r, J, y)
+        @test x0 == snapshot
+        res!(r, y)
+        @test x0 == snapshot
+        # f has never written
+        optimvars_nls(model; numthreads=static(1))[1](y)
+        @test x0 == snapshot
+        # and the evaluation was at y: the residual matches a model built at y
+        other = deepcopy(model)
+        other.variables .= y
+        _, _, rj2, x2, J2 = optimvars_nls(other; numthreads=static(1), matrix_type=:dense)
+        r2 = zeros(m)
+        rj2(r2, J2, x2)
+        resjac!(r, J, y)
+        @test r == r2 && J == J2
+    end
+
+    @testset "Z3: evaluating at x0 itself works and copies nothing" begin
+        for model in (staticmodel(), first(chainproblem(4, 3, 6)))
+            f, res!, resjac!, x0, J = optimvars_nls(model; numthreads=static(1), matrix_type=:dense)
+            r = zeros(size(J, 1))
+            c = resjac!(r, J, x0)
+            @test c ≈ f(x0) && c ≈ NLLSModel.cost(model)
+            resjac!(r, J, x0); res!(r, x0)
+            # The evaluators do allocate (a few kB per call, independent of the variables); evaluating at x0 costs no more than
+            # anywhere else, i.e. there is no copy of the variables
+            y = update!(deepcopy(x0), x0, 0.1 .* ones(size(J, 2)))
+            resjac!(r, J, y)
+            @test (@allocated resjac!(r, J, x0)) <= (@allocated resjac!(r, J, y))
+            @test (@allocated res!(r, x0)) <= (@allocated res!(r, y))
+        end
+    end
+
+    @testset "Z3: a subset or a single variable is still merged into the model, $name" for (name, unfixed) in (("a list", [1, 3]), ("a mask", Bool[1, 0, 1, 1]), ("an index", 2), ("a type", Vector{Float64}))
+        model = posemodel()
+        _, res!, resjac!, x0, J = optimvars_nls(model; unfixed, numthreads=static(1), matrix_type=:dense)
+        @test x0 !== model.variables
+        fixed = [k for k in 1:4 if !(NLLSModel.convertunfixed(unfixed, model) isa Integer ? k == unfixed : NLLSModel.convertunfixed(unfixed, model)[k])]
+        before = deepcopy(model.variables)
+        x0c = deepcopy(x0)
+        y = update!(deepcopy(x0), x0, 0.1 .* ones(size(J, 2)))
+        r = zeros(size(J, 1))
+        resjac!(r, J, y)
+        @test x0 == x0c # The optimizer's vector is untouched
+        for k in fixed
+            @test model.variables[k] == before[k]
+        end
+        # the model holds y in the unfixed slots, so its cost is the cost at y
+        ctot = NLLSModel.cost(model)
+        @test ctot ≈ optimvars_nls(model; unfixed, numthreads=static(1))[1](y) rtol=1e-12
     end
 end
