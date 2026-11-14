@@ -33,7 +33,7 @@ struct NLSTallLayout
     is_dense::Bool
     linear_weights::Vector{Float64} # Precomputed sqrt(w) for linear kernels
     all_linear::Bool
-    work::Int                       # Estimated work (see costwork), compared with min_work_per_thread
+    work::Int                       # Tall-fill estimate, sum of m * (n + 1) (see `workestimates`), compared with min_work_per_thread
 end
 
 # Call `f(cost, k)` for every cost, with `k` its running index across all cost vectors. Recursing over the tuple of cost
@@ -295,7 +295,7 @@ function build_tall_layout(problem::Model, unfixed, matrix_type::Symbol, max_den
         sparse_p, col_heights,
         is_dense,
         linear_weights, all_linear,
-        Int(countcosts(costwork, problem.costs))
+        active_entries + M # sum over costs of m * n (the Jacobian entries) plus m (the residual)
     ), J_proto
 end
 
@@ -774,7 +774,7 @@ function tall_eval!(evalone::F, costvecs, layout, status, task_results, N_req::I
         check_tall_status!(status, clamped_tot, err_code, err_val, fname)
         return tot_cost
     end
-    N_chunks = min(N_req, layout.work ÷ min_work)
+    N_chunks = min_work <= 0 ? N_req : min(N_req, layout.work ÷ min_work) # a floor of 0 forces every thread
     for t in 1:N_chunks
         task_results[t] = TaskResult(0.0, 0, 0, 0.0)
     end
@@ -846,6 +846,12 @@ There is no robust mode: each cost's kernel decides how its rows enter, as on th
 
 So choosing first- or second-order treatment means choosing the kernel type. `resjac!(r, J, x)` returns the true cost
 `cost(model)` at `x`; this equals `½‖r‖²` only when [`islinear`](@ref)`(resjac!)` is true.
+
+`min_work_per_thread`: the residual and Jacobian fill is threaded only if its estimated work is at least twice this,
+and then on at most `work ÷ min_work_per_thread` threads. The unit is one entry of `r` or `J` written: per cost
+`m * (n + 1)`, with `m` the residual length and `n` the total dimension of the cost's unfixed variables, summed over all
+costs, computed once, here. The cost function `f` is threaded as `cost` is, on the residual length alone (the
+`min_work_cost` unit of [`optimvars`](@ref), at its default floor).
 """
 function optimvars_nls(
     problem::Model;
@@ -871,10 +877,10 @@ function optimvars_nls(
 
     if is_single
         x0 = problem.variables[unfixed_inds]
-        f = SingleVarCostFunc(problem, unfixed_inds, static(numthreads), 2 * min_work_per_thread)
+        f = SingleVarCostFunc(problem, unfixed_inds, static(numthreads))
     else
         x0 = unfixed_inds === nothing ? problem.variables : problem.variables[unfixed_inds]
-        f = MultiVarCostFunc(problem, unfixed_inds, static(numthreads), 2 * min_work_per_thread)
+        f = MultiVarCostFunc(problem, unfixed_inds, static(numthreads))
     end
 
     N_req = Int(dynamic(numthreads))

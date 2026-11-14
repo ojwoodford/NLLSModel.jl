@@ -105,7 +105,7 @@ end
             p
         end
         p1, p4 = build(), build()
-        @test NLLSModel.countcosts(NLLSModel.costwork, p1.costs) >= NLLSModel.MIN_WORK_FOR_THREADED_LINEARIZATION
+        @test NLLSModel.workestimates(p1, nothing).linearization >= NLLSModel.MIN_WORK_FOR_THREADED_LINEARIZATION
         f1, fdf1!, x1, H1 = optimvars(p1, nothing, static(1))
         f4, fdf4!, x4, H4 = optimvars(p4, nothing, static(4))
         @test fdf4!.plan isa NLLSModel.BlockThreadPlan
@@ -145,7 +145,7 @@ end
     # Tall path: work (not cost count) decides whether the evaluators thread, and the layout records it
     _, res1, _, x1, _ = optimvars_nls(p; numthreads=static(1))
     _, res4, _, x4, _ = optimvars_nls(p; numthreads=static(4), min_work_per_thread=10)
-    @test res4.layout.work == NLLSModel.countcosts(NLLSModel.costwork, p.costs)
+    @test res4.layout.work == NLLSModel.workestimates(p, nothing).tall
     r1 = zeros(res1.layout.M); r4 = zeros(res4.layout.M)
     @test res1(r1, x1) ≈ res4(r4, x4)
     @test r1 ≈ r4

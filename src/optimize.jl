@@ -17,12 +17,13 @@ struct SingleVarCostFunc{P, U, NT}
     problem::P
     unfixed::U
     numthreads::NT
-    min_work::Int # Estimated work below which the cost is evaluated on one thread
+    work::Int     # Cost-evaluation estimate (see `workestimates`), computed at setup
+    min_work::Int # Floor below which the cost is evaluated on one thread
 end
-SingleVarCostFunc(problem, unfixed, numthreads) = SingleVarCostFunc(problem, unfixed, numthreads, MIN_WORK_FOR_THREADED_COST)
+SingleVarCostFunc(problem, unfixed, numthreads, min_work::Integer=MIN_WORK_FOR_THREADED_COST) = SingleVarCostFunc(problem, unfixed, numthreads, costestimate(problem.costs), Int(min_work))
 @inline function (f::SingleVarCostFunc)(x)
     @inbounds f.problem.variables[f.unfixed] = x
-    return cost(f.problem.variables, f.problem.costs, f.numthreads, f.min_work)
+    return cost(f.problem.variables, f.problem.costs, f.numthreads, f.work >= f.min_work)
 end
 
 struct SingleVarCostGradHess{LS, P, U}
@@ -73,12 +74,13 @@ struct MultiVarCostFunc{P, U, NT}
     problem::P
     unfixed_inds::U
     numthreads::NT
-    min_work::Int # Estimated work below which the cost is evaluated on one thread
+    work::Int     # Cost-evaluation estimate (see `workestimates`), computed at setup
+    min_work::Int # Floor below which the cost is evaluated on one thread
 end
-MultiVarCostFunc(problem, unfixed_inds, numthreads) = MultiVarCostFunc(problem, unfixed_inds, numthreads, MIN_WORK_FOR_THREADED_COST)
+MultiVarCostFunc(problem, unfixed_inds, numthreads, min_work::Integer=MIN_WORK_FOR_THREADED_COST) = MultiVarCostFunc(problem, unfixed_inds, numthreads, costestimate(problem.costs), Int(min_work))
 @inline function (f::MultiVarCostFunc)(vars)
     full_vars = sync_unfixed_vars!(f.problem, f.unfixed_inds, vars)
-    return cost(full_vars, f.problem.costs, f.numthreads, f.min_work)
+    return cost(full_vars, f.problem.costs, f.numthreads, f.work >= f.min_work)
 end
 
 struct MultiVarDenseFDF{LS, P, U, PL}
@@ -179,7 +181,7 @@ function optimvars_dispatch(problem::Model, unfixed::Integer, numthreads::Static
     else
         ls = LinearSystem{UniVariateLSdynamic_x, UniVariateLSdynamic_ls}((unfixed, dynamic(varlen)), (dynamic(varlen),))
     end
-    ls_shared = sharedlinearsystem(ls, problem, numthreads, min_work)
+    ls_shared = sharedlinearsystem(ls, workestimates(problem, unfixed).linearization, numthreads, min_work)
     f = SingleVarCostFunc(problem, unfixed, numthreads, min_work_cost)
     fdf! = SingleVarCostGradHess(ls_shared, problem, unfixed)
     return (f, fdf!, x0, nothing)
@@ -258,7 +260,7 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
             ls_x = MultiVariateLSSchur_x(x_vec, blockindices, boffsets, structure, partition.unfixed_inds)
             ls_val = MultiVariateLSSchur_ls(H, b_vec)
             lsschur = LinearSystem(ls_x, ls_val)
-            ls_shared = sharedschurlinearsystem(lsschur, problem, numthreads, min_work)
+            ls_shared = sharedschurlinearsystem(lsschur, workestimates(problem, partition.unfixed_inds).linearization, numthreads, min_work)
             plan = ls_shared isa LinearSystemShared ? build_schur_thread_plan!(problem, blockindices, partition.nrblocks, partition.neblocks, dynamic(numthreads)) : nothing
 
             f = MultiVarCostFunc(problem, partition.unfixed_inds, numthreads, min_work_cost)
@@ -283,12 +285,12 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
     if len >= 40 && sparse_dense_decision(len, sparsity, blocksizes)
         bsm = SparseBlockLinearSystem{Float64}(TransposedPattern(sparsity), blocksizes, blocksizes)
         lssparse = MultiVariateLSsparse(bsm, blockindices, true)
-        plan = blockthreadplan(problem, blockindices, length(blocksizes), numthreads, min_work)
+        plan = blockthreadplan(problem, blockindices, length(blocksizes), numthreads, workestimates(problem, unfixed).linearization, min_work)
         fdf! = MultiVarSparseFDF(lssparse, problem, unfixed_sync, plan)
         return (f, fdf!, x0, lssparse.x.hessian)
     else
         lsdense = MultiVariateLSdense(blocksizes, blockindices)
-        plan = blockthreadplan(problem, blockindices, length(blocksizes), numthreads, min_work)
+        plan = blockthreadplan(problem, blockindices, length(blocksizes), numthreads, workestimates(problem, unfixed).linearization, min_work)
         fdf! = MultiVarDenseFDF(lsdense, problem, unfixed_sync, plan)
         return (f, fdf!, x0, nothing)
     end

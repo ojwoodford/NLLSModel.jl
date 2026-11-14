@@ -217,8 +217,13 @@ sync `x`.)
 - `numthreads`: Number of threads to use for parallel cost and derivative evaluation (`StaticInt` or `Integer`).
 - `reduction`: whether eliminable variables are eliminated (Schur complement). `:auto` (default) eliminates when the model has `iseliminable` variables and the structure fits, and falls back to no elimination otherwise; `:eliminate` eliminates or throws an `ArgumentError`; `:none` never eliminates. Any other value is an `ArgumentError`. The returned `H` is a `SchurBlockMatrix` exactly when elimination happens, and the optimizer eliminates exactly when it is handed one.
 - `reduced`: storage of the reduced system when elimination happens: `:auto` (default; chosen from the predicted fill of a Cholesky factor), `:dense` or `:sparse`. It is silently ignored (no error, no warning) when no elimination happens, that is with `reduction = :none`, or with `:auto` on a model that does not eliminate.
-- `min_work`: Linearization is threaded only if the problem's estimated work (see `costwork`: residual length times variables squared, summed over costs; one scalar residual of one variable is one unit) is at least this.
-- `min_work_cost`: The same floor for evaluating the cost alone, which is cheaper per unit of work and so needs more of it to pay for threading.
+- `min_work`: Linearization is threaded only if its estimated work is at least this. The unit is one number written in
+  forming the normal equations: per cost, `m * n * (n + 1)`, with `m` the residual length (1 for a general
+  [`AbstractCost`](@ref)) and `n` the total dimension of the cost's unfixed variables, summed over all costs.
+- `min_work_cost`: Evaluating the cost alone is threaded only if its estimated work is at least this. The unit is one
+  residual entry: per cost `m`, summed over all costs; it does not depend on the variables.
+
+Both estimates are computed once, here; the work of the residual functions themselves is not estimated.
 """
 optimvars
 

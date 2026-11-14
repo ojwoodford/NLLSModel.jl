@@ -211,13 +211,14 @@ function sharedlinearsystem(ls::LinearSystem{F, V}, ::StaticInt{N}) where {F, V,
     return LinearSystemShared{F, V, N}(ls.x, buffers, costs)
 end
 sharedlinearsystem(ls, n::Integer) = sharedlinearsystem(ls, static(n))
-sharedlinearsystem(ls, problem, ::StaticInt{1}, min_work=MIN_WORK_FOR_THREADED_LINEARIZATION) = ls
+sharedlinearsystem(ls, work::Integer, ::StaticInt{1}, min_work=MIN_WORK_FOR_THREADED_LINEARIZATION) = ls
 # Each extra thread needs a full copy of the linear system (a dense Hessian is O(n^2)). Cap the memory the extra copies
 # may use, reducing the number of threads that linearize rather than allocating without bound.
 const MAX_THREAD_COPY_BYTES = 2^30
 threadcopylimit(ls, nthreads::Integer, budget::Integer=MAX_THREAD_COPY_BYTES) = clamp(1 + budget ÷ max(1, Base.summarysize(ls.ls)), 1, nthreads)
-function sharedlinearsystem(ls, problem, numthreads::StaticInt, min_work=MIN_WORK_FOR_THREADED_LINEARIZATION)
-    countcosts(costwork, problem.costs) >= min_work || return ls
+# `work` is the linearization estimate of `workestimates`
+function sharedlinearsystem(ls, work::Integer, numthreads::StaticInt, min_work=MIN_WORK_FOR_THREADED_LINEARIZATION)
+    work >= min_work || return ls
     return sharedlinearsystem(ls, static(threadcopylimit(ls, dynamic(numthreads))))
 end
 

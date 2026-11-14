@@ -62,10 +62,11 @@ function build_block_thread_plan(problem::Model, blockindices::AbstractVector, n
     return BlockThreadPlan(collect(map(length, vecs)), ranges, primary, secondary, zeros(N))
 end
 
-# A plan if there is enough work to linearize on several threads, otherwise `nothing`
-function blockthreadplan(problem::Model, blockindices, nblocks, numthreads::StaticInt, min_work=MIN_WORK_FOR_THREADED_LINEARIZATION)
+# A plan if there is enough work to linearize on several threads (`work`, the linearization estimate of `workestimates`),
+# otherwise `nothing`
+function blockthreadplan(problem::Model, blockindices, nblocks, numthreads::StaticInt, work::Integer, min_work=MIN_WORK_FOR_THREADED_LINEARIZATION)
     N = dynamic(numthreads)
-    (N > 1 && countcosts(costwork, problem.costs) >= min_work) || return nothing
+    (N > 1 && work >= min_work) || return nothing
     return build_block_thread_plan(problem, blockindices, nblocks, N)
 end
 

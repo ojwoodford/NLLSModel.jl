@@ -69,7 +69,7 @@ end
         Random.seed!(5)
         p_serial = optlandmark_problem(30, 120)
         p_threads = deepcopy(p_serial)
-        @test NLLSModel.countcosts(NLLSModel.costwork, p_serial.costs) >= NLLSModel.MIN_WORK_FOR_THREADED_LINEARIZATION
+        @test NLLSModel.workestimates(p_serial, nothing).linearization >= NLLSModel.MIN_WORK_FOR_THREADED_LINEARIZATION
         f1, fdf1!, x1, H1 = optimvars(p_serial, nothing, static(1); reduction=:eliminate, reduced)
         f4, fdf4!, x4, H4 = optimvars(p_threads, nothing, static(4); reduction=:eliminate, reduced)
         @test fdf4!.linsystem isa NLLSModel.LinearSystemShared
