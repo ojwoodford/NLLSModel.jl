@@ -1,3 +1,11 @@
+"""
+    NLLSModel
+
+Nonlinear least-squares (and general smooth cost) problems as a bipartite graph of variables and costs: build a
+[`Model`](@ref), and evaluate its cost, gradient and Gauss-Newton Hessian ([`optimvars`](@ref)) or its residual and
+Jacobian ([`optimvars_nls`](@ref)) for an optimizer. With SecondOrderOptimization loaded, `optimize!(model, options)`
+solves it directly.
+"""
 module NLLSModel
 
 using BlockLinearSystems
@@ -24,9 +32,8 @@ import SIRBSDispatch: sirbsdispatch
 # Problem construction & evaluation
 export Model, NLPLSModel, NLLSNLSModel
 export addvariable!, addcost!, addresidual!, subproblem, subproblem!
-export cost, optimvars, optimvars_nls, flat_optimvars_nls, nls_callbacks, syncvars!, nresiduals
-export isadditive, islinearkernel, islinear, clamped_count, reset_clamped_count!
-export partition_schur_problem
+export cost, optimvars, optimvars_nls, flat_optimvars_nls, syncvars!
+export islinearkernel, islinear
 
 # Cost and residual types & definition interface
 export AbstractCost, AbstractResidual, AbstractAdaptiveResidual

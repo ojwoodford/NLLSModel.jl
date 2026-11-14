@@ -1,5 +1,9 @@
 # API Reference
 
+```@docs
+NLLSModel
+```
+
 ## Problem Representation
 
 ```@docs
@@ -11,11 +15,10 @@ subproblem
 subproblem!
 cost
 optimvars
-partition_schur_problem
 optimvars_nls
-nls_callbacks
 flat_optimvars_nls
 islinear
+islinearkernel
 ```
 
 ## Solving a Model
@@ -48,14 +51,6 @@ SimpleError4
 generatemeasurement
 ```
 
-## Static-Size Limits
-
-```@docs
-NLLSModel.MAX_STATIC_VAR
-NLLSModel.MAX_STATIC_JAC
-NLLSModel.MAX_STATIC_ROWS
-```
-
 ## Robust Cost Functions
 
 ```@docs
@@ -78,5 +73,6 @@ ContaminatedGaussian
 
 ```@docs
 NLPLSModel
+NLLSNLSModel
 syncvars!
 ```

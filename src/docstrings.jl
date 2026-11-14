@@ -427,6 +427,47 @@ nlp = NLPLSModel(problem)
 NLPLSModel
 
 """
+    NLLSNLSModel(problem::Model; unfixed=nothing, numthreads=static(1), min_work_per_thread=5000, matrix_type=:auto, max_dense_bytes=32*1024^2, name="NLLSNLSModel")
+
+Wraps a [`Model`](@ref) as an `NLPModels.AbstractNLSModel{Float64, Vector{Float64}}`, which exposes the residual vector and
+its Jacobian, for nonlinear least-squares solvers that work on them directly, such as `JSOSolvers.trunk` and
+`JSOSolvers.tron`.
+
+Requires loading `NLPModels`:
+```julia
+using NLLSModel, NLPModels
+nls = NLLSNLSModel(problem)
+```
+
+Every cost must be a non-adaptive [`AbstractResidual`](@ref) with a linear kernel ([`islinearkernel`](@ref)), so that the
+cost is exactly `½‖r‖²`, which these solvers derive from `r`; otherwise it throws an `ArgumentError`. Every unfixed
+variable must be a `Float64`, a `StaticVector{N, Float64}` or a `Vector{Float64}` (as for [`flat_optimvars_nls`](@ref)).
+
+# Keyword Arguments
+- `unfixed = nothing`: Boolean mask, integer, or vector indicating which variables are unfixed (optimized).
+- `numthreads = static(1)`, `min_work_per_thread = 5000`: threading of the residual and Jacobian evaluation, as for
+  [`optimvars_nls`](@ref).
+- `matrix_type = :auto`, `max_dense_bytes = 32 * 1024^2`: the Jacobian storage, as for [`optimvars_nls`](@ref). The
+  default limit is lower than there (32 MB), to keep the solver's coordinate arrays below about 96 MB.
+- `name = "NLLSNLSModel"`: Name string assigned to the model metadata.
+
+The solution is transferred back to `problem.variables` with [`syncvars!`](@ref).
+"""
+NLLSNLSModel
+
+"""
+    islinearkernel(kernel::AbstractRobustifier) -> Bool
+
+`true` when `kernel` leaves a residual's cost quadratic, so the cost is `½‖r‖²` scaled by a non-negative constant: for
+[`NoRobust`](@ref), and for [`Scaled`](@ref) of a linear kernel with a finite, non-negative height. `false` for every
+other kernel, including user-defined ones. A query, not an extension point: a custom kernel is treated as robust.
+
+The tall evaluators of [`optimvars_nls`](@ref) take an unweighted (or constant-scaled) row for a cost with a linear
+kernel, and [`islinear`](@ref) reports whether every cost has one.
+"""
+islinearkernel
+
+"""
     syncvars!(nlp, x::AbstractVector) -> Model
     syncvars!(prob::Model, nlp, x::AbstractVector) -> Model
 

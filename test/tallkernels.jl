@@ -73,9 +73,9 @@ import OptimizationVariableInterface
             @test islinear(resjac!) == expected
             @test islinear(flat_optimvars_nls(model)) == expected
             if expected
-                @test nls_callbacks(model) isa NamedTuple
+                @test NLLSModel.nls_callbacks(model) isa NamedTuple
             else
-                @test_throws ArgumentError nls_callbacks(model)
+                @test_throws ArgumentError NLLSModel.nls_callbacks(model)
             end
         end
     end

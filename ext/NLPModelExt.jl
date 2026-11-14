@@ -301,13 +301,7 @@ mutable struct NLLSModelNLS{P, L, RES, RESJAC, J} <: AbstractNLSModel{Float64, V
     jac_valid::Bool
 end
 
-"""
-    NLLSNLSModel(problem::Model; unfixed=nothing, numthreads=static(1), min_work_per_thread=5000, matrix_type=:auto, max_dense_bytes=32*1024^2, name="NLLSNLSModel")
-
-Constructs an `NLLSModelNLS <: AbstractNLSModel{Float64, Vector{Float64}}` adapter for `problem`.
-Requires all costs to be non-adaptive `AbstractResidual`s with linear robust kernels (`islinearkernel`).
-Defaults `max_dense_bytes` to 32 MB (`32 * 1024^2`) to prevent solver-side coordinate arrays from exceeding ~96 MB.
-"""
+# Documented in src/docstrings.jl, which the docs build sees without loading NLPModels
 function NLLSModel.NLLSNLSModel(
     problem::Model;
     unfixed = nothing,

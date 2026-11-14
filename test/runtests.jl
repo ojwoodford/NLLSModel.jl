@@ -3,6 +3,7 @@ using OptimizationVariableInterface: nvars, update, update!
 
 @testset "NLLSModel Tests" begin
     include("imports.jl")
+    include("publicapi.jl")
     include("CostStruct.jl")
     include("robust.jl")
     include("dynamicvars.jl")

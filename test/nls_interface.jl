@@ -316,14 +316,14 @@ end
         r = zeros(1)
         J = copy(flat_clamp.J_proto)
 
-        @test clamped_count(flat_clamp) == 0
+        @test NLLSModel.clamped_count(flat_clamp) == 0
         c = flat_clamp.resjac!(r, J, flat_clamp.x0)
-        @test clamped_count(flat_clamp) == 1
+        @test NLLSModel.clamped_count(flat_clamp) == 1
         @test r[1] == 0.0
         @test J[1, 1] == 0.0
 
-        reset_clamped_count!(flat_clamp)
-        @test clamped_count(flat_clamp) == 0
+        NLLSModel.reset_clamped_count!(flat_clamp)
+        @test NLLSModel.clamped_count(flat_clamp) == 0
 
         # 2. Domain error: negative derivative beyond tolerance
         prob_domain = Model(Float64, RobustWrapper{ScalarVarIndRes, MockClampingKernel})
@@ -391,7 +391,7 @@ end
         @test_throws MethodError flat_optimvars_nls(prob_huber; robust=:none)
         @test !islinear(optimvars_nls(prob_huber)[3])
         @test !islinear(flat_optimvars_nls(prob_huber))
-        @test_throws ArgumentError nls_callbacks(prob_huber)
+        @test_throws ArgumentError NLLSModel.nls_callbacks(prob_huber)
         @test_throws ArgumentError NLLSNLSModel(prob_huber)
         # islinear: all linear, mixed, all robust
         prob_lin = Model(Float64, RobustWrapper{ScalarVarIndRes, Scaled{Float64, NoRobust}})
@@ -403,19 +403,19 @@ end
         addcost!(prob_mix, RobustWrapper(ScalarVarIndRes(), Scaled(NoRobust(), 2.0)))
         addcost!(prob_mix, RobustWrapper(ScalarVarIndRes(), HuberKernel(1.0)))
         @test !islinear(optimvars_nls(prob_mix)[3])
-        @test_throws ArgumentError nls_callbacks(prob_mix)
+        @test_throws ArgumentError NLLSModel.nls_callbacks(prob_mix)
         @test_throws ArgumentError NLLSNLSModel(prob_mix)
-        @test nls_callbacks(prob_lin) isa NamedTuple
+        @test NLLSModel.nls_callbacks(prob_lin) isa NamedTuple
         @test NLLSNLSModel(prob_lin) isa AbstractNLSModel
 
         # 2. Scaled(NoRobust(), -1.0) throws
         prob_neg = Model(Float64, RobustWrapper{ScalarVarIndRes, Scaled{Float64, NoRobust}})
         addvariable!(prob_neg, 3.0)
         addcost!(prob_neg, RobustWrapper(ScalarVarIndRes(), Scaled(NoRobust(), -1.0)))
-        @test_throws ArgumentError nls_callbacks(prob_neg)
+        @test_throws ArgumentError NLLSModel.nls_callbacks(prob_neg)
 
         # 3. Non-additive variable type throws
-        @test !isadditive(ZeroToInfScalar{Float64})
+        @test !NLLSModel.isadditive(ZeroToInfScalar{Float64})
         @test_throws ArgumentError NLLSModel.check_additive_variable(ZeroToInfScalar(1.0))
 
         # 4. Dense J with NaNs has off-structure entries zeroed
@@ -510,7 +510,7 @@ end
     addcost!(prob_dense, TestRosenbrock1())
     addcost!(prob_dense, TestRosenbrock2())
 
-    cb = nls_callbacks(prob_dense)
+    cb = NLLSModel.nls_callbacks(prob_dense)
     @test cb.nequ == 2
     @test cb.nvar == 2
 
@@ -541,7 +541,7 @@ end
         addcost!(prob_sp, RobustWrapper(TestPairDiff(i, i + 1, 1.0), Scaled(NoRobust(), 2.0)))
     end
 
-    cb_sp = nls_callbacks(prob_sp; matrix_type=:sparse)
+    cb_sp = NLLSModel.nls_callbacks(prob_sp; matrix_type=:sparse)
     @test cb_sp.J0 isa SparseMatrixCSC
 
     lsp_sp = LeastSquaresOptim.LeastSquaresProblem(

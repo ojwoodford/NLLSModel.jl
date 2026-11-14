@@ -892,7 +892,8 @@ end
 
 Constructs a flat Euclidean vector wrapper around `optimvars_nls`.
 Returns a NamedTuple `(; f, res!, resjac!, jac!, x0, J_proto, layout, status)`.
-Requires all unfixed variables to satisfy the `isadditive` trait.
+Requires every unfixed variable to be a `Float64`, a `StaticVector{N, Float64}` or a `Vector{Float64}`, so that `update` is
+addition of the flat step; any other variable type is an `ArgumentError`.
 """
 function flat_optimvars_nls(
     problem::Model;
