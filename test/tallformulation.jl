@@ -9,6 +9,39 @@ import OptimizationVariableInterface: nvars, update, update!, copyvars
 const TallExt = Base.get_extension(NLLSModel, :SecondOrderOptimizationExt)
 const TallOptions = OptimizationOptions(iterator=:levenbergmarquardt, maxiters=200)
 
+# Records whether any residual was evaluated off the calling thread, to see whether an evaluation was threaded
+const SPY_CALLER = Ref(0)
+const SPY_OFFTHREAD = Threads.Atomic{Int}(0)
+struct SpyRes <: NLLSModel.AbstractResidual
+    t::Float64
+end
+NLLSModel.ndeps(::SpyRes) = static(1)
+NLLSModel.nres(::SpyRes) = static(1)
+NLLSModel.varindices(::SpyRes) = 1
+NLLSModel.getvars(::SpyRes, vars::AbstractVector) = (vars[1]::Float64,)
+function NLLSModel.computeresidual(r::SpyRes, x)
+    Threads.threadid() == SPY_CALLER[] || Threads.atomic_add!(SPY_OFFTHREAD, 1)
+    return SVector(x - r.t)
+end
+Base.eltype(::SpyRes) = Float64
+function spymodel(ncosts, nvars=1)
+    model = Model(Float64, SpyRes)
+    for _ in 1:nvars
+        addvariable!(model, 0.0)
+    end
+    for k in 1:ncosts
+        addcost!(model, SpyRes(sin(k)))
+    end
+    return model
+end
+# Whether `fun()` evaluated a residual off the calling thread
+function offthread(fun)
+    SPY_CALLER[] = Threads.threadid()
+    SPY_OFFTHREAD[] = 0
+    fun()
+    return SPY_OFFTHREAD[] > 0
+end
+
 # Compare the tall solve with the normal equations: same final cost (the gradient at an accurate minimum is rounding noise, so it
 # is not compared), and the variables to `atol`. `cost0` is the cost at the start, to give the tolerance for zero-residual problems.
 function sameoptimum(model, options=TallOptions; atol=1e-5, kwargs...)
@@ -182,9 +215,42 @@ end
         @test optimize!(posemodel(), TallOptions; reduction=:none, numthreads=static(1)) isa OptimizationResult
     end
 
+    @testset "keywords: min_work_cost, the floor of the cost function (A2)" begin
+        @testset "$(nvars) variable(s)" for nvars in (1, 2)
+            model = spymodel(400, nvars)
+            x = nvars == 1 ? 0.3 : [0.3, 0.0]
+            f0 = optimvars_nls(model; numthreads=static(4), min_work_cost=0)[1]
+            fbig = optimvars_nls(model; numthreads=static(4), min_work_cost=10^9)[1]
+            @test f0 isa (nvars == 1 ? NLLSModel.SingleVarCostFunc : NLLSModel.MultiVarCostFunc)
+            @test f0.work >= f0.min_work == 0 # Threaded
+            @test fbig.work < fbig.min_work   # Not
+            @test optimvars_nls(model)[1].min_work == NLLSModel.MIN_WORK_FOR_THREADED_COST # Default unchanged
+            @test f0(x) ≈ fbig(x) rtol=1e-13
+            flat0 = flat_optimvars_nls(model; numthreads=static(4), min_work_cost=0)
+            flatbig = flat_optimvars_nls(model; numthreads=static(4), min_work_cost=10^9)
+            @test flat0.f(flat0.x0) ≈ flatbig.f(flatbig.x0) rtol=1e-13
+            if Threads.nthreads() > 1
+                @test offthread(() -> f0(x)) && !offthread(() -> fbig(x))
+                @test offthread(() -> flat0.f(flat0.x0)) && !offthread(() -> flatbig.f(flatbig.x0))
+            end
+        end
+        # nls_callbacks (internal) passes it on too
+        cb0 = NLLSModel.nls_callbacks(spymodel(400); numthreads=static(4), min_work_cost=0)
+        cbbig = NLLSModel.nls_callbacks(spymodel(400); numthreads=static(4), min_work_cost=10^9)
+        @test cb0.f([0.3]) ≈ cbbig.f([0.3]) rtol=1e-13
+        Threads.nthreads() > 1 && @test offthread(() -> cb0.f([0.3])) && !offthread(() -> cbbig.f([0.3]))
+        # optimize!: the residual and Jacobian fill held serial, so only the cost function can thread
+        model = spymodel(400)
+        solve(min_work_cost) = optimize(model, TallOptions; formulation=:tall, numthreads=static(4), min_work_per_thread=10^9, min_work_cost)
+        @test NLLSModel.cost(solve(0)[1]) ≈ NLLSModel.cost(solve(10^9)[1]) rtol=1e-10
+        if Threads.nthreads() > 1
+            @test offthread(() -> solve(0)) && !offthread(() -> solve(10^9))
+        end
+    end
+
     @testset "keywords: ignored by :tall are accepted silently" begin
         model = curvefit()
-        @test_logs optimize!(deepcopy(model), TallOptions; formulation=:tall, numthreads=static(1), reduced=:sparse, min_work=1, min_work_cost=1)
+        @test_logs optimize!(deepcopy(model), TallOptions; formulation=:tall, numthreads=static(1), reduced=:sparse, min_work=1)
         @test_logs optimize!(deepcopy(model), TallOptions; formulation=:tall, numthreads=static(1), reduced=:dense)
     end
 

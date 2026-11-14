@@ -16,7 +16,7 @@ end
 (w::TallResJac)(r, J, x) = w.resjac!(r, J, x; prezeroed=true)
 
 # The tall formulation: the residual vector and a dense Jacobian, solved through QR of the Jacobian.
-function optimize_tall!(model::Model, options; unfixed, numthreads, callback, workspace, reduction, min_work_per_thread, max_dense_bytes)
+function optimize_tall!(model::Model, options; unfixed, numthreads, callback, workspace, reduction, min_work_per_thread, min_work_cost, max_dense_bytes)
     reduction in (:auto, :none, :eliminate) || throw(ArgumentError("Unknown reduction $(repr(reduction)); expected :auto, :none or :eliminate."))
     reduction === :eliminate && throw(ArgumentError("formulation = :tall does not support reduction = :eliminate (elimination of variables on the Jacobian path is not implemented); use :auto or :none."))
 
@@ -29,7 +29,7 @@ function optimize_tall!(model::Model, options; unfixed, numthreads, callback, wo
     end
 
     f, _, resjac!, x0, J = try
-        optimvars_nls(model; unfixed, numthreads, min_work_per_thread=Int(min_work_per_thread), matrix_type=:dense, max_dense_bytes=Int(max_dense_bytes))
+        optimvars_nls(model; unfixed, numthreads, min_work_per_thread=Int(min_work_per_thread), min_work_cost, matrix_type=:dense, max_dense_bytes=Int(max_dense_bytes))
     catch err
         err isa ArgumentError ? throw(ArgumentError("formulation = :tall: " * err.msg)) : rethrow()
     end
@@ -72,13 +72,15 @@ other value is an `ArgumentError`.
 |:---|:---|:---|
 | `unfixed`, `numthreads`, `callback`, `workspace` | used | used |
 | `reduction` | `:auto`, `:none`, `:eliminate` | `:auto` or `:none`; `:eliminate` is an `ArgumentError` |
-| `reduced`, `min_work`, `min_work_cost` | used | ignored |
+| `min_work_cost` | used | used |
+| `reduced`, `min_work` | used | ignored |
 | `min_work_per_thread`, `max_dense_bytes` | ignored | used |
 
 - `unfixed`: which variables to optimize: an index, a type, a Boolean mask or a list of indices (default: all). The others are left untouched.
 - `numthreads`: threading of the evaluation.
 - `callback`, `workspace`: passed to the optimizer.
-- `reduction`, `reduced`, `min_work`, `min_work_cost`: layout and threading of the normal-equations system, as for [`optimvars`](@ref).
+- `reduction`, `reduced`, `min_work`: layout and threading of the normal-equations system, as for [`optimvars`](@ref).
+- `min_work_cost`: threading of the cost evaluation, as for [`optimvars`](@ref) and [`optimvars_nls`](@ref).
 - `min_work_per_thread`, `max_dense_bytes`: threading and the size limit of the dense Jacobian, as for [`optimvars_nls`](@ref).
 """
 function SecondOrderOptimization.optimize!(model::Model, options::OptimizationOptions=OptimizationOptions();
@@ -88,7 +90,7 @@ function SecondOrderOptimization.optimize!(model::Model, options::OptimizationOp
         min_work::Integer=MIN_WORK_FOR_THREADED_LINEARIZATION, min_work_cost::Integer=MIN_WORK_FOR_THREADED_COST,
         min_work_per_thread::Integer=MIN_WORK_PER_THREAD, max_dense_bytes::Integer=256 * 1024^2)
     formulation in (:normal, :tall) || throw(ArgumentError("Unknown formulation $(repr(formulation)); expected :normal or :tall."))
-    formulation === :tall && return optimize_tall!(model, options; unfixed, numthreads, callback, workspace, reduction, min_work_per_thread, max_dense_bytes)
+    formulation === :tall && return optimize_tall!(model, options; unfixed, numthreads, callback, workspace, reduction, min_work_per_thread, min_work_cost, max_dense_bytes)
     f, fdf!, x0, H = optimvars(model, unfixed, numthreads; reduction, reduced, min_work, min_work_cost)
     obj = HessianObjective(f, fdf!; H)
     if ismutablevar(x0)

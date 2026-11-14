@@ -459,7 +459,7 @@ variable must be a `Float64`, a `StaticVector{N, Float64}` or a `Vector{Float64}
 # Keyword Arguments
 - `unfixed = nothing`: Boolean mask, integer, or vector indicating which variables are unfixed (optimized).
 - `numthreads = static(1)`, `min_work_per_thread = $MIN_WORK_PER_THREAD`: threading of the residual and Jacobian evaluation, as for
-  [`optimvars_nls`](@ref).
+  [`optimvars_nls`](@ref). The cost is taken from the residual, so the cost function's floor `min_work_cost` does not apply.
 - `matrix_type = :auto`, `max_dense_bytes = 32 * 1024^2`: the Jacobian storage, as for [`optimvars_nls`](@ref). The
   default limit is lower than there (32 MB), to keep the solver's coordinate arrays below about 96 MB.
 - `name = "NLLSNLSModel"`: Name string assigned to the model metadata.
