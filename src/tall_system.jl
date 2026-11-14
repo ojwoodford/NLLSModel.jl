@@ -630,7 +630,11 @@ function eval_single_resjac!(r, J, vars, cost, k::Int, layout::NLSTallLayout, st
     return c_ret, clamped, err, val
 end
 
-# Check caller-supplied J matrix
+# Check caller-supplied J matrix. With `prezeroed = false` (the default) a dense `J` is filled with zeros first, so it may hold
+# anything. With `prezeroed = true` it is not touched here: the structural zeros of `J` are taken to be in place already. That is
+# valid for a `J` that started as zeros (`optimvars_nls` returns such a prototype) and has only ever been written by an evaluator
+# of this model, because every call writes every entry that can be non-zero (a cost's whole block, with explicit zeros for a zero
+# weight and NaN for a non-finite value), and no other entry.
 function check_caller_jacobian!(J, layout::NLSTallLayout; prezeroed::Bool=false)
     if size(J) != (layout.M, layout.N)
         throw(DimensionMismatch("Jacobian matrix size $(size(J)) does not match expected size ($(layout.M), $(layout.N))"))
@@ -808,6 +812,8 @@ function (res!::NLSResidual)(r::AbstractVector{Float64}, vars)
         values(problem.costs), layout, status, res!.task_results, Int(dynamic(numthreads)), min_work, "res!")
 end
 
+# `prezeroed = true` says the structural zeros of the dense `J` are already in place (see `check_caller_jacobian!`): the optimizer
+# hands over a `J` that started as zeros and that only this evaluator writes. The default fills `J` with zeros first.
 function (resjac!::NLSResJac)(r::AbstractVector{Float64}, J, vars; prezeroed::Bool=false)
     if length(r) != resjac!.layout.M
         throw(DimensionMismatch("Residual vector length $(length(r)) does not match expected $(resjac!.layout.M)"))

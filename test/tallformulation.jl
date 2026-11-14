@@ -100,7 +100,7 @@ end
         # Without it the model would be left on the last point evaluated: run the optimizer on the evaluators directly
         m = posemodel()
         f, _, resjac!, x0, J = tlnls(m; unfixed=[1, 3], numthreads=static(1), matrix_type=:dense)
-        obj = JacobianObjective(f, TallExt.PrezeroedResJac(resjac!), J)
+        obj = JacobianObjective(f, TallExt.TallResJac(resjac!), J)
         result = SecondOrderOptimization.optimize!(x0, obj, TallOptions)
         resjac!(zeros(size(J, 1)), J, update!(deepcopy(x0), x0, fill(0.3, 4))) # A rejected trial, the last thing evaluated
         @test !(NLLSModel.cost(m) ≈ result.bestcost)
@@ -159,7 +159,7 @@ end
         # workspace: built for the same objective and reused
         m = deepcopy(model)
         f, _, resjac!, x0, J = tlnls(m; numthreads=static(1), matrix_type=:dense)
-        obj = JacobianObjective(f, TallExt.PrezeroedResJac(resjac!), J)
+        obj = JacobianObjective(f, TallExt.TallResJac(resjac!), J)
         ws = OptimizationWorkspace(x0, obj, TallOptions)
         r1 = optimize!(deepcopy(model), TallOptions; formulation=:tall, numthreads=static(1), workspace=ws)
         r2 = optimize!(deepcopy(model), TallOptions; formulation=:tall, numthreads=static(1), workspace=ws)
@@ -329,13 +329,14 @@ end
     @testset "the optimizer's own types satisfy the evaluator (T3)" begin
         model = posemodel()
         f, _, resjac!, x0, J = tlnls(model; numthreads=static(1), matrix_type=:dense)
-        w = TallExt.PrezeroedResJac(resjac!)
+        w = TallExt.TallResJac(resjac!)
         m = size(J, 1)
         @test J isa Matrix{Float64}
         r = zeros(m) # The optimizer's own buffers: a Vector{Float64} and a Matrix{Float64}
         Jb = zeros(m, size(J, 2))
         c = w(r, Jb, x0)
-        # The wrapper does not zero, as the optimizer has already: garbage outside the Jacobian's structure is left alone
+        # The wrapper does not fill J first (prezeroed = true: the structural zeros are in place): garbage outside the Jacobian's
+        # structure is left alone
         Jg1, Jg2 = fill(1.0, size(Jb)), fill(2.0, size(Jb))
         @test w(zeros(m), Jg1, x0) == c
         w(zeros(m), Jg2, x0)
@@ -347,7 +348,7 @@ end
         Jz = fill(1.0, size(Jb))
         @test resjac!(zeros(m), Jz, x0) == c
         @test Jz == Jb
-        @test (@inferred TallExt.PrezeroedResJac{typeof(resjac!)}(resjac!)) isa TallExt.PrezeroedResJac
+        @test (@inferred TallExt.TallResJac{typeof(resjac!)}(resjac!)) isa TallExt.TallResJac
         @test isconcretetype(typeof(w))
     end
 end

@@ -6,12 +6,14 @@ using OptimizationVariableInterface
 using Static
 import NLLSModel: MIN_WORK_FOR_THREADED_LINEARIZATION, MIN_WORK_FOR_THREADED_COST
 
-# Hands `resjac!` to the optimizer. The optimizer zeroes `r` and `J` before every call, so the evaluator need not.
+# Hands `resjac!` to the optimizer with `prezeroed = true`: the structural zeros of `J` are already in place (the optimizer
+# allocates `J` as zeros and, from SecondOrderOptimization's Z1, neither re-zeroes it nor writes anything but this evaluator's
+# entries), and the evaluator writes every entry that can be non-zero on every call, so it need not fill `J` first.
 # A struct rather than a closure, so the objective's type is concrete.
-struct PrezeroedResJac{RJ}
+struct TallResJac{RJ}
     resjac!::RJ
 end
-(w::PrezeroedResJac)(r, J, x) = w.resjac!(r, J, x; prezeroed=true)
+(w::TallResJac)(r, J, x) = w.resjac!(r, J, x; prezeroed=true)
 
 # The tall formulation: the residual vector and a dense Jacobian, solved through QR of the Jacobian.
 function optimize_tall!(model::Model, options; unfixed, numthreads, callback, workspace, reduction, min_work_per_thread, max_dense_bytes)
@@ -31,7 +33,7 @@ function optimize_tall!(model::Model, options; unfixed, numthreads, callback, wo
     catch err
         err isa ArgumentError ? throw(ArgumentError("formulation = :tall: " * err.msg)) : rethrow()
     end
-    obj = JacobianObjective(f, PrezeroedResJac(resjac!), J)
+    obj = JacobianObjective(f, TallResJac(resjac!), J)
     if ismutablevar(x0)
         result = SecondOrderOptimization.optimize!(x0, obj, options; callback, workspace)
         syncvars!(model, resjac!, x0)

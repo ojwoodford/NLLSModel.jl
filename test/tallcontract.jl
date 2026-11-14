@@ -164,4 +164,89 @@ import OptimizationVariableInterface: nvars, update, update!, copyvars
         ctot = NLLSModel.cost(model)
         @test ctot ≈ optimvars_nls(model; unfixed, numthreads=static(1))[1](y) rtol=1e-12
     end
+
+    # Z1: the optimizer hands resjac! a J that started as zeros and does not zero it again (prezeroed = true: the structural zeros
+    # are in place). Every call must therefore write every entry that can be non-zero.
+    cutoffmodel() = (rng = MersenneTwister(8); m = Model(Vector{Float64}, TlRob{TlExp, TlCutoff});
+        addvariable!(m, [2.0, 1.3, 0.5]);
+        foreach(t -> addcost!(m, TlRob(TlExp(t, 2.0 * exp(-1.3 * t) + 0.5 + 0.3 * randn(rng), 1), TlCutoff(0.01))), range(0, 3; length=20)); m)
+    nanmodel() = (m = Model(Vector{Float64}, Union{TlExp, TlNan}); addvariable!(m, [2.0, 1.3, 0.5]); addvariable!(m, [1.0, 0.0]);
+        foreach(t -> addcost!(m, TlExp(t, 2.0 * exp(-1.3 * t) + 0.5, 1)), range(0, 3; length=8)); addcost!(m, TlNan(2)); m)
+
+    # Points: x0 moved by steps of the given scales
+    function repeatedpoints(x0, n, steps)
+        xs = Any[x0]
+        for s in steps
+            push!(xs, update!(deepcopy(x0), x0, s .* ones(n)))
+        end
+        return xs
+    end
+
+    @testset "Z1: prezeroed = true into one J matches a fresh zeroed J at every point, $name" for (name, make, unfixed, steps) in (
+            ("costs on different variable subsets", () -> posemodel(), nothing, (0.2, -0.3, 0.0, 0.5, -0.1)),
+            ("a subset unfixed", () -> posemodel(), [1, 3], (0.2, -0.3, 0.0, 0.5, -0.1)),
+            ("a single variable", () -> posemodel(), 2, (0.2, -0.3, 0.0, 0.5, -0.1)),
+            ("robust, second order", () -> posemodel(huber=:second), nothing, (0.2, -0.3, 0.0, 0.5)),
+            ("a weight that is zero at one point and not at the next", () -> cutoffmodel(), nothing, (0.0, 0.4, 0.0, -0.3, 0.9, 0.0)),
+            ("non-finite, then finite, then non-finite", () -> nanmodel(), nothing, (0.0, 9.0, 0.0, 9.0, 9.0, 0.0)))
+        model = make()
+        _, _, resjac!, x0, J = optimvars_nls(model; unfixed, numthreads=static(1), matrix_type=:dense)
+        m, n = size(J)
+        @test all(iszero, J) # The prototype is zeros: the structural zeros are in place
+        if name == "non-finite, then finite, then non-finite"
+            # step 9 on variable 1's first entry makes TlNan non-finite; the others are steps of a different size
+            xs = [x0, update!(deepcopy(x0), x0, [zeros(3); 9.0; 0.0]), x0, update!(deepcopy(x0), x0, [zeros(3); 9.0; 0.0]),
+                  update!(deepcopy(x0), x0, [zeros(3); 9.0; 1.0]), update!(deepcopy(x0), x0, [0.1, 0, 0, 0, 0])]
+        else
+            xs = repeatedpoints(x0, n, steps)
+        end
+        Jreuse, rreuse = zeros(m, n), zeros(m)
+        nonfinite_seen, zero_weight_seen = false, false
+        for x in xs
+            fill!(rreuse, 7.0) # r is not zeroed either: every entry is written
+            c1 = resjac!(rreuse, Jreuse, x; prezeroed=true)
+            Jfresh, rfresh = zeros(m, n), zeros(m)
+            c2 = resjac!(rfresh, Jfresh, x)
+            @test isequal(Jreuse, Jfresh)
+            @test isequal(rreuse, rfresh)
+            @test isequal(c1, c2)
+            nonfinite_seen |= any(!isfinite, Jfresh)
+            zero_weight_seen |= any(iszero, rfresh) && any(!iszero, rfresh)
+        end
+        name == "non-finite, then finite, then non-finite" && @test nonfinite_seen
+        startswith(name, "a weight") && @test zero_weight_seen
+        # J was only ever written by the evaluator, and an evaluation at a finite point leaves nothing from a non-finite one
+        name == "non-finite, then finite, then non-finite" && @test all(isfinite, Jreuse) == all(isfinite, resjac!(zeros(m), zeros(m, n), xs[end]))
+    end
+
+    @testset "Z1: a weight that is zero at one point and non-zero at the next, and the reverse" begin
+        model = cutoffmodel()
+        _, _, resjac!, x0, J = optimvars_nls(model; numthreads=static(1), matrix_type=:dense)
+        m, n = size(J)
+        weights(x) = (r = zeros(m); Jt = zeros(m, n); resjac!(r, Jt, x); count(iszero, r))
+        # Two points with different sets of zero weights, both mixed
+        cands = [update!(deepcopy(x0), x0, d .* ones(3)) for d in -0.6:0.05:0.6]
+        counts = weights.(cands)
+        @test any(c -> 0 < c < m, counts) && length(unique(counts)) > 2
+        far = cands[findfirst(c -> 0 < c < m, counts)]
+        x0 = cands[findlast(c -> 0 < c < m && c != weights(far), counts)]
+        @test weights(x0) != weights(far)
+        Jr, r = zeros(m, n), zeros(m)
+        for x in (far, x0, far, x0)
+            resjac!(r, Jr, x; prezeroed=true)
+            Jf, rf = zeros(m, n), zeros(m)
+            resjac!(rf, Jf, x)
+            @test Jr == Jf && r == rf
+        end
+    end
+
+    @testset "Z1: optimvars_nls's dense prototype is all zeros, $name" for (name, make, unfixed) in (
+            ("curve fit", () -> curvefit(), nothing), ("mixed", () -> posemodel(), nothing), ("a subset", () -> posemodel(), [2, 4]),
+            ("static blocks", staticmodel, nothing))
+        _, _, _, _, J = optimvars_nls(make(); unfixed, matrix_type=:dense)
+        @test J isa Matrix{Float64}
+        @test all(iszero, J)
+        _, _, _, _, Ja = optimvars_nls(make(); unfixed) # :auto picks dense for these small models
+        Ja isa Matrix && @test all(iszero, Ja)
+    end
 end

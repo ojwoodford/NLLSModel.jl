@@ -153,3 +153,21 @@ tlnls(model; kwargs...) = optimvars_nls(model; kwargs...)
 costlist(model) = collect(Iterators.flatten(values(model.costs)))
 samevars(a, b; atol=1e-5) = all(isapprox(u, v; atol=atol) for (u, v) in zip(a.variables, b.variables))
 
+
+# A kernel whose weight is zero beyond a threshold and one below it: the weight of a cost changes with the point
+struct TlCutoff <: AbstractRobustifier
+    s0::Float64
+end
+NLLSModel.robustify(k::TlCutoff, s) = s <= k.s0 ? s : k.s0
+NLLSModel.robustifydcost(k::TlCutoff, s) = s <= k.s0 ? (s, 1.0, 0.0) : (k.s0, 0.0, 0.0)
+
+# A residual that is not finite for x[1] > 5, on Vector variable `i`
+struct TlNan <: NLLSModel.AbstractResidual
+    i::Int
+end
+NLLSModel.ndeps(::TlNan) = static(1)
+NLLSModel.nres(::TlNan) = static(2)
+NLLSModel.varindices(r::TlNan) = r.i
+NLLSModel.getvars(r::TlNan, vars::AbstractVector) = (vars[r.i]::Vector{Float64},)
+NLLSModel.computeresidual(::TlNan, x) = x[1] > 5 ? SVector(NaN, x[2]) : SVector(x[1] - 1, x[2] + x[1])
+Base.eltype(::TlNan) = Float64
