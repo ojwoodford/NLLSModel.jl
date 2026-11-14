@@ -43,12 +43,12 @@ mutable struct NLLSModelNLP{P, F, FDF, X0, H, VarsBuf, BSZ, HIdx, UInd} <: Abstr
 end
 
 function NLLSModel.NLPLSModel(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction::Symbol=:auto,
-        storage::Symbol=:auto, min_work::Integer=NLLSModel.MIN_WORK_FOR_THREADED_LINEARIZATION,
+        storage::Symbol=:auto, max_dense_bytes::Integer=NLLSModel.MAX_DENSE_BYTES, min_work::Integer=NLLSModel.MIN_WORK_FOR_THREADED_LINEARIZATION,
         min_work_cost::Integer=NLLSModel.MIN_WORK_FOR_THREADED_COST, name="NLPLSModel")
     # Never use the Schur path here: the model works on the full (non-reduced) system
     NLLSModel.check_reduction(reduction)
     reduction === :eliminate && throw(ArgumentError("NLPLSModel works on the full system: reduction = :eliminate is not supported; use :auto or :none."))
-    f, fdf!, x0, H_temp = optimvars(problem; unfixed, numthreads, reduction=:none, storage, min_work, min_work_cost)
+    f, fdf!, x0, H_temp = optimvars(problem; unfixed, numthreads, reduction=:none, storage, max_dense_bytes, min_work, min_work_cost)
     conv_unfixed = NLLSModel.convertunfixed(unfixed, problem)
 
     if conv_unfixed isa Integer

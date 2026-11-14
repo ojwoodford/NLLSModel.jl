@@ -1,4 +1,4 @@
-using NLLSModel, Test, Static, StaticArrays, LinearAlgebra
+using NLLSModel, Test, Static, StaticArrays, LinearAlgebra, SparseArrays
 using NLPModels, SecondOrderOptimization
 
 # One keyword set for every way of building or optimizing a model (K1). Needs spymodel and offthread from
@@ -6,17 +6,16 @@ using NLPModels, SecondOrderOptimization
 
 const KW_OPTIONS = OptimizationOptions(iterator=:levenbergmarquardt, maxiters=50)
 
-# Every keyword of the set, at a valid value, for each entry point
-const KW_NORMAL = (unfixed=nothing, numthreads=static(2), reduction=:none, storage=:auto, min_work=100, min_work_cost=100)
-const KW_TALL = (KW_NORMAL..., max_dense_bytes=10^8)
+# Every keyword of the set, at a valid value; each entry point takes them all
+const KW_SET = (unfixed=nothing, numthreads=static(2), reduction=:none, storage=:auto, max_dense_bytes=10^8, min_work=100, min_work_cost=100)
 const KW_ENTRY = (
-    ("optimvars", (m; kw...) -> optimvars(m; kw...), KW_NORMAL),
-    ("optimvars_nls", (m; kw...) -> optimvars_nls(m; kw...), KW_TALL),
-    ("flat_optimvars_nls", (m; kw...) -> flat_optimvars_nls(m; kw...), KW_TALL),
-    ("optimize!, normal", (m; kw...) -> optimize!(deepcopy(m), KW_OPTIONS; kw...), KW_TALL),
-    ("optimize!, tall", (m; kw...) -> optimize!(deepcopy(m), KW_OPTIONS; formulation=:tall, kw...), KW_TALL),
-    ("NLPLSModel", (m; kw...) -> NLPLSModel(m; kw...), KW_NORMAL),
-    ("NLLSNLSModel", (m; kw...) -> NLLSNLSModel(m; kw...), KW_TALL),
+    ("optimvars", (m; kw...) -> optimvars(m; kw...), KW_SET),
+    ("optimvars_nls", (m; kw...) -> optimvars_nls(m; kw...), KW_SET),
+    ("flat_optimvars_nls", (m; kw...) -> flat_optimvars_nls(m; kw...), KW_SET),
+    ("optimize!, normal", (m; kw...) -> optimize!(deepcopy(m), KW_OPTIONS; kw...), KW_SET),
+    ("optimize!, tall", (m; kw...) -> optimize!(deepcopy(m), KW_OPTIONS; formulation=:tall, kw...), KW_SET),
+    ("NLPLSModel", (m; kw...) -> NLPLSModel(m; kw...), KW_SET),
+    ("NLLSNLSModel", (m; kw...) -> NLLSNLSModel(m; kw...), KW_SET),
 )
 
 @testset "keywords.jl" begin
@@ -57,6 +56,19 @@ const KW_ENTRY = (
         # And from the front door, raised by optimvars_nls
         err = try optimize!(deepcopy(model), KW_OPTIONS; formulation=:tall, reduction=:eliminate); nothing catch e e end
         @test err isa ArgumentError && occursin("tall", err.msg) && occursin("not implemented", err.msg)
+    end
+
+    # max_dense_bytes on the tall path: :auto switches to a sparse Jacobian just above the cap, :dense throws there
+    @testset "max_dense_bytes on the tall path" begin
+        Jof(; kw...) = optimvars_nls(model; numthreads=static(1), kw...)[5] # 400×2, 6400 bytes dense
+        @test Jof(max_dense_bytes=6400) isa Matrix{Float64}
+        @test Jof(max_dense_bytes=6399) isa SparseMatrixCSC
+        @test Jof(storage=:dense, max_dense_bytes=6400) isa Matrix{Float64}
+        err = try Jof(storage=:dense, max_dense_bytes=6399); nothing catch e e end
+        @test err isa ArgumentError && occursin("400×2", err.msg)
+        @test Jof(storage=:sparse) isa SparseMatrixCSC
+        @test NLLSNLSModel(model; max_dense_bytes=6399).J_buf isa SparseMatrixCSC
+        @test_throws ArgumentError NLLSNLSModel(model; storage=:dense, max_dense_bytes=6399)
     end
 
     @testset "NLPLSModel works on the full system" begin

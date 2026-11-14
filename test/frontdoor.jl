@@ -298,22 +298,53 @@ issolved(model, targets, which=eachindex(targets); atol=1e-6) = all(k -> isappro
             @test all(k -> isapprox(landmarkvec(md.variables[k]), landmarkvec(ms.variables[k]); atol=1e-5), eachindex(md.variables))
         end
 
-        @testset "storage is silently ignored without elimination, $storage" for storage in (:dense, :sparse)
-            for (model, reduction) in ((ba, :none), (plain, :auto), (plain, :none))
-                @test_nowarn optimvars(model; numthreads=static(1), reduction, storage)
-                _, _, _, Hr = optimvars(model; numthreads=static(1), reduction, storage)
-                _, _, _, Ha = optimvars(model; numthreads=static(1), reduction)
-                @test typeof(Hr) == typeof(Ha)
-                trajr, traja = CostTrajectory(), CostTrajectory()
-                mr, ma = deepcopy(model), deepcopy(model)
-                @test_nowarn optimize!(mr, FDOptions; reduction, storage, numthreads=static(1), callback=storecostscallback(trajr))
-                optimize!(ma, FDOptions; reduction, numthreads=static(1), callback=storecostscallback(traja))
-                @test trajr.costs == traja.costs
-                @test mr.variables == ma.variables
+        # With nothing eliminated, storage chooses the Hessian's storage: :auto keeps the structure's choice
+        @testset "storage without elimination" begin
+            small, _ = chainproblem(5, 2, 9)  # 10 dimensions: :auto chooses dense
+            large, _ = chainproblem(60, 2, 9) # 120 dimensions, a chain: :auto chooses sparse
+            Hof(model; kw...) = optimvars(model; numthreads=static(1), kw...)[4]
+            @test Hof(small) === nothing && Hof(large) isa SparseMatrixCSC # :auto, unchanged
+            @test Hof(small; storage=:sparse) isa SparseMatrixCSC
+            @test Hof(large; storage=:dense) === nothing
+            @test Hof(ba; reduction=:none, storage=:sparse) isa SparseMatrixCSC && Hof(ba; reduction=:none, storage=:dense) === nothing
+            # The same solution either way
+            for (model, forced) in ((small, :sparse), (large, :dense))
+                a, b = deepcopy(model), deepcopy(model)
+                optimize!(a, FDOptions; numthreads=static(1))
+                optimize!(b, FDOptions; numthreads=static(1), storage=forced)
+                @test NLLSModel.cost(a) ≈ NLLSModel.cost(b) atol=1e-10
+                @test all(k -> isapprox(a.variables[k], b.variables[k]; atol=1e-6), eachindex(a.variables))
             end
-            # A single variable has nothing to eliminate either
+            # A single variable's Hessian is always dense
             single, _ = singleproblem(Vector{Float64}, 5, 1)
-            @test_nowarn optimvars(single; numthreads=static(1), storage)
+            err = try optimvars(single; storage=:sparse); nothing catch e e end
+            @test err isa ArgumentError && occursin("single", err.msg)
+            @test optimvars(single; storage=:dense)[4] isa Matrix{Float64}
+        end
+
+        # max_dense_bytes: :auto stores a dense matrix above the cap sparse instead, :dense throws there
+        @testset "max_dense_bytes on the normal path" begin
+            small, _ = chainproblem(5, 2, 9) # A dense 10×10 Hessian is 800 bytes
+            Hof(model; kw...) = optimvars(model; numthreads=static(1), kw...)[4]
+            @test Hof(small; max_dense_bytes=800) === nothing
+            @test Hof(small; max_dense_bytes=799) isa SparseMatrixCSC
+            @test Hof(small; storage=:dense, max_dense_bytes=800) === nothing
+            err = try Hof(small; storage=:dense, max_dense_bytes=799); nothing catch e e end
+            @test err isa ArgumentError && occursin("10×10", err.msg) && occursin("800", err.msg)
+            # The reduced Hessian under elimination: 4 cameras of 6, so 24×24, 4608 bytes
+            @test Hof(ba; storage=:dense, max_dense_bytes=4608).R isa Matrix{Float64}
+            @test_throws ArgumentError Hof(ba; storage=:dense, max_dense_bytes=4607)
+            @test Hof(ba; storage=:auto, max_dense_bytes=4607).R isa BlockLinearSystems.SparseBlockLinearSystem
+            # A single variable has no sparse alternative: above the cap it throws either way
+            single, _ = singleproblem(Vector{Float64}, 5, 1) # 200 bytes
+            @test Hof(single; max_dense_bytes=200) isa Matrix{Float64}
+            @test_throws ArgumentError Hof(single; max_dense_bytes=199)
+            @test_throws ArgumentError Hof(single; storage=:dense, max_dense_bytes=199)
+            # And through the front door
+            m = deepcopy(small)
+            optimize!(m, FDOptions; numthreads=static(1), max_dense_bytes=799)
+            @test NLLSModel.cost(m) ≈ NLLSModel.cost(optimize(small, FDOptions; numthreads=static(1))[1]) atol=1e-10
+            @test_throws ArgumentError optimize!(deepcopy(small), FDOptions; storage=:dense, max_dense_bytes=799)
         end
 
         @testset "the linsolver keyword is gone" begin

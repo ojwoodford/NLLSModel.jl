@@ -4,7 +4,7 @@ using NLLSModel
 using SecondOrderOptimization
 using OptimizationVariableInterface
 using Static
-import NLLSModel: MIN_WORK_FOR_THREADED_LINEARIZATION, MIN_WORK_FOR_THREADED_COST, MIN_WORK_PER_THREAD, MAX_DENSE_BYTES, KEYWORDS_DOC, nresiduals
+import NLLSModel: MIN_WORK_FOR_THREADED_LINEARIZATION, MIN_WORK_FOR_THREADED_COST, MIN_WORK_PER_THREAD, MAX_DENSE_BYTES, KEYWORDS_DOC
 
 # Hands `resjac!` to the optimizer with `prezeroed = true`: the structural zeros of `J` are already in place (the optimizer
 # allocates `J` as zeros and, from SecondOrderOptimization's Z1, neither re-zeroes it nor writes anything but this evaluator's
@@ -21,13 +21,10 @@ function optimize_tall!(model::Model, options; unfixed, numthreads, callback, wo
     storage === :sparse && throw(ArgumentError("formulation = :tall needs a dense Jacobian (the optimizer solves through QR of a dense J); storage = :sparse is not supported, use :auto or :dense."))
 
     # Refuse before anything is allocated: the tall formulation holds the whole Jacobian
-    mask = NLLSModel.convertunfixed(unfixed, model)
-    n = mask isa Integer ? Int(dynamic(nvars(model.variables[mask]))) : sum(i -> Int(dynamic(nvars(model.variables[i]))), findall(mask); init=0)
-    m = all(cv -> eltype(cv) <: AbstractResidual, values(model.costs)) ? nresiduals(model) : 0 # optimvars_nls reports other costs
-    if all(cv -> eltype(cv) <: AbstractResidual, values(model.costs)) && 8 * m * n > max_dense_bytes
-        throw(ArgumentError("formulation = :tall needs a dense $m×$n Jacobian ($(8 * m * n) bytes), which exceeds max_dense_bytes = $max_dense_bytes. The tall formulation currently needs a dense Jacobian; raise max_dense_bytes or use formulation = :normal."))
+    if all(cv -> eltype(cv) <: AbstractResidual, values(model.costs)) # optimvars_nls reports other costs
+        NLLSModel.check_densefits("Jacobian", NLLSModel.nresiduals(model), NLLSModel.unfixeddims(model, NLLSModel.convertunfixed(unfixed, model)),
+            max_dense_bytes, "formulation = :tall needs a dense Jacobian; raise max_dense_bytes or use formulation = :normal")
     end
-
     f, _, resjac!, x0, J = try
         optimvars_nls(model; unfixed, numthreads, reduction, storage=:dense, max_dense_bytes, min_work, min_work_cost)
     catch err
@@ -80,7 +77,7 @@ function SecondOrderOptimization.optimize!(model::Model, options::OptimizationOp
     NLLSModel.check_reduction(reduction)
     NLLSModel.check_storage(storage)
     formulation === :tall && return optimize_tall!(model, options; unfixed, numthreads, callback, workspace, reduction, storage, max_dense_bytes, min_work, min_work_cost)
-    f, fdf!, x0, H = optimvars(model; unfixed, numthreads, reduction, storage, min_work, min_work_cost)
+    f, fdf!, x0, H = optimvars(model; unfixed, numthreads, reduction, storage, max_dense_bytes, min_work, min_work_cost)
     obj = HessianObjective(f, fdf!; H)
     if ismutablevar(x0)
         result = SecondOrderOptimization.optimize!(x0, obj, options; callback, workspace)

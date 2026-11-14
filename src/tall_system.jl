@@ -72,6 +72,10 @@ end
     end
 end
 
+# Total dimension of the unfixed variables (an index or a mask)
+unfixeddims(problem::Model, unfixed::Integer) = Int(dynamic(nvars(problem.variables[unfixed])))
+unfixeddims(problem::Model, unfixed) = sum(i -> Int(dynamic(nvars(problem.variables[i]))), findall(unfixed); init=0)
+
 function build_tall_layout(problem::Model, unfixed, storage::Symbol, max_dense_bytes::Int)
     # 1. Validate cost types and variable indices
     for costvec in values(problem.costs)
@@ -88,6 +92,8 @@ function build_tall_layout(problem::Model, unfixed, storage::Symbol, max_dense_b
     # 2. Sizing and layout arrays
     K = Int(countcosts(costnum, problem.costs))
     M = Int(countcosts(resnum, problem.costs))
+    # A forced dense Jacobian above the cap is refused before anything is allocated
+    storage === :dense && check_densefits("Jacobian", M, unfixeddims(problem, unfixed), max_dense_bytes)
     resoffsets = Vector{Int}(undef, K + 1)
     resblocksizes = Vector{Int}(undef, K)
     resoffsets[1] = 1
@@ -277,7 +283,7 @@ function build_tall_layout(problem::Model, unfixed, storage::Symbol, max_dense_b
     elseif storage === :sparse
         is_dense = false
     else # :auto
-        if (M * N * 8 <= max_dense_bytes) && (M * N <= 100_000 || fill_fraction >= 0.5 || (N <= 100 && fill_fraction >= 0.25))
+        if densefits(M, N, max_dense_bytes) && (M * N <= 100_000 || fill_fraction >= 0.5 || (N <= 100 && fill_fraction >= 0.25))
             is_dense = true
         else
             is_dense = false

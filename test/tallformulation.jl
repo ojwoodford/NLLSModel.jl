@@ -256,15 +256,6 @@ end
         @test err isa ArgumentError && occursin("dense", err.msg)
     end
 
-    @testset "keywords: ignored by :normal are accepted silently" begin
-        model = curvefit()
-        ref, rr = optimize(model, TallOptions; numthreads=static(1))
-        @test_logs (out = optimize(model, TallOptions; numthreads=static(1), min_work=3, max_dense_bytes=1))
-        out, rout = optimize(model, TallOptions; numthreads=static(1), min_work=3, max_dense_bytes=1)
-        @test out.variables == ref.variables # Nothing changed
-        @test rout.bestcost == rr.bestcost
-    end
-
     @testset "kernels (R1): the kernel decides, there is no robust keyword" begin
         @test_throws MethodError optimize!(curvefit(), TallOptions; formulation=:tall, robust=:irls)
         @test_throws MethodError optimize!(curvefit(), TallOptions; robust=:none)
@@ -319,7 +310,7 @@ end
         model = curvefit(n=20000)
         @test_throws ArgumentError optimize!(deepcopy(model), TallOptions; formulation=:tall, max_dense_bytes=1000)
         err = try optimize!(deepcopy(model), TallOptions; formulation=:tall, max_dense_bytes=1000); nothing catch e e end
-        @test occursin("20000×3", err.msg) && occursin("dense", err.msg) && occursin("1000", err.msg)
+        @test occursin("20000×3", err.msg) && occursin("dense", err.msg) && occursin("1000", err.msg) && occursin("tall", err.msg)
         m = deepcopy(model)
         alloc = @allocated try optimize!(m, TallOptions; formulation=:tall, max_dense_bytes=1000) catch end
         @test alloc < 50_000

@@ -180,15 +180,19 @@ function cholmod_symbolic_nnz(fac::SparseArrays.CHOLMOD.Factor, n::Integer)
 end
 
 function optimvars(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction::Symbol=:auto, storage::Symbol=:auto,
-        min_work::Integer=MIN_WORK_FOR_THREADED_LINEARIZATION, min_work_cost::Integer=MIN_WORK_FOR_THREADED_COST)
+        max_dense_bytes::Integer=MAX_DENSE_BYTES, min_work::Integer=MIN_WORK_FOR_THREADED_LINEARIZATION,
+        min_work_cost::Integer=MIN_WORK_FOR_THREADED_COST)
     check_reduction(reduction)
     check_storage(storage)
-    return optimvars_dispatch(problem, convertunfixed(unfixed, problem), static(numthreads), reduction, storage, min_work, min_work_cost)
+    return optimvars_dispatch(problem, convertunfixed(unfixed, problem), static(numthreads), reduction, storage, Int(max_dense_bytes), min_work, min_work_cost)
 end
 
-function optimvars_dispatch(problem::Model, unfixed::Integer, numthreads::StaticInt, reduction::Symbol=:auto, storage::Symbol=:auto, min_work::Integer=MIN_WORK_FOR_THREADED_LINEARIZATION, min_work_cost::Integer=MIN_WORK_FOR_THREADED_COST)
+function optimvars_dispatch(problem::Model, unfixed::Integer, numthreads::StaticInt, reduction::Symbol, storage::Symbol, max_dense_bytes::Int, min_work::Integer, min_work_cost::Integer)
+    # One variable's system is always dense (or static)
+    storage === :sparse && throw(ArgumentError("storage = :sparse is not available for a single unfixed variable: its Hessian is always dense; use :auto or :dense."))
     x0 = problem.variables[unfixed]
     varlen = nvars(x0)
+    check_densefits("Hessian of a single variable", dynamic(varlen), dynamic(varlen), max_dense_bytes, "raise max_dense_bytes")
     if dynamic(is_static(varlen)) && varlen <= 16
         ls = LinearSystem{UniVariateLSstatic_x{dynamic(varlen)}, UniVariateLSstatic_ls{dynamic(varlen), dynamic(varlen * varlen)}}((unfixed,), ())
     else
@@ -203,11 +207,11 @@ function optimvars_dispatch(problem::Model, unfixed::Integer, numthreads::Static
     return (f, fdf!, x0, H)
 end
 
-function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads::StaticInt, reduction::Symbol=:auto, storage::Symbol=:auto, min_work::Integer=MIN_WORK_FOR_THREADED_LINEARIZATION, min_work_cost::Integer=MIN_WORK_FOR_THREADED_COST)
+function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads::StaticInt, reduction::Symbol, storage::Symbol, max_dense_bytes::Int, min_work::Integer, min_work_cost::Integer)
     @assert length(problem.variables) > 0
     nblocks = sum(unfixed)
     if nblocks == 1
-        return optimvars_dispatch(problem, findfirst(unfixed), numthreads, reduction, storage, min_work, min_work_cost)
+        return optimvars_dispatch(problem, findfirst(unfixed), numthreads, reduction, storage, max_dense_bytes, min_work, min_work_cost)
     end
 
     has_elims = any(v -> dynamic(OptimizationVariableInterface.iseliminable(typeof(v))), problem.variables)
@@ -224,11 +228,12 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
             # handed on with the pattern, so the linear system does not analyse the same pattern again.
             analysed = nothing
             is_dense = if storage === :dense
+                check_densefits("reduced Hessian", structure.nr, structure.nr, max_dense_bytes)
                 true
             elseif storage === :sparse
                 false
             else
-                if structure.nr <= 2000
+                if structure.nr <= 2000 && densefits(structure.nr, structure.nr, max_dense_bytes)
                     chol_fac = SparseArrays.CHOLMOD.analyze(SparseArrays.CHOLMOD.Sparse(Symmetric(pattern.S_sparse, :U)))
                     analysed = chol_fac
                     # Fall back to the pattern's own size if CHOLMOD's prediction is unavailable
@@ -297,8 +302,12 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
     end
     f = MultiVarCostFunc(problem, unfixed_sync, numthreads, min_work_cost)
 
+    # storage forces the choice; :auto takes the structure's, but never a dense Hessian above max_dense_bytes
+    storage === :dense && check_densefits("Hessian", len, len, max_dense_bytes)
     sparsity = block_sparsity(problem, unfixed_inds)
-    if len >= 40 && sparse_dense_decision(len, sparsity, blocksizes)
+    issparse = storage === :sparse ||
+        (storage === :auto && (!densefits(len, len, max_dense_bytes) || (len >= 40 && sparse_dense_decision(len, sparsity, blocksizes))))
+    if issparse
         bsm = SparseBlockLinearSystem{Float64}(TransposedPattern(sparsity), blocksizes, blocksizes)
         lssparse = MultiVariateLSsparse(bsm, blockindices, true)
         ls_shared = sharedlinearsystem(lssparse, workestimates(problem, unfixed).linearization, numthreads, min_work)

@@ -43,7 +43,10 @@ the system that is left (the reduced system, after elimination).
   variable of dimension 1 to 3, coupled only to retained variables), and falls back to no elimination otherwise.
   `:eliminate` eliminates or throws an `ArgumentError`. `:none` never eliminates. Other values are an `ArgumentError`.
 - `storage = :auto` (default) stores the reduced system dense or sparse from the predicted fill of its Cholesky factor;
-  `:dense` and `:sparse` force it. With nothing eliminated it is not used on the normal path: the structure decides.
+  `:dense` and `:sparse` force it. With nothing eliminated it chooses the storage of the Hessian itself in the same way:
+  `:auto` decides from its block sparsity, `:dense` and `:sparse` force it.
+- `max_dense_bytes` (default 256 MiB) caps a dense matrix: `:auto` stores a larger one sparse, and `:dense` throws an
+  `ArgumentError` giving its size.
 
 ```julia
 optimize!(problem, options; reduction = :eliminate, storage = :sparse)
