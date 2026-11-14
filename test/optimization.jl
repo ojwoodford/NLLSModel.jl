@@ -33,6 +33,10 @@ function optlandmark_problem(ncams, nlms)
     return problem
 end
 
+# Allocation of one call, after a warm-up call (in a function, so the measurement sees concrete types)
+warmallocs_fdf(fdf!, g, H, x) = (fdf!(g, H, x); @allocated fdf!(g, H, x))
+warmallocs_f(f, x) = (f(x); @allocated f(x))
+
 function solve(problem; iterator=:levenbergmarquardt, reduction=:auto, reduced=:auto, maxiters=100)
     c0 = NLLSModel.cost(problem)
     res = optimize!(problem, OptimizationOptions(iterator=iterator, maxiters=maxiters); numthreads=static(1), reduction, reduced)
@@ -83,6 +87,10 @@ end
             @test dot(dx, H1, dx) ≈ dot(dx, H4, dx)
         end
         @test f1(x1) ≈ f4(x4)
+        # Threaded, a warm call allocates nothing: the linearization, and the cost (threaded too, above its floor)
+        @test f4.work >= f4.min_work
+        @test warmallocs_fdf(fdf4!, g4, H4, x4) == 0
+        @test warmallocs_f(f4, x4) == 0
     end
 end
 

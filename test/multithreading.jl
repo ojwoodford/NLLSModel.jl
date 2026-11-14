@@ -59,7 +59,7 @@ alloc_ephemeral(ls, ind) = @allocated NLLSModel.LinearSystem(ls, ind)
     @test isempty(NLLSModel.ithchunk(3, 4, coll))
 
     # threadargs: an isbits stand-in for the arguments of a `@batch` loop, which fromthreadargs turns back into the same
-    # objects. A field of abstract type is passed as it is.
+    # objects. A field of abstract type is passed by the address of its box; one of an isbits union as it is.
     @testset "threadargs" begin
         mv, vv = MVector(1.0, 2.0), [zeros(2), ones(3)]
         nested = (SVector(mv, mv), vv, (a=1, b=vv), 3.0)
@@ -70,11 +70,16 @@ alloc_ephemeral(ls, ind) = @allocated NLLSModel.LinearSystem(ls, ind)
         @test back[1][1] === mv && back[2] === vv
         @test (@allocated NLLSModel.threadargs(nested)) == 0
         @test (@allocated NLLSModel.fromthreadargs(a)) == 0
-        abstractfield = (Any[1], Ref{Any}(2.0), Some{Any}(vv))
+        abstractfield = (Any[1], Ref{Any}(2.0), Some{Any}(vv), Some{Any}(nothing), Some{Any}((1, mv)), Some{Union{Nothing, Vector{Vector{Float64}}}}(vv))
         b = NLLSModel.threadargs(abstractfield)
-        @test !isbits(b) # Some{Any}'s field is passed as it is
+        @test isbits(b)
         @test NLLSModel.fromthreadargs(b) === abstractfield
-        @test NLLSModel.threadargs(5) === 5
+        @test (@allocated NLLSModel.threadargs(abstractfield)) == 0
+        bitsunion = (Some{Union{Nothing, Int}}(3), mv)
+        c = NLLSModel.threadargs(bitsunion)
+        @test !isbits(c) # Stored inline, so passed as it is
+        @test NLLSModel.fromthreadargs(c) === bitsunion
+        @test NLLSModel.fromthreadargs(NLLSModel.threadargs(5)) === 5
     end
 
     # cost_range

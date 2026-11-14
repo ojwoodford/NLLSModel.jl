@@ -53,16 +53,13 @@ end
         @test warmallocs(staticplain(n=6); unfixed=2) == (0, 0, 0)
     end
 
-    # The threaded launch (Polyester's argument tuple) allocates a fixed amount per call, whatever the model size
-    @testset "threads: a fixed allocation per call, independent of the model" begin
+    # Threaded, a warm call allocates nothing either (the threads' arguments are passed by `threadargs`)
+    @testset "threads: a warm call allocates nothing" begin
         nt = Threads.nthreads()
         bigmodel(n) = (rng = MersenneTwister(3); m = Model(Vector{Float64}, TlHand{typeof(Huber2oKernel(0.3))});
             addvariable!(m, randn(rng, 12)); foreach(_ -> addcost!(m, TlHand(randn(rng, 9), 12, Huber2oKernel(0.3), 1)), 1:n); m)
-        small = warmallocs(bigmodel(200); numthreads=static(nt), min_work_per_thread=100)
-        large = warmallocs(bigmodel(800); numthreads=static(nt), min_work_per_thread=100)
-        @test small == large
-        @test all(<=(1024), small)
-        nt == 1 && @test small == (0, 0, 0)
+        @test warmallocs(bigmodel(200); numthreads=static(nt), min_work_per_thread=100) == (0, 0, 0)
+        @test warmallocs(bigmodel(800); numthreads=static(nt), min_work_per_thread=100) == (0, 0, 0)
     end
 
     # A whole solve: per iteration, the tall path allocates no more than the normal equations do on the same model

@@ -101,7 +101,7 @@ add_schur_R!(dest, src) = (dest.data .+= src.data; nothing)
 end
 
 # Work of one thread: zero its own R and gradient, then linearize its costs
-# Arguments of the threads, in a struct because Polyester converts arrays captured by a `@batch` loop into pointer arrays
+# Arguments of the threads, passed to the `@batch` loop through `threadargs`
 struct SchurThreadArgs{LS, PL, HT, G, V, CV}
     linsystem::LS
     plan::PL
@@ -138,8 +138,12 @@ function schur_threaded!(linsystem::LinearSystemShared{F, V, N}, plan, H::SchurB
     fill!(H.C_data, 0.0)
     vecs = values(costs)
     args = SchurThreadArgs(linsystem, plan, H, g, vars, vecs)
-    @batch for t in 1:N
-        linsystem.costs[t] = schur_thread_task!(args, t)
+    targs = threadargs(args)
+    GC.@preserve args begin
+        @batch for t in 1:N
+            args_ = fromthreadargs(targs)
+            args_.linsystem.costs[t] = schur_thread_task!(args_, t)
+        end
     end
 
     # Only R and the gradient were written by more than one thread

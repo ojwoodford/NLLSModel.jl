@@ -778,9 +778,13 @@ function tall_eval!(evalone::F, costvecs, layout, status, task_results, N_req::I
     for t in 1:N_chunks
         task_results[t] = TaskResult(0.0, 0, 0, 0.0)
     end
-    Polyester.@batch for taskid in 1:N_chunks
-        local_cost, local_clamped, local_err, local_val = eval_costvecs(evalone, costvecs, layout.costvec_start_idx, N_chunks, taskid, 1)
-        task_results[taskid] = TaskResult(local_cost, local_clamped, local_err, local_val)
+    args = threadargs((evalone, costvecs, layout.costvec_start_idx, task_results))
+    GC.@preserve evalone costvecs layout task_results begin
+        Polyester.@batch for taskid in 1:N_chunks
+            evalone_, costvecs_, start_idx_, task_results_ = fromthreadargs(args)
+            local_cost, local_clamped, local_err, local_val = eval_costvecs(evalone_, costvecs_, start_idx_, N_chunks, taskid, 1)
+            task_results_[taskid] = TaskResult(local_cost, local_clamped, local_err, local_val)
+        end
     end
     for t in 1:N_chunks
         if task_results[t].err_code != 0
