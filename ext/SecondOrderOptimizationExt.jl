@@ -13,7 +13,7 @@ struct PrezeroedResJac{RJ}
 end
 (w::PrezeroedResJac)(r, J, x) = w.resjac!(r, J, x; prezeroed=true)
 
-# The tall formulation: the residual vector and a dense Jacobian, solved by Levenberg-Marquardt through QR of the Jacobian.
+# The tall formulation: the residual vector and a dense Jacobian, solved through QR of the Jacobian.
 function optimize_tall!(model::Model, options; unfixed, numthreads, callback, workspace, reduction, min_work_per_thread, max_dense_bytes)
     reduction in (:auto, :none, :eliminate) || throw(ArgumentError("Unknown reduction $(repr(reduction)); expected :auto, :none or :eliminate."))
     reduction === :eliminate && throw(ArgumentError("formulation = :tall does not support reduction = :eliminate (elimination of variables on the Jacobian path is not implemented); use :auto or :none."))
@@ -56,10 +56,10 @@ Solve `model` and write the solution back into `model.variables`. This is the no
 - `:normal` (default): the normal equations. Calls [`optimvars`](@ref), wraps the result in a `HessianObjective`, runs
   `SecondOrderOptimization.optimize!` (or `optimize` when the variable to optimize is immutable, a single variable of static
   size) and writes the solution back with [`syncvars!`](@ref).
-- `:tall`: the residual vector and a dense Jacobian (a `JacobianObjective`), solved by Levenberg–Marquardt through QR of the
-  Jacobian. Calls [`optimvars_nls`](@ref) with a dense Jacobian. Each cost's kernel decides how its rows enter; there is no robust
-  keyword. This first version needs an iterator the optimizer's Jacobian path supports (Levenberg–Marquardt) with `linsolver = :auto` or `:qr` (the optimizer throws
-  otherwise), a dense Jacobian (an `ArgumentError`, before allocating, if it would exceed `max_dense_bytes`), only non-adaptive
+- `:tall`: the residual vector and a dense Jacobian (a `JacobianObjective`), solved through QR of the Jacobian, with any
+  iterator except gradient descent. Calls [`optimvars_nls`](@ref) with a dense Jacobian. Each cost's kernel decides how its rows enter; there is no robust
+  keyword. This first version needs `linsolver = :auto` or `:qr` (the optimizer throws `ArgumentError` for gradient
+  descent and for other solvers), a dense Jacobian (an `ArgumentError`, before allocating, if it would exceed `max_dense_bytes`), only non-adaptive
   `AbstractResidual` costs and no unfixed adaptive kernels (errors from `optimvars_nls` are rethrown prefixed `formulation = :tall:`),
   and no elimination.
 
