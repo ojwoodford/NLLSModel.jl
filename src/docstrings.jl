@@ -453,7 +453,7 @@ nls = NLLSNLSModel(problem)
 
 Every cost must be a non-adaptive [`AbstractResidual`](@ref) with a linear kernel ([`islinearkernel`](@ref)), so that the
 cost is exactly `½‖r‖²`, which these solvers derive from `r`; otherwise it throws an `ArgumentError`. Every unfixed
-variable must be a `Float64`, a `StaticVector{N, Float64}` or a `Vector{Float64}` (as for [`flat_optimvars_nls`](@ref)).
+variable must update by plain addition and pack into a flat `Float64` vector (as for [`flat_optimvars_nls`](@ref)).
 
 # Keyword Arguments
 - `unfixed = nothing`: Boolean mask, integer, or vector indicating which variables are unfixed (optimized).

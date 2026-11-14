@@ -13,11 +13,11 @@ const PUBLIC_NAMES = sort([
 ])
 
 # Removed, not deprecated (rules.md 9)
-const REMOVED_NAMES = [:addresidual!]
+const REMOVED_NAMES = [:addresidual!, :isadditive]
 
 # Internal: still defined, no longer exported
 const INTERNAL_NAMES = [
-    :partition_schur_problem, :clamped_count, :reset_clamped_count!, :nresiduals, :isadditive, :nls_callbacks,
+    :partition_schur_problem, :clamped_count, :reset_clamped_count!, :nresiduals, :nls_callbacks,
     :MAX_STATIC_VAR, :MAX_STATIC_JAC, :MAX_STATIC_ROWS,
 ]
 

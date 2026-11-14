@@ -127,26 +127,38 @@ function sync_flat_vars!(problem::Model, layout::FlatVarLayout, x_flat::Abstract
     return problem
 end
 
-# Trait to verify variables support Euclidean addition update(v, δ) == v + δ
-isadditive(::Type{Float64}) = true
-isadditive(::Type{<:StaticVector{N, Float64}}) where N = true
-isadditive(::Type{Vector{Float64}}) = true
-isadditive(::Type) = false
-isadditive(v) = isadditive(typeof(v))
+# The flat-vector paths accept a variable that packs into a flat `Float64` vector (a number, or an `AbstractVector` of
+# numbers that can be rebuilt from a vector of its values) and whose update is plain addition, `update(v, δ) ≈ v + δ`.
+# Both are checked numerically, once per variable type, on the first unfixed variable of that type.
+function check_flat_variables(problem::Model, unfixed)
+    checked = Type[]
+    for i in (unfixed isa Integer ? (unfixed,) : findall(unfixed))
+        v = problem.variables[i]
+        typeof(v) in checked && continue
+        check_additive_variable(v)
+        push!(checked, typeof(v))
+    end
+    return nothing
+end
 
 function check_additive_variable(v)
-    if !isadditive(typeof(v))
-        throw(ArgumentError("Variable of type $(typeof(v)) does not satisfy the `isadditive` trait (only Float64, SVector{N, Float64}, Vector{Float64} are supported for flat Euclidean updates)"))
-    end
+    T = typeof(v)
+    packerror() = ArgumentError("Variable of type $T cannot be packed into a flat Float64 vector: the flat-vector paths take a number or an AbstractVector of numbers (Float64, SVector, Vector{Float64}, or another AbstractVector type that can be built from a vector of its values)")
+    hasmethod(pack_single_var!, Tuple{Vector{Float64}, T}) || throw(packerror())
     nv = Int(dynamic(nvars(v)))
     xv = zeros(Float64, nv)
     pack_single_var!(xv, v)
+    try
+        unpack_single_var(copy_var(v), xv)
+        unpack_var_elem(copy_var(v), xv, 1, nv)
+    catch err
+        err isa MethodError ? throw(packerror()) : rethrow()
+    end
     delta = [0.1 + 0.05 * k for k in 1:nv]
-    v_upd = update(v, delta)
     x_upd = zeros(Float64, nv)
-    pack_single_var!(x_upd, v_upd)
+    pack_single_var!(x_upd, update(v, delta))
     if !isapprox(x_upd, xv + delta; rtol=1e-12, atol=1e-12)
-        throw(ArgumentError("Variable of type $(typeof(v)) failed numerical additive check update(v, δ) ≈ v + δ"))
+        throw(ArgumentError("Variable of type $T does not update by plain addition (update(v, δ) ≈ v + δ fails): the flat-vector paths need variables whose update is addition of the flat step"))
     end
     return true
 end

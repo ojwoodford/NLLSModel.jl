@@ -89,6 +89,47 @@ end
 Base.eltype(::NonFiniteRes) = Float64
 
 # Generic wrapper to attach any robustifier to any residual
+# Variables for the flat-vector check: a Euclidean AbstractVector of our own (counting its updates), a rotation (an
+# angle wrapped to (-π, π], so its update is not addition), and an AbstractVector that cannot be rebuilt from its values
+const EUCLID_UPDATES = Ref(0)
+struct EuclidVec <: AbstractVector{Float64}
+    data::Vector{Float64}
+end
+Base.size(v::EuclidVec) = size(v.data)
+Base.getindex(v::EuclidVec, i::Int) = v.data[i]
+update(v::EuclidVec, δ, start=1) = (EUCLID_UPDATES[] += 1; EuclidVec(v.data .+ view(δ, start:start+length(v)-1)))
+struct WrappedAngle <: AbstractVector{Float64}
+    θ::Float64
+end
+WrappedAngle(x::AbstractVector) = WrappedAngle(x[1])
+Base.size(::WrappedAngle) = (1,)
+Base.getindex(v::WrappedAngle, i::Int) = v.θ
+update(v::WrappedAngle, δ, start=1) = WrappedAngle(rem2pi(v.θ + δ[start], RoundNearest))
+struct UnbuildableVec <: AbstractVector{Float64}
+    data::Vector{Float64}
+    tag::Int
+end
+Base.size(v::UnbuildableVec) = size(v.data)
+Base.getindex(v::UnbuildableVec, i::Int) = v.data[i]
+struct EuclidRes <: AbstractResidual
+    i::Int
+end
+NLLSModel.ndeps(::EuclidRes) = static(1)
+NLLSModel.nres(::EuclidRes) = static(1)
+NLLSModel.varindices(r::EuclidRes) = r.i
+NLLSModel.getvars(r::EuclidRes, vars::AbstractVector) = (vars[r.i],)
+NLLSModel.computeresidual(::EuclidRes, x) = SVector(sum(x))
+Base.eltype(::EuclidRes) = Float64
+struct AngleRes <: AbstractResidual
+    i::Int
+end
+NLLSModel.ndeps(::AngleRes) = static(1)
+NLLSModel.nres(::AngleRes) = static(1)
+NLLSModel.varindices(r::AngleRes) = r.i
+NLLSModel.getvars(r::AngleRes, vars::AbstractVector) = (vars[r.i]::WrappedAngle,)
+NLLSModel.computeresidual(::AngleRes, x) = SVector(x.θ)
+Base.eltype(::AngleRes) = Float64
+
 struct RobustWrapper{R<:AbstractResidual, K<:AbstractRobustifier} <: AbstractResidual
     res::R
     kernel::K
@@ -414,9 +455,37 @@ end
         addcost!(prob_neg, RobustWrapper(ScalarVarIndRes(), Scaled(NoRobust(), -1.0)))
         @test_throws ArgumentError NLLSModel.nls_callbacks(prob_neg)
 
-        # 3. Non-additive variable type throws
-        @test !NLLSModel.isadditive(ZeroToInfScalar{Float64})
-        @test_throws ArgumentError NLLSModel.check_additive_variable(ZeroToInfScalar(1.0))
+        # 3. Variables: the numerical check decides, nothing is declared
+        @test !isdefined(NLLSModel, :isadditive)
+        for v in (2.0, SVector(1.0, 2.0, 3.0), [1.0, 2.0], EuclidVec([1.0, 2.0, 3.0]))
+            @test NLLSModel.check_additive_variable(v)
+        end
+        argmsg(v) = try NLLSModel.check_additive_variable(v); "" catch e; e isa ArgumentError ? e.msg : "not an ArgumentError" end
+        @test occursin("plain addition", argmsg(WrappedAngle(3.1))) && occursin("WrappedAngle", argmsg(WrappedAngle(3.1)))
+        # ZeroToInfScalar is neither a number nor an AbstractVector, so it cannot be packed
+        @test occursin("cannot be packed", argmsg(ZeroToInfScalar(1.0))) && occursin("ZeroToInfScalar", argmsg(ZeroToInfScalar(1.0)))
+        @test occursin("cannot be packed", argmsg(UnbuildableVec([1.0, 2.0], 0))) # An AbstractVector with no constructor from its values
+        @test occursin("cannot be packed", argmsg(:symbol))
+        # Through flat_optimvars_nls, and once per variable type: 1 000 variables of one type, one check
+        prob_rot = Model(WrappedAngle, AngleRes)
+        addvariable!(prob_rot, WrappedAngle(3.1))
+        addcost!(prob_rot, AngleRes(1))
+        @test_throws ArgumentError flat_optimvars_nls(prob_rot)
+        prob_many = Model(Union{EuclidVec, Float64}, EuclidRes)
+        for k in 1:1000
+            addvariable!(prob_many, EuclidVec([0.0, Float64(k)]))
+            addcost!(prob_many, EuclidRes(k))
+        end
+        addvariable!(prob_many, 1.0) # A second type, checked once too
+        EUCLID_UPDATES[] = 0
+        flat_many = flat_optimvars_nls(prob_many)
+        @test EUCLID_UPDATES[] == 1
+        @test length(flat_many.x0) == 2001
+        # Vectors of different lengths: one check for the type
+        prob_vec = Model(Vector{Float64}, EuclidRes)
+        addvariable!(prob_vec, [1.0])
+        addvariable!(prob_vec, [1.0, 2.0, 3.0])
+        @test length(flat_optimvars_nls(prob_vec).x0) == 4
 
         # 4. Dense J with NaNs has off-structure entries zeroed
         prob_dense = Model(SVector{2, Float64}, TestRosenbrock1)

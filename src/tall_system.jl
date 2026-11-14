@@ -901,8 +901,10 @@ end
 
 Constructs a flat Euclidean vector wrapper around `optimvars_nls`.
 Returns a NamedTuple `(; f, res!, resjac!, jac!, x0, J_proto, layout, status)`.
-Requires every unfixed variable to be a `Float64`, a `StaticVector{N, Float64}` or a `Vector{Float64}`, so that `update` is
-addition of the flat step; any other variable type is an `ArgumentError`.
+Accepts any unfixed variable whose update is plain addition, `update(v, δ) ≈ v + δ`, and that packs into a flat
+`Float64` vector: a number, or an `AbstractVector` of numbers that can be built from a vector of its values (`Float64`,
+`SVector{N, Float64}`, `Vector{Float64}`, or a type of your own). Nothing needs declaring: each variable type is checked
+numerically, once, here. A type that cannot be packed, or whose update is not addition, is an `ArgumentError` saying which.
 """
 function flat_optimvars_nls(
     problem::Model;
@@ -915,16 +917,7 @@ function flat_optimvars_nls(
 )
     conv_unfixed = convertunfixed(unfixed, problem)
 
-    # Validate that all unfixed variables satisfy the additive trait
-    if conv_unfixed isa Integer
-        check_additive_variable(problem.variables[conv_unfixed])
-    else
-        for (i, unf) in enumerate(conv_unfixed)
-            if unf
-                check_additive_variable(problem.variables[i])
-            end
-        end
-    end
+    check_flat_variables(problem, conv_unfixed)
 
     layout = FlatVarLayout(problem, unfixed)
     f_orig, res!_orig, resjac!_orig, x0_struct, J_proto = optimvars_nls(
