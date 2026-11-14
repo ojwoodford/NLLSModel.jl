@@ -439,7 +439,11 @@ wtuple(w) = (w.cost, w.tall, w.linearization)
         serial, forced = evaltall(1, 10^12), evaltall(4, 0)
         @test forced[3] == serial[3] && forced[4] == serial[4]
         @test forced[2] ≈ serial[2] rtol=1e-13
-        @test evaltall(4, 10^12) == serial
+        # A very large floor makes the fill serial: bit-identical. The cost function f threads on its own estimate at the
+        # default cost floor, whatever min_work_per_thread is, so its sum may differ in the last bits.
+        onethread = evaltall(4, 10^12)
+        @test onethread[2:4] == serial[2:4]
+        @test onethread[1] ≈ serial[1] rtol=1e-13
     end
 
     # Each cost is linearized once on several threads, as on one: a bipartite model where every cost spans the two sides

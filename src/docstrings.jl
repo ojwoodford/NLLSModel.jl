@@ -432,7 +432,7 @@ nlp = NLPLSModel(problem)
 NLPLSModel
 
 """
-    NLLSNLSModel(problem::Model; unfixed=nothing, numthreads=static(1), min_work_per_thread=5000, matrix_type=:auto, max_dense_bytes=32*1024^2, name="NLLSNLSModel")
+    NLLSNLSModel(problem::Model; unfixed=nothing, numthreads=static(1), min_work_per_thread=$MIN_WORK_PER_THREAD, matrix_type=:auto, max_dense_bytes=32*1024^2, name="NLLSNLSModel")
 
 Wraps a [`Model`](@ref) as an `NLPModels.AbstractNLSModel{Float64, Vector{Float64}}`, which exposes the residual vector and
 its Jacobian, for nonlinear least-squares solvers that work on them directly, such as `JSOSolvers.trunk` and
@@ -450,7 +450,7 @@ variable must be a `Float64`, a `StaticVector{N, Float64}` or a `Vector{Float64}
 
 # Keyword Arguments
 - `unfixed = nothing`: Boolean mask, integer, or vector indicating which variables are unfixed (optimized).
-- `numthreads = static(1)`, `min_work_per_thread = 5000`: threading of the residual and Jacobian evaluation, as for
+- `numthreads = static(1)`, `min_work_per_thread = $MIN_WORK_PER_THREAD`: threading of the residual and Jacobian evaluation, as for
   [`optimvars_nls`](@ref).
 - `matrix_type = :auto`, `max_dense_bytes = 32 * 1024^2`: the Jacobian storage, as for [`optimvars_nls`](@ref). The
   default limit is lower than there (32 MB), to keep the solver's coordinate arrays below about 96 MB.

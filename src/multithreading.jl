@@ -9,10 +9,32 @@ using Polyester
 # function itself is not estimated: the floors are calibrated on cheap residuals, so a costly one threads later than it
 # could, never earlier than it should. The estimates are computed once, at setup (`workestimates`); an evaluation compares
 # an integer. Problems with less work than the floor are evaluated on a single thread.
-# The defaults are the values from the old estimate (residual length times number of variables squared), not yet
-# recalibrated in these units.
-const MIN_WORK_FOR_THREADED_COST = 15_000
-const MIN_WORK_FOR_THREADED_LINEARIZATION = 10_000
+#
+# The defaults are the break-evens of the families with cheap residuals (static variables, hand-sized residual code), on
+# 4 threads, measured on an Apple M1 Pro (8 performance and 2 efficiency cores), Julia 1.13.3, 2026-11-14, by
+# `benchmark/threading.jl`. Break-even as (lo, hi]: lo the largest estimate at which the threaded evaluation was not
+# faster, hi the next size measured.
+#
+#   kind           threads  bundle adjustment (2x12)  pose chain (6x12)   curve fit, dynamic (1x5)  Procrustes d=5/10/20
+#   cost             2       (84, 136]                 (132, 216]          (52, 84]*                 (30,50] (30,50] (0,20]
+#                    4       (216, 346]                (132, 216]          (52, 84]                  (0,20] each
+#                    8       (346, 554]                (348, 552]          (52, 84]                  (30,50] (0,20] (0,20]
+#   tall fill        2       (546, 884]                (234, 312]          (0, 18]                   (0,55] (0,460] (0,3820]
+#                    4       (338, 546]                (546, 858]          (0, 18]                   same
+#                    8       (338, 546]                (546, 858]          (0, 18]                   same
+#   linearization    2       (2184, 3744]              (5616, 9360]        (0, 30]                   (0,550] (0,20700] (0,725800]
+#                    4       (9360, 14976]             (9360, 14976]       (60, 90]                  (1100,1650] (0,20700] (0,725800]
+#                    8       (14976, 23712]            (38376, 60840]      (120, 210]                (1100,1650] (0,20700] (0,725800]
+#   * on 2 threads two sizes measured 0.64x between 1.98x and 1.92x (an outlier, probably GC); about (52, 84] without them.
+#
+# No single floor per kind of work is within a factor of two of every family: the costly residuals (Procrustes) and the
+# dynamic-variable autodiff (curve fit) thread profitably at two costs, 7x (tall) to 45x (linearization) below the cheap
+# families, because the per-cost work of evaluating the residual and its derivatives is not in the estimates. The floors
+# are set at the cheap families, so a costly residual threads later than it could, never too early (decided 2026-11-14).
+# On 8 threads the pose chain's linearization pays only from about 38 000 to 61 000, above this floor.
+const MIN_WORK_FOR_THREADED_COST = 350
+const MIN_WORK_FOR_THREADED_LINEARIZATION = 15_000
+const MIN_WORK_PER_THREAD = 450 # tall fill: threaded from 2 * MIN_WORK_PER_THREAD = 900, one thread per MIN_WORK_PER_THREAD
 
 # The three estimates for the variables selected by `unfixed` (an index, or a mask over `problem.variables`)
 struct WorkEstimates

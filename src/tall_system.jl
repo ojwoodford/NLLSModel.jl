@@ -831,7 +831,7 @@ function (resjac!::NLSResJac)(r::AbstractVector{Float64}, J, vars; prezeroed::Bo
 end
 
 """
-    optimvars_nls(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), min_work_per_thread=5000, matrix_type=:auto, max_dense_bytes=256*1024^2)
+    optimvars_nls(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), min_work_per_thread=$MIN_WORK_PER_THREAD, matrix_type=:auto, max_dense_bytes=256*1024^2)
 
 Constructs tall residual and Jacobian callable structs `(f, res!, resjac!, x0, J_proto)` for `problem`.
 Unlike `optimvars`, `unfixed` and `numthreads` are keyword arguments.
@@ -857,7 +857,7 @@ function optimvars_nls(
     problem::Model;
     unfixed = nothing,
     numthreads = StaticInt(Threads.nthreads()),
-    min_work_per_thread::Int = 5000,
+    min_work_per_thread::Int = MIN_WORK_PER_THREAD,
     matrix_type::Symbol = :auto,
     max_dense_bytes::Int = 256 * 1024^2,
 )
@@ -894,7 +894,7 @@ function optimvars_nls(
 end
 
 """
-    flat_optimvars_nls(problem::Model; unfixed=nothing, numthreads=static(1), min_work_per_thread=5000, matrix_type=:auto, max_dense_bytes=256*1024^2)
+    flat_optimvars_nls(problem::Model; unfixed=nothing, numthreads=static(1), min_work_per_thread=$MIN_WORK_PER_THREAD, matrix_type=:auto, max_dense_bytes=256*1024^2)
 
 Constructs a flat Euclidean vector wrapper around `optimvars_nls`.
 Returns a NamedTuple `(; f, res!, resjac!, jac!, x0, J_proto, layout, status)`.
@@ -905,7 +905,7 @@ function flat_optimvars_nls(
     problem::Model;
     unfixed = nothing,
     numthreads = static(1),
-    min_work_per_thread::Int = 5000,
+    min_work_per_thread::Int = MIN_WORK_PER_THREAD,
     matrix_type::Symbol = :auto,
     max_dense_bytes::Int = 256 * 1024^2,
 )
@@ -987,7 +987,7 @@ function throw_nonlinear(name, problem)
 end
 
 """
-    nls_callbacks(problem::Model; unfixed=nothing, numthreads=static(1), min_work_per_thread=5000, matrix_type=:auto, max_dense_bytes=256*1024^2)
+    nls_callbacks(problem::Model; unfixed=nothing, numthreads=static(1), min_work_per_thread=$MIN_WORK_PER_THREAD, matrix_type=:auto, max_dense_bytes=256*1024^2)
 
 Lightweight callback helper for `LeastSquaresOptim.jl`.
 Accepts any non-adaptive `AbstractResidual` problem with linear kernels (`islinearkernel`).
@@ -998,7 +998,7 @@ function nls_callbacks(
     problem::Model;
     unfixed = nothing,
     numthreads = static(1),
-    min_work_per_thread::Int = 5000,
+    min_work_per_thread::Int = MIN_WORK_PER_THREAD,
     matrix_type::Symbol = :auto,
     max_dense_bytes::Int = 256 * 1024^2,
 )

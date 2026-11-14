@@ -306,7 +306,7 @@ function NLLSModel.NLLSNLSModel(
     problem::Model;
     unfixed = nothing,
     numthreads = static(1),
-    min_work_per_thread::Int = 5000,
+    min_work_per_thread::Int = NLLSModel.MIN_WORK_PER_THREAD,
     matrix_type::Symbol = :auto,
     max_dense_bytes::Int = 32 * 1024^2,
     name::String = "NLLSNLSModel",

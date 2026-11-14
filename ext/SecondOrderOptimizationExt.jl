@@ -4,7 +4,7 @@ using NLLSModel
 using SecondOrderOptimization
 using OptimizationVariableInterface
 using Static
-import NLLSModel: MIN_WORK_FOR_THREADED_LINEARIZATION, MIN_WORK_FOR_THREADED_COST, nresiduals
+import NLLSModel: MIN_WORK_FOR_THREADED_LINEARIZATION, MIN_WORK_FOR_THREADED_COST, MIN_WORK_PER_THREAD, nresiduals
 
 # Hands `resjac!` to the optimizer with `prezeroed = true`: the structural zeros of `J` are already in place (the optimizer
 # allocates `J` as zeros and, from SecondOrderOptimization's Z1, neither re-zeroes it nor writes anything but this evaluator's
@@ -48,7 +48,7 @@ end
 # through `optimize` (which returns the solution); everything else is updated in place by `optimize!`. Either way the
 # solution is written back with `syncvars!`, which knows the block order and the Schur partition.
 """
-    optimize!(model::Model, options = OptimizationOptions(); formulation=:normal, unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), callback=nullcallback, workspace=nothing, reduction=:auto, reduced=:auto, min_work, min_work_cost, min_work_per_thread=5000, max_dense_bytes=256*1024^2) -> OptimizationResult
+    optimize!(model::Model, options = OptimizationOptions(); formulation=:normal, unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), callback=nullcallback, workspace=nothing, reduction=:auto, reduced=:auto, min_work, min_work_cost, min_work_per_thread=$MIN_WORK_PER_THREAD, max_dense_bytes=256*1024^2) -> OptimizationResult
 
 Solve `model` and write the solution back into `model.variables`. This is the normal way to solve a `Model`; it is defined when
 `SecondOrderOptimization` is loaded (`using SecondOrderOptimization`).
@@ -86,7 +86,7 @@ function SecondOrderOptimization.optimize!(model::Model, options::OptimizationOp
         unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), callback=nullcallback, workspace=nothing,
         reduction::Symbol=:auto, reduced::Symbol=:auto,
         min_work::Integer=MIN_WORK_FOR_THREADED_LINEARIZATION, min_work_cost::Integer=MIN_WORK_FOR_THREADED_COST,
-        min_work_per_thread::Integer=5000, max_dense_bytes::Integer=256 * 1024^2)
+        min_work_per_thread::Integer=MIN_WORK_PER_THREAD, max_dense_bytes::Integer=256 * 1024^2)
     formulation in (:normal, :tall) || throw(ArgumentError("Unknown formulation $(repr(formulation)); expected :normal or :tall."))
     formulation === :tall && return optimize_tall!(model, options; unfixed, numthreads, callback, workspace, reduction, min_work_per_thread, max_dense_bytes)
     f, fdf!, x0, H = optimvars(model, unfixed, numthreads; reduction, reduced, min_work, min_work_cost)
