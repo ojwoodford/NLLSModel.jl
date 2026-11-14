@@ -68,7 +68,7 @@ end
     # A whole solve: per iteration, the tall path allocates no more than the normal equations do on the same model
     @testset "per iteration, no more than the normal equations: $name" for (name, make) in (
             ("static", () -> staticrobust(Huber2oKernel(0.3))), ("Vector, hand-written", () -> handmodel(Huber2oKernel(0.3), NoRobust())))
-        opts(n) = OptimizationOptions(iterator=:levenbergmarquardt, maxiters=n, reldcost=0.0, absdcost=0.0, dstep=0.0, gtol=0.0, maxfails=10^6)
+        opts(n) = OptimizationOptions(iterator=:levenbergmarquardt, maxiters=n, reldcost=0.0, absdcost=0.0, dstep=0.0, gtol=0.0, maxstall=10^6)
         function periteration(formulation)
             function run(n)
                 m = make()
