@@ -940,6 +940,10 @@ whole residual into `r`. `RType`, `Matrix{Float64}` or `SparseMatrixCSC{Float64,
 system, chosen by `storage` and `max_dense_bytes` by the normal path's rule. `x0` then holds the unfixed variables
 in the partition's order, retained first; [`syncvars!`](@ref) writes a solution back.
 
+What `optimize!(model, options; formulation = :tall)` does with each prototype:
+
+$TALL_FORMULATION_DOC
+
 $KEYWORDS_DOC"""
 function optimvars_nls(
     problem::Model;

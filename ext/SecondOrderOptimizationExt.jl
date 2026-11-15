@@ -4,7 +4,7 @@ using NLLSModel
 using SecondOrderOptimization
 using OptimizationVariableInterface
 using Static
-import NLLSModel: MIN_WORK_PER_THREAD_NORMAL, MIN_WORK_PER_THREAD_COST, MIN_WORK_PER_THREAD_TALL, MAX_DENSE_BYTES, KEYWORDS_DOC
+import NLLSModel: MIN_WORK_PER_THREAD_NORMAL, MIN_WORK_PER_THREAD_COST, MIN_WORK_PER_THREAD_TALL, MAX_DENSE_BYTES, KEYWORDS_DOC, TALL_FORMULATION_DOC
 
 # Hands `resjac!` to the optimizer with `prezeroed = true`: the structural zeros of `J` are already in place (the optimizer
 # allocates `J` as zeros and, from SecondOrderOptimization's Z1, neither re-zeroes it nor writes anything but this evaluator's
@@ -49,14 +49,14 @@ Solve `model` and write the solution back into `model.variables`. This is the no
 - `:normal` (default): the normal equations. Calls [`optimvars`](@ref), wraps the result in a `HessianObjective`, runs
   `SecondOrderOptimization.optimize!` (or `optimize` when the variable to optimize is immutable, a single variable of static
   size) and writes the solution back with [`syncvars!`](@ref).
-- `:tall`: the residual vector and the Jacobian (a `JacobianObjective`), solved through QR of the Jacobian, with any
-  iterator except gradient descent. Calls [`optimvars_nls`](@ref) with the same keywords, and hands its Jacobian prototype
-  to the optimizer: `storage` chooses a dense or a sparse Jacobian (`:auto` decides from its fill; a dense one forced
-  above `max_dense_bytes` is an `ArgumentError`, before allocating). Each cost's kernel decides how its rows enter; there
-  is no robust keyword. This version needs `linsolver = :auto` or `:qr` (the optimizer throws `ArgumentError` for gradient
-  descent and for other solvers), and only non-adaptive `AbstractResidual` costs and no unfixed adaptive kernels (errors
-  from `optimvars_nls` are rethrown prefixed `formulation = :tall:`). `reduction` eliminates as on the normal path, here by
-  QR: the prototype is then a `SchurBlockJacobian`, whose reduced system `storage` makes dense or sparse.
+- `:tall`: the residual vector and the Jacobian (a `JacobianObjective`); the whole `JᵀJ` is never formed.
+  Calls [`optimvars_nls`](@ref) with the same keywords and hands its Jacobian prototype to the optimizer, which chooses the
+  linear system from it; the table below. Each cost's kernel decides how its rows enter; there is no robust keyword. Every
+  cost must be a non-adaptive `AbstractResidual`, with no unfixed adaptive kernel; errors from `optimvars_nls` are
+  rethrown prefixed `formulation = :tall:`, and a dense Jacobian forced above `max_dense_bytes` is one of them, raised
+  before it is allocated.
+
+$TALL_FORMULATION_DOC
 
 `formulation` is a keyword here only: it is not a field of `OptimizationOptions` and is not inferred from `options.linsolver`. Any
 other value is an `ArgumentError`. `callback` and `workspace` are passed to the optimizer. The default of `min_work` is the

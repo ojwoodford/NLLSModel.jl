@@ -1,6 +1,7 @@
 [deps]
 BlockLinearSystems = "a7d4e89f-9c3b-4d0e-8f5a-5b8c7d1e4f28"
 JSOSolvers = "10dff2fc-5484-5881-a0e0-c90441020f8a"
+Krylov = "ba0b0d4f-ebba-5204-a429-3ac8c609bfb7"
 LeastSquaresOptim = "0fc2ff8b-aaa3-5acd-a817-1944a5e08891"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 NLLSModel = "b7e28c5a-4e6f-4d8b-9a1c-5d3e2f1a0b9c"

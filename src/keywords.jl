@@ -29,6 +29,24 @@ function check_densefits(what, rows::Integer, cols::Integer, max_dense_bytes::In
     throw(ArgumentError("A dense $(rows)×$(cols) $what needs $(8 * Int(rows) * Int(cols)) bytes, which exceeds max_dense_bytes = $max_dense_bytes; $remedy."))
 end
 
+# What `formulation = :tall` supports, interpolated into the docstrings of the front door (`optimize!(model, options)`) and
+# of `optimvars_nls`. The README and docs/src/index.md hold the same table, by hand.
+const TALL_FORMULATION_DOC = """
+| `reduction` | `storage` | Jacobian prototype | `linsolver` |
+|:---|:---|:---|:---|
+| no elimination | dense | `Matrix{Float64}` | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
+| no elimination | sparse | `SparseMatrixCSC{Float64, Int}` | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
+| elimination | dense | `SchurBlockJacobian{Float64, Matrix{Float64}}` | `:auto`, `:qr`, `:cholesky`, `:ldl`; `:lsmr` (with Krylov.jl) |
+| elimination | sparse | `SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}` | `:auto`, `:cholesky`, `:ldl`; `:lsmr` (with Krylov.jl) |
+
+`reduction` and `storage` are as for the normal path, `:auto` included: elimination when the model has eliminable
+variables and the structure fits (on the tall path also: each eliminated variable is in a cost), the reduced system
+stored by the normal path's rule, and without elimination the Jacobian's storage from its fill, never dense above
+`max_dense_bytes`. The `linsolver` values are those SecondOrderOptimization accepts for each prototype: its rules,
+the linear system of each row and the iterators it takes are in the "Supported combinations" table of its
+`JacobianObjective` docstring. Any other combination is an `ArgumentError` before anything is evaluated.
+"""
+
 # The description of the set, interpolated into the docstring of each entry point
 const KEYWORDS_DOC = """
 # Keywords

@@ -53,26 +53,38 @@ matrix the solver receives) and `max_dense_bytes`, and the threading floors `min
 ### Tall formulation
 
 `optimize!(model, options; formulation = :tall)` solves the same model from the residual vector and the Jacobian instead of
-the normal equations. Each step is a QR factorization of the Jacobian (dense, or SuiteSparse's sparse QR), so `JᵀJ` is
-never formed and the conditioning is that of `J`, not its square. Use it when the model is ill conditioned (the normal
-equations stall above the minimum).
+the normal equations. Each step is a QR factorization of the Jacobian (dense, or SuiteSparse's sparse QR), or with
+elimination a QR of each eliminated variable's rows and a solve of the reduced problem, so `JᵀJ` is not formed (only the
+reduced system's normal equations, when `linsolver` asks for them) and the conditioning is that of `J`, not its square. Use it when the model is ill conditioned (the normal equations stall above
+the minimum).
 
 ```julia
 result = optimize!(problem, OptimizationOptions(iterator = :levenbergmarquardt); formulation = :tall)
 ```
 
-In this first version:
+What it supports, by the `reduction` and `storage` it ends up with and the `linsolver` given in `OptimizationOptions`:
 
-- `storage` chooses a dense or a sparse Jacobian (`:auto` decides from its fill, and never chooses a dense one above
-  `max_dense_bytes`, default 256 MB). A dense one forced above the cap is an `ArgumentError` giving its size, before
-  anything is allocated;
-- any iterator except gradient descent works (`:levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg`, `:newton`), with
-  `linsolver = :auto` or `:qr`; `:gradientdescent` and the other solvers (for example `:cholesky`) throw the optimizer's `ArgumentError`;
-- `reduction` eliminates eliminable variables as on the normal path (`:auto` when the model has them and the structure
-  fits), here by QR of each eliminated variable's rows; `storage` then chooses dense or sparse storage of the reduced
-  system. `min_work` is the floor of the residual and Jacobian fill, in its own work estimate, with its own default;
+| `reduction` | `storage` | Jacobian prototype | `linsolver` |
+|:---|:---|:---|:---|
+| no elimination | dense | `Matrix{Float64}` | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
+| no elimination | sparse | `SparseMatrixCSC{Float64, Int}` | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
+| elimination | dense | `SchurBlockJacobian{Float64, Matrix{Float64}}` | `:auto`, `:qr`, `:cholesky`, `:ldl`; `:lsmr` (with Krylov.jl) |
+| elimination | sparse | `SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}` | `:auto`, `:cholesky`, `:ldl`; `:lsmr` (with Krylov.jl) |
+
+`reduction` and `storage` are as for the normal path, `:auto` included: elimination when the model has eliminable
+variables and the structure fits (on the tall path also: each eliminated variable is in a cost), the reduced system
+stored by the normal path's rule, and without elimination the Jacobian's storage from its fill, never dense above
+`max_dense_bytes`. The `linsolver` values are those SecondOrderOptimization accepts for each prototype: its rules,
+the linear system of each row and the iterators it takes are in the "Supported combinations" table of its
+`JacobianObjective` docstring. Any other combination is an `ArgumentError` before anything is evaluated.
+
+Also:
+
 - every cost must be a non-adaptive `AbstractResidual`, and no adaptive kernel variable may be unfixed. Otherwise the error
-  from `optimvars_nls` is rethrown with the prefix `formulation = :tall:`;
+  from `optimvars_nls` is rethrown with the prefix `formulation = :tall:`, as is a dense Jacobian forced above
+  `max_dense_bytes` (default 256 MB), raised before it is allocated;
+- `min_work` is the floor of the residual and Jacobian fill (the tables, with elimination), in its own work estimate,
+  with its own default;
 - there is no robust-mode keyword: each cost's kernel decides how its rows enter (see the robust-kernel tutorial), so
   choosing `HuberKernel` or `Huber2oKernel` chooses first- or second-order treatment.
 
