@@ -54,8 +54,9 @@ Solve `model` and write the solution back into `model.variables`. This is the no
   to the optimizer: `storage` chooses a dense or a sparse Jacobian (`:auto` decides from its fill; a dense one forced
   above `max_dense_bytes` is an `ArgumentError`, before allocating). Each cost's kernel decides how its rows enter; there
   is no robust keyword. This version needs `linsolver = :auto` or `:qr` (the optimizer throws `ArgumentError` for gradient
-  descent and for other solvers), only non-adaptive `AbstractResidual` costs and no unfixed adaptive kernels (errors from
-  `optimvars_nls` are rethrown prefixed `formulation = :tall:`), and no elimination.
+  descent and for other solvers), and only non-adaptive `AbstractResidual` costs and no unfixed adaptive kernels (errors
+  from `optimvars_nls` are rethrown prefixed `formulation = :tall:`). `reduction` eliminates as on the normal path, here by
+  QR: the prototype is then a `SchurBlockJacobian`, whose reduced system `storage` makes dense or sparse.
 
 `formulation` is a keyword here only: it is not a field of `OptimizationOptions` and is not inferred from `options.linsolver`. Any
 other value is an `ArgumentError`. `callback` and `workspace` are passed to the optimizer. The default of `min_work` is the

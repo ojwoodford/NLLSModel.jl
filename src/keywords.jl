@@ -10,6 +10,13 @@ function check_reduction(reduction::Symbol)
     reduction in REDUCTION_VALUES || throw(ArgumentError("Unknown reduction $(repr(reduction)); expected :auto, :none or :eliminate."))
     return reduction
 end
+# The wrappers that hand a plain Jacobian to external solvers (`flat_optimvars_nls`, `nls_callbacks`, `NLLSNLSModel`) cannot
+# eliminate: `:auto` does not eliminate there, and `:eliminate` is refused up front. Returns the reduction to build with.
+function check_plain_reduction(reduction::Symbol, name)
+    check_reduction(reduction)
+    reduction === :eliminate && throw(ArgumentError("$name hands a plain Jacobian to external solvers, which cannot eliminate variables: reduction = :eliminate is not supported; use :auto or :none (neither eliminates here)."))
+    return :none
+end
 function check_storage(storage::Symbol)
     storage in STORAGE_VALUES || throw(ArgumentError("Unknown storage $(repr(storage)); expected :auto, :dense or :sparse."))
     return storage
@@ -34,10 +41,12 @@ The same for [`optimvars`](@ref), [`optimvars_nls`](@ref), [`flat_optimvars_nls`
 - `numthreads = StaticInt(Threads.nthreads())`: the most threads an evaluation uses (`StaticInt` or `Integer`).
 - `reduction = :auto`: whether eliminable variables are eliminated (the Schur complement). `:auto` eliminates when the
   model has `iseliminable` variables and the structure fits, and otherwise does not; `:eliminate` eliminates or throws an
-  `ArgumentError`; `:none` never eliminates. On the tall path (the residual and Jacobian) `:auto` means `:none`, and
-  `:eliminate` is an `ArgumentError`: elimination is not implemented there.
-- `storage = :auto`: storage of the matrix the solver receives: the Hessian, the reduced Hessian under elimination, or
-  the Jacobian. `:auto` chooses from the structure (the sparsity of the Hessian, the predicted fill of the reduced
+  `ArgumentError`; `:none` never eliminates. The rule is the same on the tall path (the residual and Jacobian, where the
+  eliminated variables are eliminated by QR), which also needs every eliminated variable to be in a cost. The wrappers
+  that hand a plain Jacobian to external solvers (`flat_optimvars_nls`, `NLLSNLSModel`) never eliminate: there `:auto`
+  does not eliminate and `:eliminate` is an `ArgumentError`. A single unfixed variable is never eliminated.
+- `storage = :auto`: storage of the matrix the solver receives: the Hessian, the reduced system under elimination (on
+  either path), or the Jacobian. `:auto` chooses from the structure (the sparsity of the Hessian, the predicted fill of the reduced
   system's Cholesky factor, or the fill of the Jacobian); `:dense` and `:sparse` force the choice. On the tall path the
   Jacobian is a `Matrix{Float64}` or a `SparseMatrixCSC{Float64, Int}`, and `optimize!(...; formulation = :tall)` hands
   either to the optimizer. On the normal path a single unfixed variable's Hessian is always dense, so `:sparse` is an

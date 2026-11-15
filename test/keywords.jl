@@ -42,9 +42,11 @@ const KW_ENTRY = (
         end
     end
 
-    @testset "reduction on the tall path: :auto means :none, :eliminate is not implemented" begin
+    # NTP2: the normal path's rule; with no eliminable variable :eliminate is the partition's ArgumentError (elimination on
+    # the tall path itself is tested in tallelimination.jl)
+    @testset "reduction on the tall path: no eliminable variable" begin
         err = try optimvars_nls(model; reduction=:eliminate); nothing catch e e end
-        @test err isa ArgumentError && occursin("not implemented", err.msg)
+        @test err isa ArgumentError && occursin("eliminable", err.msg)
         @test_throws ArgumentError flat_optimvars_nls(model; reduction=:eliminate)
         @test_throws ArgumentError NLLSNLSModel(model; reduction=:eliminate)
         x = [0.3, 0.1]
@@ -55,7 +57,7 @@ const KW_ENTRY = (
         @test r_auto == r_none
         # And from the front door, raised by optimvars_nls
         err = try optimize!(deepcopy(model), KW_OPTIONS; formulation=:tall, reduction=:eliminate); nothing catch e e end
-        @test err isa ArgumentError && occursin("tall", err.msg) && occursin("not implemented", err.msg)
+        @test err isa ArgumentError && startswith(err.msg, "formulation = :tall:") && occursin("eliminable", err.msg)
     end
 
     # max_dense_bytes on the tall path: :auto switches to a sparse Jacobian just above the cap, :dense throws there

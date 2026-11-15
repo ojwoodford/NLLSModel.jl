@@ -51,3 +51,8 @@ the system that is left (the reduced system, after elimination).
 ```julia
 optimize!(problem, options; reduction = :eliminate, storage = :sparse)
 ```
+
+The same keywords, with the same rule, apply to `formulation = :tall` (the residual and the Jacobian). There the
+eliminated variables are eliminated by QR of their rows of the Jacobian, so `JᵀJ` is not formed for them: the prototype
+handed to the optimizer is a `SchurBlockJacobian`, and `storage` chooses the storage of the reduced system the same way.
+The tall path also needs each eliminated variable to be in at least one cost.

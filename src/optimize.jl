@@ -181,6 +181,26 @@ function cholmod_symbolic_nnz(fac::SparseArrays.CHOLMOD.Factor, n::Integer)
     end
 end
 
+# Dense or sparse storage of the reduced system, the one rule of the normal and the tall path. `storage` forces it (a dense
+# one above `max_dense_bytes` is an `ArgumentError` naming `what`); `:auto` chooses dense for a reduced system of at most
+# 2 000 that fits under the cap and whose Cholesky factor CHOLMOD predicts to be at least 40% full. Returns
+# `(is_dense, pattern, analysed)`: the reduced system's pattern, when it was built (for the decision, or because the caller
+# `needpattern`), and CHOLMOD's symbolic analysis of it, when that was run.
+function reduced_storage(structure::SchurStructure, extra_blocks, storage::Symbol, max_dense_bytes::Int, what::String; needpattern::Bool)
+    if storage === :dense
+        check_densefits(what, structure.nr, structure.nr, max_dense_bytes)
+        return true, nothing, nothing
+    end
+    pattern = (needpattern || storage === :auto) ? build_schur_pattern(structure; extra_blocks) : nothing
+    if storage === :auto && structure.nr <= 2000 && densefits(structure.nr, structure.nr, max_dense_bytes)
+        chol_fac = SparseArrays.CHOLMOD.analyze(SparseArrays.CHOLMOD.Sparse(Symmetric(pattern.S_sparse, :U)))
+        # Fall back to the pattern's own size if CHOLMOD's prediction is unavailable
+        factor_nnz = something(cholmod_symbolic_nnz(chol_fac, structure.nr), nnz(pattern.S_sparse))
+        return factor_nnz >= 0.40 * 0.5 * structure.nr^2, pattern, chol_fac
+    end
+    return false, pattern, nothing
+end
+
 function optimvars(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction::Symbol=:auto, storage::Symbol=:auto,
         max_dense_bytes::Integer=MAX_DENSE_BYTES, min_work::Integer=MIN_WORK_PER_THREAD_NORMAL,
         min_work_cost::Integer=MIN_WORK_PER_THREAD_COST)
@@ -216,81 +236,59 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
         return optimvars_dispatch(problem, findfirst(unfixed), numthreads, reduction, storage, max_dense_bytes, min_work, min_work_cost)
     end
 
-    has_elims = any(v -> dynamic(OptimizationVariableInterface.iseliminable(typeof(v))), problem.variables)
+    partition = schur_partition(problem, unfixed, reduction)
+    if !isnothing(partition)
+        structure = SchurStructure(partition.r_dims, partition.e_dims, partition.couplings; nchunks=dynamic(numthreads))
 
-    if reduction === :eliminate || (reduction === :auto && has_elims)
-        partition = partition_schur_problem(problem, unfixed, reduction === :eliminate)
-        if !isnothing(partition)
-            structure = SchurStructure(partition.r_dims, partition.e_dims, partition.couplings; nchunks=dynamic(numthreads))
-            
-            # The pattern includes retained-retained pairs sharing a cost, not only those sharing an eliminated variable
-            pattern = storage === :dense ? nothing : build_schur_pattern(structure; extra_blocks=partition.extra_blocks)
+        # Dense or sparse. The pattern includes retained-retained pairs sharing a cost, not only those sharing an
+        # eliminated variable. When the symbolic analysis is run for the decision, it is kept and handed on with the
+        # pattern, so the linear system does not analyse the same pattern again.
+        is_dense, pattern, analysed = reduced_storage(structure, partition.extra_blocks, storage, max_dense_bytes, "reduced Hessian"; needpattern=true)
 
-            # Decision Matrix: Dense vs. Sparse. When the symbolic analysis is run for the decision, it is kept and
-            # handed on with the pattern, so the linear system does not analyse the same pattern again.
-            analysed = nothing
-            is_dense = if storage === :dense
-                check_densefits("reduced Hessian", structure.nr, structure.nr, max_dense_bytes)
-                true
-            elseif storage === :sparse
-                false
-            else
-                if structure.nr <= 2000 && densefits(structure.nr, structure.nr, max_dense_bytes)
-                    chol_fac = SparseArrays.CHOLMOD.analyze(SparseArrays.CHOLMOD.Sparse(Symmetric(pattern.S_sparse, :U)))
-                    analysed = chol_fac
-                    # Fall back to the pattern's own size if CHOLMOD's prediction is unavailable
-                    factor_nnz = something(cholmod_symbolic_nnz(chol_fac, structure.nr), nnz(pattern.S_sparse))
-                    factor_nnz >= 0.40 * 0.5 * structure.nr^2
-                else
-                    false
-                end
-            end
+        total_e_size = sum(Int(d)^2 for d in structure.e_dims; init=0)
+        total_c_size = sum(Int(structure.e_dims[e]) * Int(structure.r_dims[structure.entry_retained[c]]) for e in eachindex(structure.e_dims) for c in structure.eliminated_ptr[e]:(structure.eliminated_ptr[e+1]-1); init=0)
+        E_data = zeros(Float64, total_e_size)
+        C_data = zeros(Float64, total_c_size)
 
-            total_e_size = sum(Int(d)^2 for d in structure.e_dims; init=0)
-            total_c_size = sum(Int(structure.e_dims[e]) * Int(structure.r_dims[structure.entry_retained[c]]) for e in eachindex(structure.e_dims) for c in structure.eliminated_ptr[e]:(structure.eliminated_ptr[e+1]-1); init=0)
-            E_data = zeros(Float64, total_e_size)
-            C_data = zeros(Float64, total_c_size)
-
-            H = if is_dense
-                R_dense = zeros(Float64, structure.nr, structure.nr)
-                SchurBlockMatrix(structure, R_dense, E_data, C_data)
-            else
-                R_sys = SparseBlockLinearSystem{Float64}(TransposedPattern(pattern.block_pattern), structure.r_dims, structure.r_dims)
-                # The pattern (and analysed factor, if any) travel with the matrix to the linear system
-                carried = isnothing(analysed) ? pattern : merge(pattern, (S_factor = analysed,))
-                SchurBlockMatrix(structure, R_sys, E_data, C_data; pattern=carried)
-            end
-
-            nblocks_tot = partition.nrblocks + partition.neblocks
-            blockindices = zeros(UInt, length(problem.variables))
-            for (b, var_idx) in enumerate(partition.unfixed_inds)
-                blockindices[var_idx] = b
-            end
-
-            boffsets = Vector{Int}(undef, nblocks_tot + 1)
-            for b in 1:partition.nrblocks
-                boffsets[b] = structure.boffsets_r[b]
-            end
-            for e in 1:partition.neblocks
-                boffsets[partition.nrblocks + e] = structure.nr + structure.boffsets_e[e]
-            end
-            boffsets[end] = structure.nr + sum(Int, structure.e_dims; init=0) + 1
-
-            tot_len = structure.nr + sum(Int, structure.e_dims; init=0)
-            x_vec = zeros(Float64, tot_len)
-            b_vec = zeros(Float64, tot_len)
-
-            ls_x = MultiVariateLSSchur_x(x_vec, blockindices, boffsets, structure, partition.unfixed_inds)
-            ls_val = MultiVariateLSSchur_ls(H, b_vec)
-            lsschur = LinearSystem(ls_x, ls_val)
-            ls_shared = sharedschurlinearsystem(lsschur, workestimates(problem, partition.unfixed_inds).normal, numthreads, costsplit(problem.costs), min_work)
-            plan = ls_shared isa LinearSystemShared ? build_schur_thread_plan!(problem, blockindices, partition.nrblocks, partition.neblocks, length(ls_shared.ls)) : nothing
-
-            f = MultiVarCostFunc(problem, partition.unfixed_inds, numthreads, min_work_cost)
-            fdf! = MultiVarSchurFDF(ls_shared, problem, partition.unfixed_inds, plan)
-            x0 = problem.variables[partition.unfixed_inds]
-            return (f, fdf!, x0, H)
+        H = if is_dense
+            R_dense = zeros(Float64, structure.nr, structure.nr)
+            SchurBlockMatrix(structure, R_dense, E_data, C_data)
+        else
+            R_sys = SparseBlockLinearSystem{Float64}(TransposedPattern(pattern.block_pattern), structure.r_dims, structure.r_dims)
+            # The pattern (and analysed factor, if any) travel with the matrix to the linear system
+            carried = isnothing(analysed) ? pattern : merge(pattern, (S_factor = analysed,))
+            SchurBlockMatrix(structure, R_sys, E_data, C_data; pattern=carried)
         end
+
+        nblocks_tot = partition.nrblocks + partition.neblocks
+        blockindices = zeros(UInt, length(problem.variables))
+        for (b, var_idx) in enumerate(partition.unfixed_inds)
+            blockindices[var_idx] = b
+        end
+
+        boffsets = Vector{Int}(undef, nblocks_tot + 1)
+        for b in 1:partition.nrblocks
+            boffsets[b] = structure.boffsets_r[b]
+        end
+        for e in 1:partition.neblocks
+            boffsets[partition.nrblocks + e] = structure.nr + structure.boffsets_e[e]
+        end
+        boffsets[end] = structure.nr + sum(Int, structure.e_dims; init=0) + 1
+
+        tot_len = structure.nr + sum(Int, structure.e_dims; init=0)
+        x_vec = zeros(Float64, tot_len)
+        b_vec = zeros(Float64, tot_len)
+
+        ls_x = MultiVariateLSSchur_x(x_vec, blockindices, boffsets, structure, partition.unfixed_inds)
+        ls_val = MultiVariateLSSchur_ls(H, b_vec)
+        lsschur = LinearSystem(ls_x, ls_val)
+        ls_shared = sharedschurlinearsystem(lsschur, workestimates(problem, partition.unfixed_inds).normal, numthreads, costsplit(problem.costs), min_work)
+        plan = ls_shared isa LinearSystemShared ? build_schur_thread_plan!(problem, blockindices, partition.nrblocks, partition.neblocks, length(ls_shared.ls)) : nothing
+
+        f = MultiVarCostFunc(problem, partition.unfixed_inds, numthreads, min_work_cost)
+        fdf! = MultiVarSchurFDF(ls_shared, problem, partition.unfixed_inds, plan)
+        x0 = problem.variables[partition.unfixed_inds]
+        return (f, fdf!, x0, H)
     end
 
     blocksizes, blockindices, unfixed_inds, is_natural = block_sizes_indices(problem.variables, unfixed)

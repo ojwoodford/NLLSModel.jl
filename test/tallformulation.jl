@@ -204,13 +204,15 @@ end
     end
 
     @testset "keywords: reduction" begin
+        # One variable: never partitioned, on either path, whatever the reduction (NTP2)
         model = curvefit()
-        for reduction in (:auto, :none)
+        for reduction in (:auto, :none, :eliminate)
             @test optimize!(deepcopy(model), TallOptions; formulation=:tall, reduction, numthreads=static(1)) isa OptimizationResult
         end
-        err = try optimize!(deepcopy(model), TallOptions; formulation=:tall, reduction=:eliminate); nothing catch e e end
+        # Several variables, none eliminable: :eliminate is the partition's error, from optimvars_nls, prefixed by the front door
+        err = try optimize!(posemodel(), TallOptions; formulation=:tall, reduction=:eliminate); nothing catch e e end
         @test err isa ArgumentError
-        @test occursin("eliminate", err.msg) && occursin("tall", err.msg)
+        @test startswith(err.msg, "formulation = :tall:") && occursin("eliminable", err.msg)
         # and the normal formulation still takes all three
         @test optimize!(posemodel(), TallOptions; reduction=:none, numthreads=static(1)) isa OptimizationResult
     end

@@ -15,7 +15,7 @@ struct TaskResult
     err_val::Float64
 end
 
-struct NLSTallLayout
+struct NLSTallLayout{S}
     K::Int                          # Total residual blocks
     M::Int                          # Total scalar residual length
     N::Int                          # Total unfixed variable degrees of freedom
@@ -34,6 +34,18 @@ struct NLSTallLayout
     linear_weights::Vector{Float64} # Precomputed sqrt(w) for linear kernels
     all_linear::Bool
     work::Int                       # Tall-fill estimate, sum of m * (n + 1) (see `workestimates`), compared with min_work
+    schur::S                        # With elimination, where each cost's rows go in the tables (`TallSchurMap`), otherwise nothing
+end
+
+# Elimination on the tall path: where each cost's rows go in the tables of a `SchurBlockJacobian`. A cost involving an
+# eliminated variable has its rows in that variable's table; any other cost has them in the table of its free group, the
+# costs whose unfixed variables are the same retained blocks.
+struct TallSchurMap
+    structure::SchurJacobianStructure # Built once, at setup: the optimizer reuses a workspace only for the same object
+    cost_table::Vector{Int}           # Table of each cost: its eliminated block, or the number of eliminated blocks plus its free group
+    cost_row::Vector{Int}             # First row of each cost in its table
+    dep_target::Vector{Int}           # Per (cost, dependency), indexed as `sparse_p`: the entry of a retained block in the cost's
+                                      # table (> 0), minus the eliminated block (< 0), or 0 for a fixed variable
 end
 
 # Call `f(cost, k)` for every cost, with `k` its running index across all cost vectors. Recursing over the tuple of cost
@@ -76,8 +88,9 @@ end
 unfixeddims(problem::Model, unfixed::Integer) = Int(dynamic(nvars(problem.variables[unfixed])))
 unfixeddims(problem::Model, unfixed) = sum(i -> Int(dynamic(nvars(problem.variables[i]))), findall(unfixed); init=0)
 
-function build_tall_layout(problem::Model, unfixed, storage::Symbol, max_dense_bytes::Int)
-    # 1. Validate cost types and variable indices
+# 1. Validate cost types and variable indices. The first step of the layout, run by `optimvars_nls` before the partition,
+# which needs valid costs.
+function check_tall_costs(problem::Model)
     for costvec in values(problem.costs)
         if !(eltype(costvec) <: AbstractResidual)
             throw(ArgumentError("optimvars_nls only supports AbstractResidual costs; found $(eltype(costvec))"))
@@ -88,12 +101,94 @@ function build_tall_layout(problem::Model, unfixed, storage::Symbol, max_dense_b
             throw(ArgumentError("Cost of type $(typeof(c)) has duplicate variable indices in varindices(c); unique variable indices per cost are required"))
         end
     end
+    return nothing
+end
 
+# Elimination on the tall path: the partition of the normal path (`schur_partition`), provided every eliminated variable is
+# in a cost (QR cannot eliminate a block of the Jacobian with no rows). A single unfixed variable is never partitioned,
+# as on the normal path.
+function tall_schur_partition(problem::Model, unfixed, reduction::Symbol)
+    unfixed isa Integer && return nothing
+    partition = schur_partition(problem, unfixed, reduction)
+    isnothing(partition) && return nothing
+    incost = falses(length(problem.variables))
+    eachcost(problem.costs) do c, k
+        vinds = varindices(c)
+        for v in (vinds isa Integer ? (vinds,) : vinds)
+            incost[v] = true
+        end
+    end
+    for v in view(partition.unfixed_inds, partition.nrblocks+1:length(partition.unfixed_inds))
+        if !incost[v]
+            reduction === :eliminate && throw(ArgumentError("reduction = :eliminate on the tall path needs every eliminated variable in a cost; variable $v is in none."))
+            return nothing
+        end
+    end
+    return partition
+end
+
+# The tables of the elimination, and where each cost's rows go in them (see `TallSchurMap`)
+function tall_schur_map(problem::Model, partition, resblocksizes::Vector{Int}, dep_start_idx::Vector{Int}, nchunks::Int)
+    nr, ne = partition.nrblocks, partition.neblocks
+    role = zeros(Int, length(problem.variables)) # Retained block (> 0), minus the eliminated block (< 0), or 0 for a fixed variable
+    for (p, v) in enumerate(partition.unfixed_inds)
+        role[v] = p <= nr ? p : nr - p
+    end
+    K = length(resblocksizes)
+    cost_table = Vector{Int}(undef, K)
+    cost_row = Vector{Int}(undef, K)
+    e_rows = zeros(Int, ne)
+    group = Dict{Vector{Int}, Int}()
+    free_retained = Vector{Int}[]
+    free_rows = Int[]
+    eachcost(problem.costs) do c, k
+        vinds = varindices(c)
+        m = resblocksizes[k]
+        e = 0
+        rs = Int[]
+        for v in (vinds isa Integer ? (vinds,) : vinds)
+            role[v] < 0 && (e = -role[v])
+            role[v] > 0 && push!(rs, role[v])
+        end
+        if e > 0
+            cost_table[k] = e
+            cost_row[k] = e_rows[e] + 1
+            e_rows[e] += m
+        else
+            sort!(rs)
+            g = get(group, rs, 0)
+            if g == 0
+                push!(free_retained, rs)
+                push!(free_rows, 0)
+                g = group[rs] = length(free_rows)
+            end
+            cost_table[k] = ne + g
+            cost_row[k] = free_rows[g] + 1
+            free_rows[g] += m
+        end
+    end
+    schur = SchurStructure(partition.r_dims, partition.e_dims, partition.couplings; nchunks)
+    structure = SchurJacobianStructure(schur, e_rows; free_rows, free_retained, nchunks)
+    dep_target = zeros(Int, dep_start_idx[K + 1] - 1)
+    eachcost(problem.costs) do c, k
+        vinds = varindices(c)
+        for d in 1:Int(dynamic(ndeps(c)))
+            ro = role[vinds isa Integer ? vinds : vinds[d]]
+            dep_target[dep_start_idx[k] + d - 1] = ro > 0 ? coupling_entry(structure, cost_table[k], ro) : ro
+        end
+    end
+    return TallSchurMap(structure, cost_table, cost_row, dep_target)
+end
+
+# The layout of the tall system, and the Jacobian prototype: a `Matrix` or a `SparseMatrixCSC`, or with a `partition`
+# (elimination) a `SchurBlockJacobian`, whose reduced storage `storage` chooses
+function build_tall_layout(problem::Model, unfixed, storage::Symbol, max_dense_bytes::Int, partition=nothing, nchunks::Int=1)
     # 2. Sizing and layout arrays
     K = Int(countcosts(costnum, problem.costs))
     M = Int(countcosts(resnum, problem.costs))
-    # A forced dense Jacobian above the cap is refused before anything is allocated
-    storage === :dense && check_densefits("Jacobian", M, unfixeddims(problem, unfixed), max_dense_bytes)
+    # A forced dense Jacobian above the cap is refused before anything is allocated (with elimination, `storage` is the
+    # storage of the reduced system, checked below)
+    isnothing(partition) && storage === :dense && check_densefits("Jacobian", M, unfixeddims(problem, unfixed), max_dense_bytes)
     resoffsets = Vector{Int}(undef, K + 1)
     resblocksizes = Vector{Int}(undef, K)
     resoffsets[1] = 1
@@ -203,6 +298,27 @@ function build_tall_layout(problem::Model, unfixed, storage::Symbol, max_dense_b
     if !isempty(empty_vars)
         @warn "Unfixed variable(s) $(empty_vars) are not referenced by any cost; corresponding Jacobian columns are identically zero (rank-deficient)"
     end
+    active_entries = sum(b -> varblocksizes[b] * col_heights[b], 1:nblocks; init=0)
+    work = active_entries + M # sum over costs of m * n (the Jacobian entries) plus m (the residual)
+
+    # With elimination: the tables, and where each cost goes in them. The storage of the reduced system follows the normal
+    # path's rule (`reduced_storage`); the optimizer builds its own pattern for a sparse one.
+    if !isnothing(partition)
+        schur = tall_schur_map(problem, partition, resblocksizes, dep_start_idx, nchunks)
+        is_dense, = reduced_storage(schur.structure.schur, partition.extra_blocks, storage, max_dense_bytes, "reduced system"; needpattern=false)
+        J_proto = SchurBlockJacobian{Float64, is_dense ? Matrix{Float64} : SparseMatrixCSC{Float64, Int}}(schur.structure)
+        return NLSTallLayout(
+            K, M, N, 0,
+            resoffsets, resblocksizes,
+            varoffsets, varblocksizes,
+            blockindices, nblocks,
+            costvec_start_idx, dep_start_idx,
+            Int[], col_heights,
+            false,
+            linear_weights, all_linear,
+            work, schur
+        ), J_proto
+    end
 
     # 5. Build sparse structure and sparse_p base pointers
     total_deps = dep_start_idx[K + 1] - 1
@@ -275,7 +391,6 @@ function build_tall_layout(problem::Model, unfixed, storage::Symbol, max_dense_b
     end
 
     # 6. Dense vs Sparse decision
-    active_entries = sum(b -> varblocksizes[b] * col_heights[b], 1:nblocks; init=0)
     fill_fraction = active_entries / max(1, M * N)
     is_dense = false
     if storage === :dense
@@ -301,7 +416,7 @@ function build_tall_layout(problem::Model, unfixed, storage::Symbol, max_dense_b
         sparse_p, col_heights,
         is_dense,
         linear_weights, all_linear,
-        active_entries + M # sum over costs of m * n (the Jacobian entries) plus m (the residual)
+        work, nothing
     ), J_proto
 end
 
@@ -324,15 +439,21 @@ end
 @inline safe_sqnorm(r_val::Number) = Float64(abs2(r_val))
 @inline safe_sqnorm(r_val) = Float64(sum(abs2, r_val))
 
-# Check non-finite status and write non-finite values into r without throwing
-@inline function handle_nonfinite_res!(r, r_range, r_val, s)
+# Check non-finite status and write non-finite values into a cost's residual rows `rv` without throwing
+@inline function handle_nonfinite_res!(rv, r_val)
     if any_nonfinite(r_val)
-        r[r_range] .= r_val
+        rv .= r_val
     else
-        r[r_range] .= NaN
+        rv .= NaN
     end
     return Inf
 end
+
+# The rows of cost `k`'s residual: in `r`, or with elimination in its table of `J` (`r` is then not used)
+@inline residual_rows(r, J, k::Int, layout::NLSTallLayout) =
+    view(r, layout.resoffsets[k]:(layout.resoffsets[k] + layout.resblocksizes[k] - 1))
+@inline residual_rows(r, J::SchurBlockJacobian, k::Int, layout::NLSTallLayout) =
+    residual_block(J, layout.schur.cost_table[k], layout.schur.cost_row[k], layout.resblocksizes[k])
 
 # Single residual evaluation returning (cost, clamped, err_code, err_val)
 # How a non-linear robust kernel reweights a residual (shared by the residual and the residual+Jacobian evaluators)
@@ -372,11 +493,9 @@ function robust_weights(kernel, s)
     return WEIGHT_CORRECTOR, 0.5 * c_val, sqrt(dc_val), eps_i, 0, 0, 0.0
 end
 
-function eval_single_res!(r, vars, cost, k::Int, layout::NLSTallLayout, status::NLSRobustStatus)
+# `rv` is the cost's residual rows (`residual_rows`)
+function eval_single_res!(rv, vars, cost, k::Int, layout::NLSTallLayout, status::NLSRobustStatus)
     vars_k = getvars(cost, vars)
-    r_start = layout.resoffsets[k]
-    m_k = layout.resblocksizes[k]
-    r_range = r_start:(r_start + m_k - 1)
 
     if cost isa AbstractAdaptiveResidual
         kernel = vars_k[1]
@@ -389,17 +508,17 @@ function eval_single_res!(r, vars, cost, k::Int, layout::NLSTallLayout, status::
     r_val = computeresidual(cost, vars_for_res...)
     s = safe_sqnorm(r_val)
     if is_nonfinite(s) || any_nonfinite(r_val)
-        c_ret = handle_nonfinite_res!(r, r_range, r_val, s)
+        c_ret = handle_nonfinite_res!(rv, r_val)
         return c_ret, 0, 0, 0.0
     end
 
     if layout.all_linear || islinearkernel(kernel)
         w = layout.linear_weights[k]
         if w == 0.0
-            r[r_range] .= 0.0
+            rv .= 0.0
             return 0.0, 0, 0, 0.0
         else
-            r[r_range] .= r_val .* w
+            rv .= r_val .* w
             return 0.5 * (w * w) * s, 0, 0, 0.0
         end
     end
@@ -407,127 +526,78 @@ function eval_single_res!(r, vars, cost, k::Int, layout::NLSTallLayout, status::
     # Non-linear robust path
     mode, c_ret, scale, eps_i, clamped, err, val = robust_weights(kernel, s)
     if mode == WEIGHT_ZERO
-        r[r_range] .= 0.0
+        rv .= 0.0
     elseif mode == WEIGHT_NAN
-        r[r_range] .= NaN
+        rv .= NaN
     elseif mode == WEIGHT_SCALE
-        r[r_range] .= r_val .* scale
+        rv .= r_val .* scale
     else # WEIGHT_CORRECTOR
-        r[r_range] .= r_val .* (scale / sqrt(1.0 + eps_i))
+        rv .= r_val .* (scale / sqrt(1.0 + eps_i))
     end
     return c_ret, clamped, err, val
 end
 
-# Write zero into Jacobian columns/nzval for cost k
-function zero_cost_jacobian!(J, k::Int, layout::NLSTallLayout, cost)
+# Write cost `k`'s Jacobian into its blocks of `J`. `src` is the cost's (scaled) Jacobian, or one value (0.0 or NaN) for
+# every entry. One loop over the cost's unfixed variables; one method of `write_block!` for each kind of `J`.
+@inline jacobian_entry(src::Number, i, j) = src
+@inline jacobian_entry(src, i, j) = src[i, j]
+function write_cost_jacobian!(J, src, k::Int, layout::NLSTallLayout, cost)
     nd = Int(dynamic(ndeps(cost)))
     vinds = varindices(cost)
-    base_dep = layout.dep_start_idx[k]
+    dep = layout.dep_start_idx[k] - 1
     m_k = layout.resblocksizes[k]
-    r_start = layout.resoffsets[k]
-
-    for d in 1:nd
-        v = vinds isa Integer ? vinds : vinds[d]
-        b = layout.blockindices[v]
-        if b > 0
-            nb = layout.varblocksizes[b]
-            if J isa SparseMatrixCSC
-                p = layout.sparse_p[base_dep + d - 1]
-                stride = layout.col_strides[b]
-                for c_loc in 0:nb-1
-                    col_p = p + c_loc * stride
-                    for r_loc in 0:m_k-1
-                        J.nzval[col_p + r_loc] = 0.0
-                    end
-                end
-            else
-                col_start = layout.varoffsets[b]
-                for c_loc in 0:nb-1
-                    col = col_start + c_loc
-                    for r_loc in 0:m_k-1
-                        J[r_start + r_loc, col] = 0.0
-                    end
-                end
-            end
-        end
-    end
-end
-
-# Write non-finite into Jacobian columns/nzval for cost k
-function nan_cost_jacobian!(J, k::Int, layout::NLSTallLayout, cost)
-    nd = Int(dynamic(ndeps(cost)))
-    vinds = varindices(cost)
-    base_dep = layout.dep_start_idx[k]
-    m_k = layout.resblocksizes[k]
-    r_start = layout.resoffsets[k]
-
-    for d in 1:nd
-        v = vinds isa Integer ? vinds : vinds[d]
-        b = layout.blockindices[v]
-        if b > 0
-            nb = layout.varblocksizes[b]
-            if J isa SparseMatrixCSC
-                p = layout.sparse_p[base_dep + d - 1]
-                stride = layout.col_strides[b]
-                for c_loc in 0:nb-1
-                    col_p = p + c_loc * stride
-                    for r_loc in 0:m_k-1
-                        J.nzval[col_p + r_loc] = NaN
-                    end
-                end
-            else
-                col_start = layout.varoffsets[b]
-                for c_loc in 0:nb-1
-                    col = col_start + c_loc
-                    for r_loc in 0:m_k-1
-                        J[r_start + r_loc, col] = NaN
-                    end
-                end
-            end
-        end
-    end
-end
-
-# Scatter scaled jacobian matrix into J
-function scatter_cost_jacobian!(J, jac_scaled, k::Int, layout::NLSTallLayout, cost)
-    nd = Int(dynamic(ndeps(cost)))
-    vinds = varindices(cost)
-    base_dep = layout.dep_start_idx[k]
-    m_k = layout.resblocksizes[k]
-    r_start = layout.resoffsets[k]
     loffset = 0
-
     for d in 1:nd
         v = vinds isa Integer ? vinds : vinds[d]
         b = layout.blockindices[v]
         if b > 0
             nb = layout.varblocksizes[b]
-            if J isa SparseMatrixCSC
-                p = layout.sparse_p[base_dep + d - 1]
-                stride = layout.col_strides[b]
-                for c_loc in 0:nb-1
-                    col_p = p + c_loc * stride
-                    for r_loc in 0:m_k-1
-                        J.nzval[col_p + r_loc] = jac_scaled[r_loc + 1, loffset + c_loc + 1]
-                    end
-                end
-            else
-                col_start = layout.varoffsets[b]
-                for c_loc in 0:nb-1
-                    col = col_start + c_loc
-                    for r_loc in 0:m_k-1
-                        J[r_start + r_loc, col] = jac_scaled[r_loc + 1, loffset + c_loc + 1]
-                    end
-                end
-            end
+            write_block!(J, src, loffset, k, dep + d, b, m_k, nb, layout)
             loffset += nb
+        end
+    end
+    return nothing
+end
+
+# A sparse J: the block's stored entries, one column of the block every `col_strides[b]` entries of `nzval`
+function write_block!(J::SparseMatrixCSC, src, loffset, k, dep, b, m, nb, layout::NLSTallLayout)
+    p = layout.sparse_p[dep]
+    stride = layout.col_strides[b]
+    for c_loc in 0:nb-1
+        col_p = p + c_loc * stride
+        for r_loc in 0:m-1
+            J.nzval[col_p + r_loc] = jacobian_entry(src, r_loc + 1, loffset + c_loc + 1)
+        end
+    end
+end
+
+# A dense J (a Matrix, or the optimizer's static copy of one): the cost's rows, the block's columns
+function write_block!(J::AbstractMatrix, src, loffset, k, dep, b, m, nb, layout::NLSTallLayout)
+    r_start = layout.resoffsets[k]
+    col_start = layout.varoffsets[b]
+    for c_loc in 0:nb-1
+        col = col_start + c_loc
+        for r_loc in 0:m-1
+            J[r_start + r_loc, col] = jacobian_entry(src, r_loc + 1, loffset + c_loc + 1)
+        end
+    end
+end
+
+# Elimination: the cost's rows of its table, in the columns of the retained block's entry or of the eliminated block
+function write_block!(J::SchurBlockJacobian, src, loffset, k, dep, b, m, nb, layout::NLSTallLayout)
+    target = layout.schur.dep_target[dep]
+    row = layout.schur.cost_row[k]
+    dest = target > 0 ? coupling_block(J, target, row, m, nb) : eliminated_block(J, -target, row, m, nb)
+    for c_loc in 1:nb
+        for r_loc in 1:m
+            dest[r_loc, c_loc] = jacobian_entry(src, r_loc, loffset + c_loc)
         end
     end
 end
 
 # Single residual and Jacobian evaluation returning (cost, clamped, err_code, err_val)
 # Per-task scratch matrix for a scaled Jacobian (Triggs correction, robust weights), so that nothing is allocated per cost.
-# The matrix is valid until the same task evaluates its next cost; `scatter_cost_jacobian!` consumes it straight away.
+# The matrix is valid until the same task evaluates its next cost; `write_cost_jacobian!` consumes it straight away.
 function tall_scratch(::Type{T}, m::Int, P::Int)::Matrix{T} where T
     cache = get!(() -> Dict{DataType, Any}(), task_local_storage(), :nllsmodel_tallcache)::Dict{DataType, Any}
     bysize = get!(() -> Dict{Tuple{Int, Int}, Matrix{T}}(), cache, T)::Dict{Tuple{Int, Int}, Matrix{T}}
@@ -549,18 +619,16 @@ end
 @inline split_kernel(cost::AbstractAdaptiveResidual, vars_k, varflags) = (vars_k[1], Base.tail(vars_k), ndeps(cost) - static(1), varflags >> 1)
 @inline split_kernel(cost, vars_k, varflags) = (robustkernel(cost), vars_k, ndeps(cost), varflags)
 
+# The same kernel for every kind of `J`: only where the rows are written differs (`residual_rows`, `write_block!`)
 function eval_single_resjac!(r, J, vars, cost, k::Int, layout::NLSTallLayout, status::NLSRobustStatus)
     vars_k = getvars(cost, vars)
-    r_start = layout.resoffsets[k]
     m_k = layout.resblocksizes[k]
-    r_range = r_start:(r_start + m_k - 1)
+    rv = residual_rows(r, J, k, layout)
 
     varflags = cost_varflags(layout.blockindices, cost)
     if varflags == 0
-        # All variables are fixed
-        c, cl, err, val = eval_single_res!(r, vars, cost, k, layout, status)
-        zero_cost_jacobian!(J, k, layout, cost)
-        return c, cl, err, val
+        # All variables are fixed: there are no Jacobian entries to write
+        return eval_single_res!(rv, vars, cost, k, layout, status)
     end
 
     # Each of these is assigned once: a variable assigned in two branches and captured by the closure below is boxed
@@ -571,21 +639,20 @@ function eval_single_resjac!(r, J, vars, cost, k::Int, layout::NLSTallLayout, st
     s = safe_sqnorm(res_k)
 
     if is_nonfinite(s) || any_nonfinite(res_k) || any_nonfinite(jac_k)
-        handle_nonfinite_res!(r, r_range, res_k, s)
-        nan_cost_jacobian!(J, k, layout, cost)
+        handle_nonfinite_res!(rv, res_k)
+        write_cost_jacobian!(J, NaN, k, layout, cost)
         return Inf, 0, 0, 0.0
     end
 
     if layout.all_linear || islinearkernel(kernel)
         w = layout.linear_weights[k]
         if w == 0.0
-            r[r_range] .= 0.0
-            zero_cost_jacobian!(J, k, layout, cost)
+            rv .= 0.0
+            write_cost_jacobian!(J, 0.0, k, layout, cost)
             return 0.0, 0, 0, 0.0
         else
-            r[r_range] .= res_k .* w
-            jac_scaled = scaled_jacobian(jac_k, w)
-            scatter_cost_jacobian!(J, jac_scaled, k, layout, cost)
+            rv .= res_k .* w
+            write_cost_jacobian!(J, scaled_jacobian(jac_k, w), k, layout, cost)
             return 0.5 * (w * w) * s, 0, 0, 0.0
         end
     end
@@ -593,20 +660,20 @@ function eval_single_resjac!(r, J, vars, cost, k::Int, layout::NLSTallLayout, st
     # Non-linear robust path
     mode, c_ret, scale, eps_i, clamped, err, val = robust_weights(kernel, s)
     if mode == WEIGHT_ZERO
-        r[r_range] .= 0.0
-        zero_cost_jacobian!(J, k, layout, cost)
+        rv .= 0.0
+        write_cost_jacobian!(J, 0.0, k, layout, cost)
     elseif mode == WEIGHT_NAN
-        r[r_range] .= NaN
-        nan_cost_jacobian!(J, k, layout, cost)
+        rv .= NaN
+        write_cost_jacobian!(J, NaN, k, layout, cost)
     elseif mode == WEIGHT_SCALE
-        r[r_range] .= res_k .* scale
-        scatter_cost_jacobian!(J, scaled_jacobian(jac_k, scale), k, layout, cost)
+        rv .= res_k .* scale
+        write_cost_jacobian!(J, scaled_jacobian(jac_k, scale), k, layout, cost)
     else # WEIGHT_CORRECTOR
         tau = sqrt(1.0 + eps_i)
         alpha = -eps_i / (1.0 + tau)
         inv_norm = inv(sqrt(s))
         sqrt_dc = scale
-        r[r_range] .= res_k .* (sqrt_dc / tau)
+        rv .= res_k .* (sqrt_dc / tau)
 
         # Scale jacobian: jac_scaled = sqrt_dc * (jac_k - alpha * n * (n' * jac_k))
         if jac_k isa SMatrix
@@ -628,7 +695,7 @@ function eval_single_resjac!(r, J, vars, cost, k::Int, layout::NLSTallLayout, st
                 end
             end
         end
-        scatter_cost_jacobian!(J, jac_scaled, k, layout, cost)
+        write_cost_jacobian!(J, jac_scaled, k, layout, cost)
     end
     return c_ret, clamped, err, val
 end
@@ -638,6 +705,14 @@ end
 # valid for a `J` that started as zeros (`optimvars_nls` returns such a prototype) and has only ever been written by an evaluator
 # of this model, because every call writes every entry that can be non-zero (a cost's whole block, with explicit zeros for a zero
 # weight and NaN for a non-finite value), and no other entry.
+# With elimination the zeros of the tables are the entries no cost writes, and the damping rows, which only the optimizer's
+# copy of the tables uses. The tables must be those of this evaluator's structure, which says where each cost goes.
+function check_caller_jacobian!(J::SchurBlockJacobian, layout::NLSTallLayout; prezeroed::Bool=false)
+    (layout.schur isa TallSchurMap && J.structure === layout.schur.structure) ||
+        throw(ArgumentError("This SchurBlockJacobian has another structure: pass the prototype that optimvars_nls returned for this model, or a copy_structure of it."))
+    prezeroed || zero!(J)
+    return nothing
+end
 function check_caller_jacobian!(J, layout::NLSTallLayout; prezeroed::Bool=false)
     if size(J) != (layout.M, layout.N)
         throw(DimensionMismatch("Jacobian matrix size $(size(J)) does not match expected size ($(layout.M), $(layout.N))"))
@@ -669,6 +744,12 @@ end
 # `vars` may be the optimizer's current point, which is `problem.variables` itself, and a trial must not overwrite it.
 # (The same rule as `sync_unfixed_vars!` on the normal-equations path.)
 @inline sync_tall_vars!(::Model, ::Nothing, vars) = vars
+
+# The residual vector: one entry per residual row, except with elimination, where the residuals are written into the
+# tables of `J` and `r` is not used (the optimizer passes an empty one)
+check_caller_residual(r, J, layout::NLSTallLayout) = length(r) == layout.M ||
+    throw(DimensionMismatch("Residual vector length $(length(r)) does not match expected $(layout.M)"))
+check_caller_residual(r, ::SchurBlockJacobian, layout::NLSTallLayout) = nothing
 
 # Callable structs for optimvars_nls
 struct NLSResidual{P, L, U, TR}
@@ -812,16 +893,14 @@ function (res!::NLSResidual)(r::AbstractVector{Float64}, vars)
     full_vars = sync_tall_vars!(problem, res!.unfixed_inds, vars)
 
     return tall_eval!(
-        (c, k) -> eval_single_res!(r, full_vars, c, k, layout, status),
+        (c, k) -> eval_single_res!(residual_rows(r, nothing, k, layout), full_vars, c, k, layout, status),
         values(problem.costs), layout, status, res!.task_results, res!.nthreads, "res!")
 end
 
 # `prezeroed = true` says the structural zeros of the dense `J` are already in place (see `check_caller_jacobian!`): the optimizer
 # hands over a `J` that started as zeros and that only this evaluator writes. The default fills `J` with zeros first.
 function (resjac!::NLSResJac)(r::AbstractVector{Float64}, J, vars; prezeroed::Bool=false)
-    if length(r) != resjac!.layout.M
-        throw(DimensionMismatch("Residual vector length $(length(r)) does not match expected $(resjac!.layout.M)"))
-    end
+    check_caller_residual(r, J, resjac!.layout)
     check_caller_jacobian!(J, resjac!.layout; prezeroed=prezeroed)
 
     problem = resjac!.problem
@@ -851,6 +930,14 @@ There is no robust mode: each cost's kernel decides how its rows enter, as on th
 So choosing first- or second-order treatment means choosing the kernel type. `resjac!(r, J, x)` returns the true cost
 `cost(model)` at `x`; this equals `½‖r‖²` only when [`islinear`](@ref)`(resjac!)` is true.
 
+`J_proto` is a `Matrix{Float64}` or a `SparseMatrixCSC{Float64, Int}`, chosen by `storage`. With elimination (`reduction`) it
+is a BlockLinearSystems `SchurBlockJacobian{Float64, RType}`: one table per eliminated variable, holding the rows of the
+costs that involve it, and tables for the other costs. `resjac!(r, J, x)` then writes each cost's residual and Jacobian
+rows into its table, and leaves `r` alone (pass any vector, for example an empty one); `res!(r, x)` still writes the
+whole residual into `r`. `RType`, `Matrix{Float64}` or `SparseMatrixCSC{Float64, Int}`, is the storage of the reduced
+system, chosen by `storage` and `max_dense_bytes` by the normal path's rule. `x0` then holds the unfixed variables
+in the partition's order, retained first; [`syncvars!`](@ref) writes a solution back.
+
 $KEYWORDS_DOC"""
 function optimvars_nls(
     problem::Model;
@@ -863,12 +950,17 @@ function optimvars_nls(
     min_work_cost::Integer = MIN_WORK_PER_THREAD_COST,
 )
     check_reduction(reduction)
-    reduction === :eliminate && throw(ArgumentError("optimvars_nls does not support reduction = :eliminate (elimination of variables on the Jacobian path is not implemented); use :auto or :none."))
     check_storage(storage)
+    check_tall_costs(problem)
     conv_unfixed = convertunfixed(unfixed, problem)
-    layout, J_proto = build_tall_layout(problem, conv_unfixed, storage, Int(max_dense_bytes))
+    partition = tall_schur_partition(problem, conv_unfixed, reduction)
+    layout, J_proto = build_tall_layout(problem, conv_unfixed, storage, Int(max_dense_bytes), partition, Int(dynamic(numthreads)))
 
-    if conv_unfixed isa Integer
+    if !isnothing(partition)
+        # The variables in the partition's order (retained, then eliminated), which is the column order of the tables
+        is_single = false
+        unfixed_inds = partition.unfixed_inds
+    elseif conv_unfixed isa Integer
         is_single = true
         unfixed_inds = conv_unfixed
     elseif count(conv_unfixed) == 1
@@ -883,7 +975,7 @@ function optimvars_nls(
         x0 = problem.variables[unfixed_inds]
         f = SingleVarCostFunc(problem, unfixed_inds, static(numthreads), min_work_cost)
     else
-        x0 = unfixed_inds === nothing ? problem.variables : problem.variables[unfixed_inds]
+        x0 = isnothing(unfixed_inds) ? problem.variables : problem.variables[unfixed_inds]
         f = MultiVarCostFunc(problem, unfixed_inds, static(numthreads), min_work_cost)
     end
 
@@ -901,7 +993,8 @@ end
     flat_optimvars_nls(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work=$MIN_WORK_PER_THREAD_TALL, min_work_cost=$MIN_WORK_PER_THREAD_COST)
 
 Constructs a flat Euclidean vector wrapper around `optimvars_nls`.
-Returns a NamedTuple `(; f, res!, resjac!, jac!, x0, J_proto, layout, status)`.
+Returns a NamedTuple `(; f, res!, resjac!, jac!, x0, J_proto, layout, status)`. Its Jacobian is a plain matrix, for
+external solvers, so it never eliminates: `reduction = :auto` does not eliminate here, and `:eliminate` is an `ArgumentError`.
 Accepts any unfixed variable whose update is plain addition, `update(v, δ) ≈ v + δ`, and that packs into a flat
 `Float64` vector: a number, or an `AbstractVector` of numbers that can be built from a vector of its values (`Float64`,
 `SVector{N, Float64}`, `Vector{Float64}`, or a type of your own). Nothing needs declaring: each variable type is checked
@@ -918,6 +1011,7 @@ function flat_optimvars_nls(
     min_work::Integer = MIN_WORK_PER_THREAD_TALL,
     min_work_cost::Integer = MIN_WORK_PER_THREAD_COST,
 )
+    reduction = check_plain_reduction(reduction, "flat_optimvars_nls")
     conv_unfixed = convertunfixed(unfixed, problem)
 
     check_flat_variables(problem, conv_unfixed)
@@ -1006,6 +1100,7 @@ function nls_callbacks(
     min_work::Integer = MIN_WORK_PER_THREAD_TALL,
     min_work_cost::Integer = MIN_WORK_PER_THREAD_COST,
 )
+    check_plain_reduction(reduction, "nls_callbacks")
     flat = flat_optimvars_nls(
         problem;
         unfixed = unfixed,

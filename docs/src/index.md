@@ -77,8 +77,9 @@ In this first version:
   anything is allocated;
 - any iterator except gradient descent works (`:levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg`, `:newton`), with
   `linsolver = :auto` or `:qr`; `:gradientdescent` and the other solvers (for example `:cholesky`) throw the optimizer's `ArgumentError`;
-- `reduction = :eliminate` is an `ArgumentError` (use `:auto` or `:none`); `min_work` is the floor of the residual and
-  Jacobian fill, in its own work estimate, with its own default;
+- `reduction` eliminates eliminable variables as on the normal path (`:auto` when the model has them and the structure
+  fits), here by QR of each eliminated variable's rows; `storage` then chooses dense or sparse storage of the reduced
+  system. `min_work` is the floor of the residual and Jacobian fill, in its own work estimate, with its own default;
 - every cost must be a non-adaptive `AbstractResidual`, and no adaptive kernel variable may be unfixed. Otherwise the error
   from [`optimvars_nls`](@ref) is rethrown with the prefix `formulation = :tall:`;
 - there is no robust-mode keyword: each cost's kernel decides how its rows enter (see the robust-kernel tutorial), so

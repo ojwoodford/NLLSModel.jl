@@ -318,6 +318,7 @@ function NLLSModel.NLLSNLSModel(
     min_work_cost::Integer = NLLSModel.MIN_WORK_PER_THREAD_COST,
     name::String = "NLLSNLSModel",
 )
+    reduction = NLLSModel.check_plain_reduction(reduction, "NLLSNLSModel")
     flat = flat_optimvars_nls(problem; unfixed, numthreads, reduction, storage, max_dense_bytes, min_work, min_work_cost)
 
     islinear(flat) || NLLSModel.throw_nonlinear("NLLSNLSModel", problem)

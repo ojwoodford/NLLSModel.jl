@@ -175,6 +175,15 @@ resnum(vec::Vector)   = length(vec) != 0 ? (dynamic(is_static(nres(vec[1]))) ? l
 countcosts(fun, costs::CostStruct) = sum(fun, values(costs); init=0)
 nresiduals(problem::Model) = Int(countcosts(resnum, problem.costs))
 
+# The partition for elimination, or `nothing`: the one rule of the normal and the tall path. `:none` never eliminates;
+# `:auto` eliminates when the model has eliminable variables and the structure fits; `:eliminate` eliminates or throws.
+function schur_partition(problem::Model, unfixed::AbstractVector, reduction::Symbol)
+    reduction === :none && return nothing
+    has_elims = any(v -> dynamic(OptimizationVariableInterface.iseliminable(typeof(v))), problem.variables)
+    (reduction === :eliminate || has_elims) || return nothing
+    return partition_schur_problem(problem, unfixed, reduction === :eliminate)
+end
+
 """
     partition_schur_problem(problem::Model, unfixed::AbstractVector, explicit::Bool=false)
 
