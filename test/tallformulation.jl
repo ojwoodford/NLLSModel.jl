@@ -99,6 +99,32 @@ end
         @test NLLSModel.cost(m2) ≈ r.bestcost atol=1e-12
     end
 
+    # NTP3: a small single static variable gets the optimizer's static tall system, which hands resjac! an MMatrix copy of
+    # the prototype (and an MVector for r); the evaluators take it as they take the Matrix
+    @testset "a single static variable: the optimizer's static system ($name)" for (name, kernel) in (("no kernel", nothing),
+            ("Huber2o", Huber2oKernel(0.3)))
+        model, t = singleproblem(SVector{3, Float64}, 3, 7)
+        if kernel !== nothing
+            robust = Model(SVector{3, Float64}, TlRob{Tgt{SVector{3, Float64}}, typeof(kernel)})
+            addvariable!(robust, model.variables[1])
+            addcost!(robust, TlRob(Tgt(t, 1), kernel))
+            model = robust
+        end
+        f, _, rj, x0, J = tlnls(model; numthreads=static(1))
+        @test x0 isa SVector{3, Float64} && J isa Matrix{Float64} # 3 × 3: under the optimizer's static cap
+        # As the front door builds it, with a spy on the arguments resjac! receives
+        seen = Set{Any}()
+        spy = (r, J, x) -> (push!(seen, (typeof(r), typeof(J))); TallExt.TallResJac(rj)(r, J, x))
+        x, res = SecondOrderOptimization.optimize(x0, JacobianObjective(f, spy, J), TallOptions)
+        @test seen == Set([(MVector{3, Float64}, MMatrix{3, 3, Float64, 9})])
+        # The front door reaches the normal path's cost and the spy's point
+        solved, rt = optimize(model, TallOptions; formulation=:tall)
+        normal, _ = optimize(model, TallOptions)
+        @test NLLSModel.cost(solved) ≈ NLLSModel.cost(normal) rtol=1e-8 atol=1e-14
+        @test solved.variables[1] ≈ x rtol=1e-12
+        @test rt.bestcost ≈ res.bestcost rtol=1e-12 atol=1e-20
+    end
+
     @testset "same optimum, robust Huber with outliers is not the least-squares optimum" begin
         # Guard against the Huber tests above passing because the kernel was silently ignored
         ls = optimize(curvefit(outliers=4), TallOptions; formulation=:tall, numthreads=static(1))[1]

@@ -35,6 +35,22 @@ function warmallocs_barrier(model; storage, kwargs...)
     f, res!, resjac!, x0, J = optimvars_nls(model; storage, kwargs...)
     return evalallocs(f, res!, resjac!, x0, J)
 end
+# A warm call with the static copies the optimizer's static system passes, with and without prezeroed
+prezeroedcall(rj, r, J, x) = rj(r, J, x; prezeroed=true)
+function staticallocs(rj, r, J, x)
+    rj(r, J, x); prezeroedcall(rj, r, J, x)
+    a = @allocated rj(r, J, x)
+    b = @allocated prezeroedcall(rj, r, J, x)
+    return a, b
+end
+# A warm solve of a single static variable (`optimize`, which returns the solution) through the static system
+function staticsolve_allocs(f, rj, x0, J)
+    opts = OptimizationOptions(iterator=:levenbergmarquardt, maxiters=10, reldcost=0.0, absdcost=0.0, dstep=0.0, gtol=0.0, maxstall=10^6)
+    obj = JacobianObjective(f, AllocExt.TallResJac(rj), J)
+    ws = OptimizationWorkspace(x0, obj, opts)
+    SecondOrderOptimization.optimize(x0, obj, opts; workspace=ws); SecondOrderOptimization.optimize(x0, obj, opts; workspace=ws)
+    return @allocated SecondOrderOptimization.optimize(x0, obj, opts; workspace=ws)
+end
 function evalallocs(f, res!, resjac!, x0, J)
     r = zeros(NLLSModel.nresiduals(res!.problem))
     for _ in 1:3
@@ -85,6 +101,19 @@ end
         @test warmallocs_barrier(staticrobust(Huber2oKernel(0.3); n=40); kw...) == (0, 0, 0)
         @test warmallocs_barrier(staticplain(n=40); unfixed=[1, 3, 5], kw...) == (0, 0, 0)
         @test warmallocs_barrier(handmodel(Huber2oKernel(0.3), HuberKernel(0.3)); kw...)[1:2] == (0, 0)
+    end
+
+    # NTP3: the optimizer's static system hands resjac! an MMatrix and an MVector; a warm call allocates nothing (through a
+    # function barrier), and neither does a warm solve through the static system
+    @testset "the static system's MMatrix: a warm call allocates nothing, $name" for (name, kernel) in (("no kernel", NoRobust()),
+            ("Huber2o", Huber2oKernel(0.3)))
+        rng = MersenneTwister(8)
+        model = Model(SVector{3, Float64}, TlRob{Tgt{SVector{3, Float64}}, typeof(kernel)})
+        addvariable!(model, randn(rng, SVector{3, Float64}))
+        foreach(_ -> addcost!(model, TlRob(Tgt(randn(rng, SVector{3, Float64}), 1), kernel)), 1:4) # 12 × 3: under the cap
+        f, _, rj, x0, J = optimvars_nls(model; numthreads=static(1))
+        @test staticallocs(rj, MVector{12}(zeros(12)), MMatrix{12, 3}(zeros(12, 3)), x0) == (0, 0)
+        @test staticsolve_allocs(f, rj, x0, J) == 0
     end
 
     # A whole solve: per iteration, the tall path allocates no more than the normal equations do on the same model

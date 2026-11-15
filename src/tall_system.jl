@@ -930,7 +930,9 @@ There is no robust mode: each cost's kernel decides how its rows enter, as on th
 So choosing first- or second-order treatment means choosing the kernel type. `resjac!(r, J, x)` returns the true cost
 `cost(model)` at `x`; this equals `½‖r‖²` only when [`islinear`](@ref)`(resjac!)` is true.
 
-`J_proto` is a `Matrix{Float64}` or a `SparseMatrixCSC{Float64, Int}`, chosen by `storage`. With elimination (`reduction`) it
+`J_proto` is a `Matrix{Float64}` or a `SparseMatrixCSC{Float64, Int}`, chosen by `storage`. In place of a dense prototype,
+`resjac!` takes any dense `AbstractMatrix` of its size (SecondOrderOptimization hands it an `MMatrix` copy, and an
+`MVector` for `r`, when it solves a small single static variable with its static system). With elimination (`reduction`) it
 is a BlockLinearSystems `SchurBlockJacobian{Float64, RType}`: one table per eliminated variable, holding the rows of the
 costs that involve it, and tables for the other costs. `resjac!(r, J, x)` then writes each cost's residual and Jacobian
 rows into its table, and leaves `r` alone (pass any vector, for example an empty one); `res!(r, x)` still writes the
