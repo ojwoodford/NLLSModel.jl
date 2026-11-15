@@ -105,7 +105,7 @@ end
             p
         end
         p1, p4 = build(), build()
-        @test NLLSModel.workestimates(p1, nothing).linearization >= NLLSModel.MIN_WORK_FOR_THREADED_LINEARIZATION
+        @test NLLSModel.workestimates(p1, nothing).normal >= NLLSModel.MIN_WORK_PER_THREAD_NORMAL
         f1, fdf1!, x1, H1 = optimvars(p1; numthreads=static(1))
         f4, fdf4!, x4, H4 = optimvars(p4; numthreads=static(4))
         @test fdf4!.linsystem isa NLLSModel.LinearSystemShared # One copy of the system per thread

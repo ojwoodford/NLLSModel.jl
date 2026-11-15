@@ -20,7 +20,7 @@ struct SingleVarCostFunc{P, U}
     min_work::Int # Per-thread floor
     nthreads::Int # Threads the cost is evaluated on, `threadcount(work, min_work, numthreads)`
 end
-SingleVarCostFunc(problem, unfixed, numthreads, min_work::Integer=MIN_WORK_FOR_THREADED_COST) =
+SingleVarCostFunc(problem, unfixed, numthreads, min_work::Integer=MIN_WORK_PER_THREAD_COST) =
     SingleVarCostFunc(problem, unfixed, costestimate(problem.costs), Int(min_work), threadcount(costestimate(problem.costs), min_work, dynamic(numthreads)))
 @inline function (f::SingleVarCostFunc)(x)
     @inbounds f.problem.variables[f.unfixed] = x
@@ -78,7 +78,7 @@ struct MultiVarCostFunc{P, U}
     min_work::Int # Per-thread floor
     nthreads::Int # Threads the cost is evaluated on, `threadcount(work, min_work, numthreads)`
 end
-MultiVarCostFunc(problem, unfixed_inds, numthreads, min_work::Integer=MIN_WORK_FOR_THREADED_COST) =
+MultiVarCostFunc(problem, unfixed_inds, numthreads, min_work::Integer=MIN_WORK_PER_THREAD_COST) =
     MultiVarCostFunc(problem, unfixed_inds, costestimate(problem.costs), Int(min_work), threadcount(costestimate(problem.costs), min_work, dynamic(numthreads)))
 @inline function (f::MultiVarCostFunc)(vars)
     full_vars = sync_unfixed_vars!(f.problem, f.unfixed_inds, vars)
@@ -182,8 +182,8 @@ function cholmod_symbolic_nnz(fac::SparseArrays.CHOLMOD.Factor, n::Integer)
 end
 
 function optimvars(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction::Symbol=:auto, storage::Symbol=:auto,
-        max_dense_bytes::Integer=MAX_DENSE_BYTES, min_work::Integer=MIN_WORK_FOR_THREADED_LINEARIZATION,
-        min_work_cost::Integer=MIN_WORK_FOR_THREADED_COST)
+        max_dense_bytes::Integer=MAX_DENSE_BYTES, min_work::Integer=MIN_WORK_PER_THREAD_NORMAL,
+        min_work_cost::Integer=MIN_WORK_PER_THREAD_COST)
     check_reduction(reduction)
     check_storage(storage)
     return optimvars_dispatch(problem, convertunfixed(unfixed, problem), static(numthreads), reduction, storage, Int(max_dense_bytes), min_work, min_work_cost)
@@ -200,7 +200,7 @@ function optimvars_dispatch(problem::Model, unfixed::Integer, numthreads::Static
     else
         ls = LinearSystem{UniVariateLSdynamic_x, UniVariateLSdynamic_ls}((unfixed, dynamic(varlen)), (dynamic(varlen),))
     end
-    ls_shared = sharedlinearsystem(ls, workestimates(problem, unfixed).linearization, numthreads, min_work)
+    ls_shared = sharedlinearsystem(ls, workestimates(problem, unfixed).normal, numthreads, min_work)
     f = SingleVarCostFunc(problem, unfixed, numthreads, min_work_cost)
     fdf! = SingleVarCostGradHess(ls_shared, problem, unfixed)
     # The Hessian prototype has the type of the system's own storage (an MMatrix or a Matrix), so buffers built from it
@@ -283,7 +283,7 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
             ls_x = MultiVariateLSSchur_x(x_vec, blockindices, boffsets, structure, partition.unfixed_inds)
             ls_val = MultiVariateLSSchur_ls(H, b_vec)
             lsschur = LinearSystem(ls_x, ls_val)
-            ls_shared = sharedschurlinearsystem(lsschur, workestimates(problem, partition.unfixed_inds).linearization, numthreads, min_work)
+            ls_shared = sharedschurlinearsystem(lsschur, workestimates(problem, partition.unfixed_inds).normal, numthreads, min_work)
             plan = ls_shared isa LinearSystemShared ? build_schur_thread_plan!(problem, blockindices, partition.nrblocks, partition.neblocks, length(ls_shared.ls)) : nothing
 
             f = MultiVarCostFunc(problem, partition.unfixed_inds, numthreads, min_work_cost)
@@ -312,12 +312,12 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
     if issparse
         bsm = SparseBlockLinearSystem{Float64}(TransposedPattern(sparsity), blocksizes, blocksizes)
         lssparse = MultiVariateLSsparse(bsm, blockindices, true)
-        ls_shared = sharedlinearsystem(lssparse, workestimates(problem, unfixed).linearization, numthreads, min_work)
+        ls_shared = sharedlinearsystem(lssparse, workestimates(problem, unfixed).normal, numthreads, min_work)
         fdf! = MultiVarSparseFDF(ls_shared, problem, unfixed_sync)
         return (f, fdf!, x0, lssparse.x.hessian)
     else
         lsdense = MultiVariateLSdense(blocksizes, blockindices)
-        ls_shared = sharedlinearsystem(lsdense, workestimates(problem, unfixed).linearization, numthreads, min_work)
+        ls_shared = sharedlinearsystem(lsdense, workestimates(problem, unfixed).normal, numthreads, min_work)
         fdf! = MultiVarDenseFDF(ls_shared, problem, unfixed_sync)
         return (f, fdf!, x0, nothing)
     end

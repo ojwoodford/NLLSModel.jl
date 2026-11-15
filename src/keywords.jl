@@ -43,15 +43,16 @@ The same for [`optimvars`](@ref), [`optimvars_nls`](@ref), [`flat_optimvars_nls`
 - `max_dense_bytes = $MAX_DENSE_BYTES` (256 MiB): under `storage = :auto` a dense matrix larger than this is not chosen (it is
   stored sparse instead); under `:dense` a larger one is an `ArgumentError` saying how large it would be, raised before it
   is allocated. A single variable's Hessian has no sparse alternative, so above the cap it is an `ArgumentError` either way.
-- `min_work`: per-thread floor of the linearization, in the work estimate of the formulation: on the normal path
-  (default $MIN_WORK_FOR_THREADED_LINEARIZATION) one number written in forming the normal equations, per cost `m * n * (n + 1)`; on the
-  tall path (default $MIN_WORK_PER_THREAD) one entry of `r` or `J` written, per cost `m * (n + 1)`.
-- `min_work_cost = $MIN_WORK_FOR_THREADED_COST`: per-thread floor of a cost evaluation, one residual entry, per cost `m`.
+- `min_work`: per-thread floor of the fill, in the work estimate of the formulation: on the normal path (the normal fill,
+  forming `JᵀJ` and `Jᵀr`; default $MIN_WORK_PER_THREAD_NORMAL) one number written, per cost `m * n * (n + 1)`; on the tall path (the
+  tall fill, writing `r` and `J`; default $MIN_WORK_PER_THREAD_TALL) one entry of `r` or `J` written, per cost `m * (n + 1)`.
+- `min_work_cost = $MIN_WORK_PER_THREAD_COST`: per-thread floor of a cost evaluation, one residual entry, per cost `m`.
 
 Each kind of work is split over `clamp(work ÷ floor, 1, numthreads)` threads: one thread when its estimate is below
-twice the floor, and every thread at a floor of 0. On the normal path each thread has its own copy of the linear system,
-so the number of copies is also capped by memory. The floors are starting values, measured on cheap residuals; a
-costly residual could thread earlier than they let it.
+twice the floor, and every thread at a floor of 0. The normal fill uses at most $MAX_THREADS_NORMAL threads: each thread fills its own
+copy of the linear system, which costs work in proportion to the size of the system, so on large systems more threads
+were measured to be slower (the number of copies is also capped by memory). The defaults were measured on cheap residuals,
+on one machine; a costly residual could thread earlier than they let it.
 
 Here `m` is a cost's residual length (1 for a general [`AbstractCost`](@ref)) and `n` the total dimension of its
 unfixed variables; each estimate is summed over all costs and computed once, at setup. The work of the residual

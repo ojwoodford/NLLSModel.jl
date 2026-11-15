@@ -836,7 +836,7 @@ function (resjac!::NLSResJac)(r::AbstractVector{Float64}, J, vars; prezeroed::Bo
 end
 
 """
-    optimvars_nls(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work=$MIN_WORK_PER_THREAD, min_work_cost=$MIN_WORK_FOR_THREADED_COST)
+    optimvars_nls(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work=$MIN_WORK_PER_THREAD_TALL, min_work_cost=$MIN_WORK_PER_THREAD_COST)
 
 Constructs tall residual and Jacobian callable structs `(f, res!, resjac!, x0, J_proto)` for `problem`.
 
@@ -859,8 +859,8 @@ function optimvars_nls(
     reduction::Symbol = :auto,
     storage::Symbol = :auto,
     max_dense_bytes::Integer = MAX_DENSE_BYTES,
-    min_work::Integer = MIN_WORK_PER_THREAD,
-    min_work_cost::Integer = MIN_WORK_FOR_THREADED_COST,
+    min_work::Integer = MIN_WORK_PER_THREAD_TALL,
+    min_work_cost::Integer = MIN_WORK_PER_THREAD_COST,
 )
     check_reduction(reduction)
     reduction === :eliminate && throw(ArgumentError("optimvars_nls does not support reduction = :eliminate (elimination of variables on the Jacobian path is not implemented); use :auto or :none."))
@@ -898,7 +898,7 @@ function optimvars_nls(
 end
 
 """
-    flat_optimvars_nls(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work=$MIN_WORK_PER_THREAD, min_work_cost=$MIN_WORK_FOR_THREADED_COST)
+    flat_optimvars_nls(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work=$MIN_WORK_PER_THREAD_TALL, min_work_cost=$MIN_WORK_PER_THREAD_COST)
 
 Constructs a flat Euclidean vector wrapper around `optimvars_nls`.
 Returns a NamedTuple `(; f, res!, resjac!, jac!, x0, J_proto, layout, status)`.
@@ -915,8 +915,8 @@ function flat_optimvars_nls(
     reduction::Symbol = :auto,
     storage::Symbol = :auto,
     max_dense_bytes::Integer = MAX_DENSE_BYTES,
-    min_work::Integer = MIN_WORK_PER_THREAD,
-    min_work_cost::Integer = MIN_WORK_FOR_THREADED_COST,
+    min_work::Integer = MIN_WORK_PER_THREAD_TALL,
+    min_work_cost::Integer = MIN_WORK_PER_THREAD_COST,
 )
     conv_unfixed = convertunfixed(unfixed, problem)
 
@@ -989,7 +989,7 @@ function throw_nonlinear(name, problem)
 end
 
 """
-    nls_callbacks(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work=$MIN_WORK_PER_THREAD, min_work_cost=$MIN_WORK_FOR_THREADED_COST)
+    nls_callbacks(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work=$MIN_WORK_PER_THREAD_TALL, min_work_cost=$MIN_WORK_PER_THREAD_COST)
 
 Lightweight callback helper for `LeastSquaresOptim.jl`.
 Accepts any non-adaptive `AbstractResidual` problem in which every cost has a linear kernel (`NoRobust`, or `Scaled` with a finite non-negative height).
@@ -1003,8 +1003,8 @@ function nls_callbacks(
     reduction::Symbol = :auto,
     storage::Symbol = :auto,
     max_dense_bytes::Integer = MAX_DENSE_BYTES,
-    min_work::Integer = MIN_WORK_PER_THREAD,
-    min_work_cost::Integer = MIN_WORK_FOR_THREADED_COST,
+    min_work::Integer = MIN_WORK_PER_THREAD_TALL,
+    min_work_cost::Integer = MIN_WORK_PER_THREAD_COST,
 )
     flat = flat_optimvars_nls(
         problem;

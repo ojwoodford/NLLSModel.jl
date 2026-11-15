@@ -224,7 +224,7 @@ end
             @test f0 isa (nvars == 1 ? NLLSModel.SingleVarCostFunc : NLLSModel.MultiVarCostFunc)
             @test f0.work >= f0.min_work == 0 # Threaded
             @test fbig.work < fbig.min_work   # Not
-            @test optimvars_nls(model)[1].min_work == NLLSModel.MIN_WORK_FOR_THREADED_COST # Default unchanged
+            @test optimvars_nls(model)[1].min_work == NLLSModel.MIN_WORK_PER_THREAD_COST # Default unchanged
             @test f0(x) ≈ fbig(x) rtol=1e-13
             flat0 = flat_optimvars_nls(model; numthreads=static(4), min_work_cost=0)
             flatbig = flat_optimvars_nls(model; numthreads=static(4), min_work_cost=10^9)

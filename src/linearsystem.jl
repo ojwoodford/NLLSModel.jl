@@ -216,9 +216,9 @@ sharedlinearsystem(ls, n::Integer) = sharedlinearsystem(ls, static(n))
 # may use, reducing the number of threads that linearize rather than allocating without bound.
 const MAX_THREAD_COPY_BYTES = 2^30
 threadcopylimit(ls, nthreads::Integer, budget::Integer=MAX_THREAD_COPY_BYTES) = clamp(1 + budget ÷ max(1, Base.summarysize(ls.ls)), 1, nthreads)
-# `work` is the linearization estimate of `workestimates`: one copy per thread of `threadcount`, capped by the memory budget
-function sharedlinearsystem(ls, work::Integer, numthreads::StaticInt, min_work=MIN_WORK_FOR_THREADED_LINEARIZATION)
-    n = threadcount(work, min_work, dynamic(numthreads))
+# `work` is the normal-fill estimate of `workestimates`: one copy per thread of `normalthreads`, capped by the memory budget
+function sharedlinearsystem(ls, work::Integer, numthreads::StaticInt, min_work=MIN_WORK_PER_THREAD_NORMAL)
+    n = normalthreads(work, min_work, dynamic(numthreads))
     n == 1 && return ls
     return sharedlinearsystem(ls, static(threadcopylimit(ls, n)))
 end

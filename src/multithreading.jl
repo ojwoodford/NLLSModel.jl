@@ -2,46 +2,46 @@ using Polyester
 
 # Threading decisions. Each kind of work has its own estimate, the count of numbers it writes, summed over all costs, with
 # per cost `m` the residual length (1 for a general `AbstractCost`) and `n` the total dimension of its unfixed variables:
-#   cost evaluation                 m              (residual entries)                        per-thread floor `min_work_cost`
-#   tall residual and Jacobian fill m * (n + 1)    (Jacobian entries and the residual)       per-thread floor `min_work`
-#   normal-equations linearization  m * n * (n + 1) (Jacobian entries times columns, Gram)   per-thread floor `min_work`
-# A general `AbstractCost` has a Hessian, so it counts as `m = 1` in the linearization form. The work of the residual
-# function itself is not estimated: the floors are calibrated on cheap residuals, so a costly one threads later than it
-# could, never earlier than it should. The estimates are computed once, at setup (`workestimates`), and each kind of work
-# is split over `threadcount(work, floor, numthreads)` threads, decided then too.
+#   cost evaluation                 m              (residual entries)                         per-thread floor `min_work_cost`
+#   tall fill, r and J              m * (n + 1)    (Jacobian entries and the residual)        per-thread floor `min_work`
+#   normal fill, JᵀJ and Jᵀr        m * n * (n + 1) (Jacobian entries times columns, Gram)    per-thread floor `min_work`
+# A general `AbstractCost` has a Hessian, so it counts as `m = 1` in the normal-fill form. The work of the residual
+# function itself is not estimated. The estimates are computed once, at setup (`workestimates`), and each kind of work
+# is split over `threadcount(work, floor, numthreads)` threads, decided then too; the normal fill over at most
+# `MAX_THREADS_NORMAL` of them (`normalthreads`).
 #
-# The table below measures the break-even of the total estimate, before the floors were per thread. The defaults are the
-# break-evens of the families with cheap residuals (static variables, hand-sized residual code), on
-# 4 threads, measured on an Apple M1 Pro (8 performance and 2 efficiency cores), Julia 1.13.3, 2026-11-14, by timing the
-# serial and the threaded evaluation of each family over a range of sizes. Break-even as (lo, hi]: lo the largest
-# estimate at which the threaded evaluation was not faster, hi the next size measured.
+# The defaults were measured on an Apple M1 Pro (8 performance and 2 efficiency cores), Julia 1.13.3, -t 8, 2026-11-14/15,
+# three runs. For each family and size every kind of work was timed on exactly 1 to 8 threads (minimum over repeated
+# evaluations), and the count the rule chooses for T = 2, 4 and 8 was compared with serial and with the best count up to
+# T. Worst cases over the three runs, for the families with cheap residuals (static variables, hand-sized residual code),
+# at the defaults:
 #
-#   kind           threads  bundle adjustment (2x12)  pose chain (6x12)   curve fit, dynamic (1x5)  Procrustes d=5/10/20
-#   cost             2       (84, 136]                 (132, 216]          (52, 84]*                 (30,50] (30,50] (0,20]
-#                    4       (216, 346]                (132, 216]          (52, 84]                  (0,20] each
-#                    8       (346, 554]                (348, 552]          (52, 84]                  (30,50] (0,20] (0,20]
-#   tall fill        2       (546, 884]                (234, 312]          (0, 18]                   (0,55] (0,460] (0,3820]
-#                    4       (338, 546]                (546, 858]          (0, 18]                   same
-#                    8       (338, 546]                (546, 858]          (0, 18]                   same
-#   linearization    2       (2184, 3744]              (5616, 9360]        (0, 30]                   (0,550] (0,20700] (0,725800]
-#                    4       (9360, 14976]             (9360, 14976]       (60, 90]                  (1100,1650] (0,20700] (0,725800]
-#                    8       (14976, 23712]            (38376, 60840]      (120, 210]                (1100,1650] (0,20700] (0,725800]
-#   * on 2 threads two sizes measured 0.64x between 1.98x and 1.92x (an outlier, probably GC); about (52, 84] without them.
+#   kind          floor             bundle adjustment (2x12)          pose chain (6x12)
+#   cost          120               1.04x serial, 1.58-1.90x best     1.00-1.23x serial, 1.29-2.06x best
+#   tall fill     280               1.00x serial, 1.36-1.95x best     1.00-1.11x serial, 1.47-1.77x best
+#   normal fill   4000, at most 4   1.00x serial, 1.19-1.21x best     1.00x serial, 1.12-1.15x best
 #
-# No single floor per kind of work is within a factor of two of every family: the costly residuals (Procrustes) and the
-# dynamic-variable autodiff (curve fit) thread profitably at two costs, 7x (tall) to 45x (linearization) below the cheap
-# families, because the per-cost work of evaluating the residual and its derivatives is not in the estimates. The floors
-# are set at the cheap families, so a costly residual threads later than it could, never too early (decided 2026-11-14).
-# On 8 threads the pose chain's linearization pays only from about 38 000 to 61 000, above this floor.
-const MIN_WORK_FOR_THREADED_COST = 350
-const MIN_WORK_FOR_THREADED_LINEARIZATION = 15_000
-const MIN_WORK_PER_THREAD = 450 # tall fill: threaded from 2 * MIN_WORK_PER_THREAD = 900, one thread per MIN_WORK_PER_THREAD
+# The cost and tall floors are compromises: no per-thread floor keeps every size within 25% of the best count, because the
+# best count jumps between sizes near each switch point and the best floor moved between runs (tall: 130 to 278). The
+# normal fill is capped because each thread fills and then sums its own copy of the system, work in proportion to the size
+# of the system: without the cap, on 8 threads, 4 to 7 threads beat 8 by up to 2.3x from an estimate of about 60 000. The
+# cap of 4 is a starting value for this machine; more cores, or a costly residual, may want more.
+#
+# The costly residuals (Procrustes) and the dynamic-variable autodiff (curve fit) would thread profitably well below these
+# floors, because the per-cost work of evaluating the residual and its derivatives is not in the estimates; at these
+# floors they thread later than they could, up to 4 to 6x slower than their best count at small sizes (decided
+# 2026-11-14: no per-cost term). A model of a single costly cost can be given more threads than it has costs (Procrustes,
+# one cost: up to 1.39x slower than serial); the rule does not bound the count by the number of costs.
+const MIN_WORK_PER_THREAD_COST = 120
+const MIN_WORK_PER_THREAD_TALL = 280
+const MIN_WORK_PER_THREAD_NORMAL = 4_000
+const MAX_THREADS_NORMAL = 4
 
 # The three estimates for the variables selected by `unfixed` (an index, or a mask over `problem.variables`)
 struct WorkEstimates
     cost::Int
     tall::Int
-    linearization::Int
+    normal::Int
 end
 
 unfixedsizes(problem, unfixed::Integer) = [i == unfixed ? Int(dynamic(nvars(v))) : 0 for (i, v) in enumerate(problem.variables)]
@@ -145,6 +145,9 @@ function threadcount(work::Integer, floor::Integer, numthreads::Integer)
     work < 2 * floor && return 1
     return Int(clamp(work ÷ floor, 1, numthreads))
 end
+
+# The normal fill: the same rule, at most `MAX_THREADS_NORMAL` threads (each thread fills its own copy of the system)
+normalthreads(work::Integer, floor::Integer, numthreads::Integer) = min(threadcount(work, floor, numthreads), MAX_THREADS_NORMAL)
 
 # The cost, summed over `nthreads` chunks of the costs, one per thread
 function cost_multithreaded(vars, costs::CostStruct, nthreads::Int)::Float64

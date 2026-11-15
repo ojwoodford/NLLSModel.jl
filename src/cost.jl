@@ -11,7 +11,7 @@ cost(vars::AbstractVector, costs::CostStruct, numthreads::StaticInt)::Float64 = 
 
 cost_struct(vars, costs::CostStruct, ::StaticInt{1}) = sum(bindleadingargs(computecost, vars), costs; init=0.0)
 cost_struct(vars, costs::CostStruct, numthreads::StaticInt) =
-    cost_multithreaded(vars, costs, threadcount(costestimate(costs), MIN_WORK_FOR_THREADED_COST, dynamic(numthreads)))
+    cost_multithreaded(vars, costs, threadcount(costestimate(costs), MIN_WORK_PER_THREAD_COST, dynamic(numthreads)))
 
 function cost_range(vars, costlist::AbstractVector, rng::AbstractUnitRange)::Float64
     tot = 0.0

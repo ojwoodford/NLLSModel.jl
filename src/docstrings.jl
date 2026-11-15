@@ -193,7 +193,7 @@ addcost!(problem, my_residual)
 addcost!
 
 """
-    optimvars(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, min_work=$MIN_WORK_FOR_THREADED_LINEARIZATION, min_work_cost=$MIN_WORK_FOR_THREADED_COST) -> (f, fdf!, x0, H)
+    optimvars(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, min_work=$MIN_WORK_PER_THREAD_NORMAL, min_work_cost=$MIN_WORK_PER_THREAD_COST) -> (f, fdf!, x0, H)
 
 The normal way to solve a `Model` is `optimize!(model, options)` (needs `using SecondOrderOptimization`); `optimvars` is the
 advanced route, for custom outer loops, reusing a workspace, or other solvers.
@@ -402,7 +402,7 @@ without BLAS; the arrays returned alias per-task buffers and are valid until the
 function computecostgradhess end
 
 """
-    NLPLSModel(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, min_work=$MIN_WORK_FOR_THREADED_LINEARIZATION, min_work_cost=$MIN_WORK_FOR_THREADED_COST, name="NLPLSModel")
+    NLPLSModel(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, min_work=$MIN_WORK_PER_THREAD_NORMAL, min_work_cost=$MIN_WORK_PER_THREAD_COST, name="NLPLSModel")
 
 Wraps a [`Model`](@ref) as an `NLPModels.AbstractNLPModel` for use with general
 nonlinear programming solvers such as `JSOSolvers`, `Ipopt`, and `Optim`.
@@ -429,7 +429,7 @@ $KEYWORDS_DOC"""
 NLPLSModel
 
 """
-    NLLSNLSModel(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work=$MIN_WORK_PER_THREAD, min_work_cost=$MIN_WORK_FOR_THREADED_COST, name="NLLSNLSModel")
+    NLLSNLSModel(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work=$MIN_WORK_PER_THREAD_TALL, min_work_cost=$MIN_WORK_PER_THREAD_COST, name="NLLSNLSModel")
 
 Wraps a [`Model`](@ref) as an `NLPModels.AbstractNLSModel{Float64, Vector{Float64}}`, which exposes the residual vector and
 its Jacobian, for nonlinear least-squares solvers that work on them directly, such as `JSOSolvers.trunk` and
