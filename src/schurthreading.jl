@@ -1,5 +1,3 @@
-using Polyester
-
 # Threaded linearization of Schur problems without whole-system copies.
 #
 # Each eliminated variable owns its block of E and its coupling blocks of C, and every cost touches at most

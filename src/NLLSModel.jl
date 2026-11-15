@@ -12,6 +12,7 @@ using BlockLinearSystems
 using FastNorm
 using OptimizationVariableInterface
 using SIRBSDispatch
+using Polyester: @batch
 using Static, StaticArrays, SparseArrays, LinearAlgebra
 
 import BlockLinearSystems:

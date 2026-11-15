@@ -1,5 +1,3 @@
-using Polyester
-
 # Threading decisions. Each kind of work has its own estimate, the count of numbers it writes, summed over all costs, with
 # per cost `m` the residual length (1 for a general `AbstractCost`) and `n` the total dimension of its unfixed variables:
 #   cost evaluation                 m              (residual entries)                         per-thread floor `min_work_cost`

@@ -1,7 +1,5 @@
 # Tall residual and Jacobian system assembly for NLLSModel
 
-using Polyester
-
 mutable struct NLSRobustStatus
     clamped_count::Int
     warned_clamp::Bool
@@ -866,7 +864,7 @@ function tall_eval!(evalone::F, costvecs, layout, status, task_results, N_chunks
     end
     args = threadargs((evalone, costvecs, layout.costvec_start_idx, task_results))
     GC.@preserve evalone costvecs layout task_results begin
-        Polyester.@batch for taskid in 1:N_chunks
+        @batch for taskid in 1:N_chunks
             evalone_, costvecs_, start_idx_, task_results_ = fromthreadargs(args)
             local_cost, local_clamped, local_err, local_val = eval_costvecs(evalone_, costvecs_, start_idx_, N_chunks, taskid, 1)
             task_results_[taskid] = TaskResult(local_cost, local_clamped, local_err, local_val)
