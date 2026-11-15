@@ -15,18 +15,12 @@ struct TallResJac{RJ}
 end
 (w::TallResJac)(r, J, x) = w.resjac!(r, J, x; prezeroed=true)
 
-# The tall formulation: the residual vector and a dense Jacobian, solved through QR of the Jacobian.
+# The tall formulation: the residual vector and the Jacobian, solved by the optimizer from the Jacobian prototype that
+# `optimvars_nls` returns (its type decides the linear system; the optimizer validates it against `linsolver`). A dense
+# Jacobian forced above `max_dense_bytes` is refused by `optimvars_nls` before it is allocated.
 function optimize_tall!(model::Model, options; unfixed, numthreads, callback, workspace, reduction, storage, max_dense_bytes, min_work, min_work_cost)
-    # The optimizer solves through QR of a dense J
-    storage === :sparse && throw(ArgumentError("formulation = :tall needs a dense Jacobian (the optimizer solves through QR of a dense J); storage = :sparse is not supported, use :auto or :dense."))
-
-    # Refuse before anything is allocated: the tall formulation holds the whole Jacobian
-    if all(cv -> eltype(cv) <: AbstractResidual, values(model.costs)) # optimvars_nls reports other costs
-        NLLSModel.check_densefits("Jacobian", NLLSModel.nresiduals(model), NLLSModel.unfixeddims(model, NLLSModel.convertunfixed(unfixed, model)),
-            max_dense_bytes, "formulation = :tall needs a dense Jacobian; raise max_dense_bytes or use formulation = :normal")
-    end
     f, _, resjac!, x0, J = try
-        optimvars_nls(model; unfixed, numthreads, reduction, storage=:dense, max_dense_bytes, min_work, min_work_cost)
+        optimvars_nls(model; unfixed, numthreads, reduction, storage, max_dense_bytes, min_work, min_work_cost)
     catch err
         err isa ArgumentError ? throw(ArgumentError("formulation = :tall: " * err.msg)) : rethrow()
     end
@@ -55,12 +49,13 @@ Solve `model` and write the solution back into `model.variables`. This is the no
 - `:normal` (default): the normal equations. Calls [`optimvars`](@ref), wraps the result in a `HessianObjective`, runs
   `SecondOrderOptimization.optimize!` (or `optimize` when the variable to optimize is immutable, a single variable of static
   size) and writes the solution back with [`syncvars!`](@ref).
-- `:tall`: the residual vector and a dense Jacobian (a `JacobianObjective`), solved through QR of the Jacobian, with any
-  iterator except gradient descent. Calls [`optimvars_nls`](@ref) with `storage = :dense`. Each cost's kernel decides how its rows enter; there is no robust
-  keyword. This first version needs `linsolver = :auto` or `:qr` (the optimizer throws `ArgumentError` for gradient
-  descent and for other solvers), a dense Jacobian (`storage = :sparse` is an `ArgumentError`, and so is a Jacobian larger
-  than `max_dense_bytes`, before allocating), only non-adaptive `AbstractResidual` costs and no unfixed adaptive kernels
-  (errors from `optimvars_nls` are rethrown prefixed `formulation = :tall:`), and no elimination.
+- `:tall`: the residual vector and the Jacobian (a `JacobianObjective`), solved through QR of the Jacobian, with any
+  iterator except gradient descent. Calls [`optimvars_nls`](@ref) with the same keywords, and hands its Jacobian prototype
+  to the optimizer: `storage` chooses a dense or a sparse Jacobian (`:auto` decides from its fill; a dense one forced
+  above `max_dense_bytes` is an `ArgumentError`, before allocating). Each cost's kernel decides how its rows enter; there
+  is no robust keyword. This version needs `linsolver = :auto` or `:qr` (the optimizer throws `ArgumentError` for gradient
+  descent and for other solvers), only non-adaptive `AbstractResidual` costs and no unfixed adaptive kernels (errors from
+  `optimvars_nls` are rethrown prefixed `formulation = :tall:`), and no elimination.
 
 `formulation` is a keyword here only: it is not a field of `OptimizationOptions` and is not inferred from `options.linsolver`. Any
 other value is an `ArgumentError`. `callback` and `workspace` are passed to the optimizer. The default of `min_work` is the

@@ -38,8 +38,10 @@ The same for [`optimvars`](@ref), [`optimvars_nls`](@ref), [`flat_optimvars_nls`
   `:eliminate` is an `ArgumentError`: elimination is not implemented there.
 - `storage = :auto`: storage of the matrix the solver receives: the Hessian, the reduced Hessian under elimination, or
   the Jacobian. `:auto` chooses from the structure (the sparsity of the Hessian, the predicted fill of the reduced
-  system's Cholesky factor, or the fill of the Jacobian); `:dense` and `:sparse` force the choice. A single unfixed
-  variable's Hessian is always dense, so `:sparse` is an `ArgumentError` there.
+  system's Cholesky factor, or the fill of the Jacobian); `:dense` and `:sparse` force the choice. On the tall path the
+  Jacobian is a `Matrix{Float64}` or a `SparseMatrixCSC{Float64, Int}`, and `optimize!(...; formulation = :tall)` hands
+  either to the optimizer. On the normal path a single unfixed variable's Hessian is always dense, so `:sparse` is an
+  `ArgumentError` there.
 - `max_dense_bytes = $MAX_DENSE_BYTES` (256 MiB): under `storage = :auto` a dense matrix larger than this is not chosen (it is
   stored sparse instead); under `:dense` a larger one is an `ArgumentError` saying how large it would be, raised before it
   is allocated. A single variable's Hessian has no sparse alternative, so above the cap it is an `ArgumentError` either way.

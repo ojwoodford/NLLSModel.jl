@@ -52,10 +52,10 @@ matrix the solver receives) and `max_dense_bytes`, and the threading floors `min
 
 ### Tall formulation
 
-`optimize!(model, options; formulation = :tall)` solves the same model from the residual vector and a dense Jacobian instead of
-the normal equations. Each step is a QR factorization of the Jacobian, so `JᵀJ` is never formed and the
-conditioning is that of `J`, not its square. Use it when the model is ill conditioned (the normal equations stall above the
-minimum) and the Jacobian is small enough to hold densely.
+`optimize!(model, options; formulation = :tall)` solves the same model from the residual vector and the Jacobian instead of
+the normal equations. Each step is a QR factorization of the Jacobian (dense, or SuiteSparse's sparse QR), so `JᵀJ` is
+never formed and the conditioning is that of `J`, not its square. Use it when the model is ill conditioned (the normal
+equations stall above the minimum).
 
 ```julia
 result = optimize!(problem, OptimizationOptions(iterator = :levenbergmarquardt); formulation = :tall)
@@ -63,8 +63,9 @@ result = optimize!(problem, OptimizationOptions(iterator = :levenbergmarquardt);
 
 In this first version:
 
-- the Jacobian is **dense** (`storage = :sparse` is an `ArgumentError`). If it would exceed `max_dense_bytes` (default 256 MB)
-  an `ArgumentError` gives its size, before anything is allocated; raise the limit or use `formulation = :normal`;
+- `storage` chooses a dense or a sparse Jacobian (`:auto` decides from its fill, and never chooses a dense one above
+  `max_dense_bytes`, default 256 MB). A dense one forced above the cap is an `ArgumentError` giving its size, before
+  anything is allocated;
 - any iterator except gradient descent works (`:levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg`, `:newton`), with
   `linsolver = :auto` or `:qr`; `:gradientdescent` and the other solvers (for example `:cholesky`) throw the optimizer's `ArgumentError`;
 - `reduction = :eliminate` is an `ArgumentError` (use `:auto` or `:none`); `min_work` is the floor of the residual and

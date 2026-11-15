@@ -1,4 +1,4 @@
-using NLLSModel, Test, Static, StaticArrays, Random, LinearAlgebra
+using NLLSModel, Test, Static, StaticArrays, SparseArrays, Random, LinearAlgebra
 using SecondOrderOptimization
 import OptimizationVariableInterface: update!, copyvars
 
@@ -23,6 +23,20 @@ staticplain(; n=4) = (rng = MersenneTwister(5); m = Model(SVector{2, Float64}, T
 function warmallocs(model; unfixed=nothing, numthreads=static(1), min_work=5000)
     f, res!, resjac!, x0, J = optimvars_nls(model; unfixed, numthreads, min_work, storage=:dense)
     r = zeros(size(J, 1))
+    for _ in 1:3
+        resjac!(r, J, x0); res!(r, x0); f(x0)
+    end
+    return (@allocated resjac!(r, J, x0)), (@allocated res!(r, x0)), (@allocated f(x0))
+end
+
+# The same through a function barrier, so the measurement sees concrete types: `optimvars_nls`'s result is not inferred,
+# and on Julia 1.10 a call on a non-inferred value boxes its return value, which `@allocated` then counts
+function warmallocs_barrier(model; storage, kwargs...)
+    f, res!, resjac!, x0, J = optimvars_nls(model; storage, kwargs...)
+    return evalallocs(f, res!, resjac!, x0, J)
+end
+function evalallocs(f, res!, resjac!, x0, J)
+    r = zeros(NLLSModel.nresiduals(res!.problem))
     for _ in 1:3
         resjac!(r, J, x0); res!(r, x0); f(x0)
     end
@@ -60,6 +74,17 @@ end
             addvariable!(m, randn(rng, 12)); foreach(_ -> addcost!(m, TlHand(randn(rng, 9), 12, Huber2oKernel(0.3), 1)), 1:n); m)
         @test warmallocs(bigmodel(200); numthreads=static(nt), min_work=100) == (0, 0, 0)
         @test warmallocs(bigmodel(800); numthreads=static(nt), min_work=100) == (0, 0, 0)
+    end
+
+    # NTP1: a sparse Jacobian, serial and threaded
+    @testset "a sparse Jacobian: a warm call allocates nothing, $threads" for threads in ("one thread", "threads")
+        nt = threads == "one thread" ? 1 : Threads.nthreads()
+        kw = (numthreads=static(nt), min_work=(nt == 1 ? 5000 : 0), storage=:sparse)
+        _, _, rj, _, Jsp = optimvars_nls(staticplain(n=40); kw...)
+        @test Jsp isa SparseMatrixCSC && rj.nthreads == nt # the fill is threaded when there are threads
+        @test warmallocs_barrier(staticrobust(Huber2oKernel(0.3); n=40); kw...) == (0, 0, 0)
+        @test warmallocs_barrier(staticplain(n=40); unfixed=[1, 3, 5], kw...) == (0, 0, 0)
+        @test warmallocs_barrier(handmodel(Huber2oKernel(0.3), HuberKernel(0.3)); kw...)[1:2] == (0, 0)
     end
 
     # A whole solve: per iteration, the tall path allocates no more than the normal equations do on the same model

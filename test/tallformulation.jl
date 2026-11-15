@@ -1,4 +1,4 @@
-using NLLSModel, Test, Static, StaticArrays, Random, LinearAlgebra
+using NLLSModel, Test, Static, StaticArrays, SparseArrays, Random, LinearAlgebra
 using SecondOrderOptimization
 import OptimizationVariableInterface
 import OptimizationVariableInterface: nvars, update, update!, copyvars
@@ -248,12 +248,40 @@ end
         end
     end
 
-    @testset "keywords: storage on :tall, which needs a dense Jacobian" begin
-        model = curvefit()
-        @test_logs optimize!(deepcopy(model), TallOptions; formulation=:tall, numthreads=static(1), storage=:dense)
-        @test_logs optimize!(deepcopy(model), TallOptions; formulation=:tall, numthreads=static(1), storage=:auto)
-        err = try optimize!(deepcopy(model), TallOptions; formulation=:tall, numthreads=static(1), storage=:sparse); nothing catch e e end
-        @test err isa ArgumentError && occursin("dense", err.msg)
+    # NTP1: the front door hands over the Jacobian optimvars_nls chooses, dense or sparse
+    @testset "keywords: storage on :tall, $name" for (name, make) in (
+            ("curve fit, one Vector", () -> curvefit()),
+            ("several variables of different sizes", () -> first(mixedproblem())),
+            ("chain of Vectors", () -> first(chainproblem(6, 3, 5))),
+            ("rotation, Vector, SVector, Vector", () -> posemodel()),
+            ("Huber on every cost", () -> curvefit(huber=true, outliers=4)))
+        model = make()
+        c0 = NLLSModel.cost(model)
+        normal, _ = optimize(model, TallOptions; numthreads=static(1))
+        dense, rd = optimize(model, TallOptions; formulation=:tall, numthreads=static(1), storage=:dense)
+        sparse, rs = optimize(model, TallOptions; formulation=:tall, numthreads=static(1), storage=:sparse)
+        cn, cd, cs = NLLSModel.cost(normal), NLLSModel.cost(dense), NLLSModel.cost(sparse)
+        @test cs ≈ cd rtol=1e-8 atol=1e-10 * c0
+        @test cs ≈ cn rtol=1e-8 atol=1e-10 * c0
+        @test cs ≈ rs.bestcost rtol=1e-12
+        @test samevars(sparse, dense; atol=1e-5)
+    end
+
+    @testset "keywords: storage = :auto on :tall keeps optimvars_nls's choice" begin
+        small = curvefit()
+        big, _ = chainproblem(200, 3, 4) # 1 197 x 600, under 1% filled
+        # The layout's choice, unchanged: dense for a small Jacobian, sparse for a large one with little fill
+        @test tlnls(small; numthreads=static(1))[5] isa Matrix{Float64}
+        @test tlnls(big; numthreads=static(1))[5] isa SparseMatrixCSC{Float64, Int}
+        # The front door hands that choice over: the large one is solved sparse, under a cap too small for it dense
+        cap = 8 * 1197 * 600 - 1
+        tall, rt = optimize(big, TallOptions; formulation=:tall, numthreads=static(1), max_dense_bytes=cap)
+        normal, _ = optimize(big, TallOptions; numthreads=static(1))
+        @test NLLSModel.cost(tall) ≈ NLLSModel.cost(normal) rtol=1e-8 atol=1e-10 * NLLSModel.cost(big)
+        # Forced dense above the cap: an ArgumentError before anything is allocated, prefixed by the front door
+        err = try optimize!(deepcopy(big), TallOptions; formulation=:tall, numthreads=static(1), storage=:dense, max_dense_bytes=cap); nothing catch e e end
+        @test err isa ArgumentError && startswith(err.msg, "formulation = :tall:") && occursin("$(8 * 1197 * 600) bytes", err.msg)
+        @test_logs optimize!(deepcopy(small), TallOptions; formulation=:tall, numthreads=static(1), storage=:sparse)
     end
 
     @testset "kernels (R1): the kernel decides, there is no robust keyword" begin
@@ -305,21 +333,24 @@ end
         @test optimize!(prob, TallOptions; unfixed=2, numthreads=static(1)) isa OptimizationResult
     end
 
-    @testset "too large for a dense Jacobian: throws before allocating" begin
+    @testset "too large for a dense Jacobian: storage = :dense throws before allocating, :auto goes sparse" begin
         # 20000 residuals by 3 variables: 480 kB if dense
         model = curvefit(n=20000)
-        @test_throws ArgumentError optimize!(deepcopy(model), TallOptions; formulation=:tall, max_dense_bytes=1000)
-        err = try optimize!(deepcopy(model), TallOptions; formulation=:tall, max_dense_bytes=1000); nothing catch e e end
+        @test_throws ArgumentError optimize!(deepcopy(model), TallOptions; formulation=:tall, storage=:dense, max_dense_bytes=1000)
+        err = try optimize!(deepcopy(model), TallOptions; formulation=:tall, storage=:dense, max_dense_bytes=1000); nothing catch e e end
         @test occursin("20000×3", err.msg) && occursin("dense", err.msg) && occursin("1000", err.msg) && occursin("tall", err.msg)
         m = deepcopy(model)
-        alloc = @allocated try optimize!(m, TallOptions; formulation=:tall, max_dense_bytes=1000) catch end
+        alloc = @allocated try optimize!(m, TallOptions; formulation=:tall, storage=:dense, max_dense_bytes=1000) catch end
         @test alloc < 50_000
+        # Under :auto the same cap gives a sparse Jacobian, and the solve goes ahead
+        @test tlnls(model; numthreads=static(1), max_dense_bytes=1000)[5] isa SparseMatrixCSC
+        @test optimize!(deepcopy(model), TallOptions; formulation=:tall, numthreads=static(1), max_dense_bytes=1000) isa OptimizationResult
         # The limit counts only the unfixed variables, and allows exactly its size
         big = posemodel()
         n = 8 * NLLSModel.nresiduals(big) * 9 # 3 + 3 + 2 + 1 degrees of freedom
-        @test_throws ArgumentError optimize!(deepcopy(big), TallOptions; formulation=:tall, numthreads=static(1), max_dense_bytes=n - 1)
-        @test optimize!(deepcopy(big), TallOptions; formulation=:tall, numthreads=static(1), max_dense_bytes=n - 1, unfixed=[1, 2]) isa OptimizationResult
-        @test optimize!(deepcopy(big), TallOptions; formulation=:tall, numthreads=static(1), max_dense_bytes=n) isa OptimizationResult
+        @test_throws ArgumentError optimize!(deepcopy(big), TallOptions; formulation=:tall, numthreads=static(1), storage=:dense, max_dense_bytes=n - 1)
+        @test optimize!(deepcopy(big), TallOptions; formulation=:tall, numthreads=static(1), storage=:dense, max_dense_bytes=n - 1, unfixed=[1, 2]) isa OptimizationResult
+        @test optimize!(deepcopy(big), TallOptions; formulation=:tall, numthreads=static(1), storage=:dense, max_dense_bytes=n) isa OptimizationResult
     end
 
     @testset "rejected by the optimizer" begin
