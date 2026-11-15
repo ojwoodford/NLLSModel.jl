@@ -82,8 +82,8 @@ end
 
 # Like `sharedlinearsystem`, but the extra buffers carry no E and C storage
 # One buffer per thread of `normalthreads`
-function sharedschurlinearsystem(ls::LinearSystem, work::Integer, numthreads::StaticInt, min_work=MIN_WORK_PER_THREAD_NORMAL)
-    n = normalthreads(work, min_work, dynamic(numthreads))
+function sharedschurlinearsystem(ls::LinearSystem, work::Integer, numthreads::StaticInt, costsplit::Integer, min_work=MIN_WORK_PER_THREAD_NORMAL)
+    n = normalthreads(work, min_work, dynamic(numthreads), costsplit)
     n == 1 && return ls
     return sharedschurlinearsystem(ls, static(n))
 end

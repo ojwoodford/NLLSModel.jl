@@ -677,7 +677,7 @@ struct NLSResidual{P, L, U, TR}
     unfixed_inds::U
     status::NLSRobustStatus
     min_work::Int # Per-thread floor
-    nthreads::Int # Threads the fill uses, `threadcount(layout.work, min_work, numthreads)`
+    nthreads::Int # Threads the fill uses, `threadcount(layout.work, min_work, numthreads, costsplit)`
     task_results::TR
 end
 
@@ -687,7 +687,7 @@ struct NLSResJac{P, L, U, TR}
     unfixed_inds::U
     status::NLSRobustStatus
     min_work::Int # Per-thread floor
-    nthreads::Int # Threads the fill uses, `threadcount(layout.work, min_work, numthreads)`
+    nthreads::Int # Threads the fill uses, `threadcount(layout.work, min_work, numthreads, costsplit)`
     task_results::TR
 end
 
@@ -887,7 +887,7 @@ function optimvars_nls(
         f = MultiVarCostFunc(problem, unfixed_inds, static(numthreads), min_work_cost)
     end
 
-    nthreads = threadcount(layout.work, min_work, dynamic(numthreads))
+    nthreads = threadcount(layout.work, min_work, dynamic(numthreads), costsplit(problem.costs))
     task_results = [TaskResult(0.0, 0, 0, 0.0) for _ in 1:nthreads]
     status = NLSRobustStatus()
 

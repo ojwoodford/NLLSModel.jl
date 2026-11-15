@@ -7,8 +7,8 @@ using Polyester
 #   normal fill, JᵀJ and Jᵀr        m * n * (n + 1) (Jacobian entries times columns, Gram)    per-thread floor `min_work`
 # A general `AbstractCost` has a Hessian, so it counts as `m = 1` in the normal-fill form. The work of the residual
 # function itself is not estimated. The estimates are computed once, at setup (`workestimates`), and each kind of work
-# is split over `threadcount(work, floor, numthreads)` threads, decided then too; the normal fill over at most
-# `MAX_THREADS_NORMAL` of them (`normalthreads`).
+# is split over `threadcount(work, floor, numthreads, costsplit)` threads, decided then too: never more than the largest
+# number of costs of one type (`costsplit`), and for the normal fill at most `MAX_THREADS_NORMAL` (`normalthreads`).
 #
 # The defaults were measured on an Apple M1 Pro (8 performance and 2 efficiency cores), Julia 1.13.3, -t 8, 2026-11-14/15,
 # three runs. For each family and size every kind of work was timed on exactly 1 to 8 threads (minimum over repeated
@@ -30,8 +30,8 @@ using Polyester
 # The costly residuals (Procrustes) and the dynamic-variable autodiff (curve fit) would thread profitably well below these
 # floors, because the per-cost work of evaluating the residual and its derivatives is not in the estimates; at these
 # floors they thread later than they could, up to 4 to 6x slower than their best count at small sizes (decided
-# 2026-11-14: no per-cost term). A model of a single costly cost can be given more threads than it has costs (Procrustes,
-# one cost: up to 1.39x slower than serial); the rule does not bound the count by the number of costs.
+# 2026-11-14: no per-cost term). Before the count was bounded by the number of costs of one type, a model of a single
+# costly cost was given up to 4 threads for the normal fill (Procrustes, one cost: up to 1.39x slower than serial).
 const MIN_WORK_PER_THREAD_COST = 120
 const MIN_WORK_PER_THREAD_TALL = 280
 const MIN_WORK_PER_THREAD_NORMAL = 4_000
@@ -136,18 +136,26 @@ end
 end
 @generated fromthreadargs(a::ThreadArgs{T}) where T = fromthreadargs_expr(T, :a, Ref(0))
 
+# The most threads an evaluation can keep busy: every evaluation splits the costs of each type into one chunk per thread,
+# so a thread beyond the largest number of costs of one type is given nothing (and on the normal path would only zero and
+# sum its copy of the system)
+costsplit(costs::CostStruct) = maximum(length, values(costs); init=0)
+
 # The one threading rule, for every kind of work: the number of threads for an estimate `work` at a per-thread floor
-# `floor`. One thread below twice the floor, `work ÷ floor` threads above it, and never more than `numthreads`; a floor of
-# 0 uses every thread. Decided once, at setup, from the estimates of `workestimates`.
-function threadcount(work::Integer, floor::Integer, numthreads::Integer)
-    numthreads <= 1 && return 1
-    floor <= 0 && return Int(numthreads)
+# `floor`. One thread below twice the floor, `work ÷ floor` threads above it, and never more than `numthreads` or than
+# `costsplit`, the largest number of costs of one type; a floor of 0 uses every thread there is work for. Decided once,
+# at setup, from the estimates of `workestimates`.
+function threadcount(work::Integer, floor::Integer, numthreads::Integer, costsplit::Integer)
+    maxthreads = min(Int(numthreads), Int(costsplit))
+    maxthreads <= 1 && return 1
+    floor <= 0 && return maxthreads
     work < 2 * floor && return 1
-    return Int(clamp(work ÷ floor, 1, numthreads))
+    return Int(clamp(work ÷ floor, 1, maxthreads))
 end
 
 # The normal fill: the same rule, at most `MAX_THREADS_NORMAL` threads (each thread fills its own copy of the system)
-normalthreads(work::Integer, floor::Integer, numthreads::Integer) = min(threadcount(work, floor, numthreads), MAX_THREADS_NORMAL)
+normalthreads(work::Integer, floor::Integer, numthreads::Integer, costsplit::Integer) =
+    min(threadcount(work, floor, numthreads, costsplit), MAX_THREADS_NORMAL)
 
 # The cost, summed over `nthreads` chunks of the costs, one per thread
 function cost_multithreaded(vars, costs::CostStruct, nthreads::Int)::Float64

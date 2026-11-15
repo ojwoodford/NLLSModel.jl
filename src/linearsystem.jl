@@ -217,8 +217,8 @@ sharedlinearsystem(ls, n::Integer) = sharedlinearsystem(ls, static(n))
 const MAX_THREAD_COPY_BYTES = 2^30
 threadcopylimit(ls, nthreads::Integer, budget::Integer=MAX_THREAD_COPY_BYTES) = clamp(1 + budget ÷ max(1, Base.summarysize(ls.ls)), 1, nthreads)
 # `work` is the normal-fill estimate of `workestimates`: one copy per thread of `normalthreads`, capped by the memory budget
-function sharedlinearsystem(ls, work::Integer, numthreads::StaticInt, min_work=MIN_WORK_PER_THREAD_NORMAL)
-    n = normalthreads(work, min_work, dynamic(numthreads))
+function sharedlinearsystem(ls, work::Integer, numthreads::StaticInt, costsplit::Integer, min_work=MIN_WORK_PER_THREAD_NORMAL)
+    n = normalthreads(work, min_work, dynamic(numthreads), costsplit)
     n == 1 && return ls
     return sharedlinearsystem(ls, static(threadcopylimit(ls, n)))
 end

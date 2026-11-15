@@ -49,7 +49,8 @@ The same for [`optimvars`](@ref), [`optimvars_nls`](@ref), [`flat_optimvars_nls`
 - `min_work_cost = $MIN_WORK_PER_THREAD_COST`: per-thread floor of a cost evaluation, one residual entry, per cost `m`.
 
 Each kind of work is split over `clamp(work ÷ floor, 1, numthreads)` threads: one thread when its estimate is below
-twice the floor, and every thread at a floor of 0. The normal fill uses at most $MAX_THREADS_NORMAL threads: each thread fills its own
+twice the floor, and every thread at a floor of 0. The costs of each type are split into one chunk per thread, so the
+count is also never more than the largest number of costs of one type: a thread beyond that would have nothing to do. The normal fill uses at most $MAX_THREADS_NORMAL threads: each thread fills its own
 copy of the linear system, which costs work in proportion to the size of the system, so on large systems more threads
 were measured to be slower (the number of copies is also capped by memory). The defaults were measured on cheap residuals,
 on one machine; a costly residual could thread earlier than they let it.

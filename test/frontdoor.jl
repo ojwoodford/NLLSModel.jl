@@ -100,12 +100,13 @@ NLLSModel.computeresjac(::StaticInt{1}, r::LinTgt{<:StaticVector{N}}, x) where N
 NLLSModel.computeresjac(::StaticInt{1}, r::LinTgt{<:Vector}, x) = (r.r .= x .- r.t; (r.r, r.J))
 Base.eltype(::LinTgt) = Float64
 
-function linsingleproblem(V, n, seed)
+# Four costs, so that a shared system has a cost for each of up to four threads
+function linsingleproblem(V, n, seed; ncosts=4)
     rng = MersenneTwister(seed)
     t = V(randn(rng, n))
     model = Model(V, typeof(LinTgt(t)))
     addvariable!(model, V(t .+ 0.3 .* randn(rng, n)))
-    addcost!(model, LinTgt(t))
+    foreach(_ -> addcost!(model, LinTgt(V(t .+ 0.01 .* randn(rng, n)))), 1:ncosts)
     return model
 end
 
