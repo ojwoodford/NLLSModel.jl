@@ -9,7 +9,3 @@ SIRBSDispatch = "c8e4d12a-5f3b-4a9c-8d2e-1f6b3a7c9e04"
 
 [sources]
 NLLSModel = {path = ".."}
-OptimizationVariableInterface = {path = "../../OptimizationVariableInterface.jl"}
-FastNorm = {path = "../../FastNorm.jl"}
-BlockLinearSystems = {path = "../../BlockLinearSystems.jl"}
-SIRBSDispatch = {path = "../../SIRBSDispatch.jl"}

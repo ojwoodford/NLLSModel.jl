@@ -25,12 +25,6 @@ SecondOrderOptimization = "a3f5c71e-3b2d-4d9a-9e20-7f8e3c4b1a50"
 NLPModelExt = "NLPModels"
 SecondOrderOptimizationExt = "SecondOrderOptimization"
 
-[sources]
-BlockLinearSystems = {path = "../BlockLinearSystems.jl"}
-FastNorm = {path = "../FastNorm.jl"}
-OptimizationVariableInterface = {path = "../OptimizationVariableInterface.jl"}
-SIRBSDispatch = {path = "../SIRBSDispatch.jl"}
-
 [compat]
 BlockLinearSystems = "0.1"
 DiffResults = "1.1"
