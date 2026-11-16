@@ -35,6 +35,7 @@ threaded_allocs_ok(bytes, threaded=Threads.nthreads() > 1) =
     include("talliterators.jl")
     include("tallalloc.jl")
     include("tallelimination.jl")
+    include("eliminablesizes.jl")
     include("tallcombinations.jl")
     include("NLPModel.jl")
     include("nls_interface.jl")
