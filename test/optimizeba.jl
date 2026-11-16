@@ -180,7 +180,7 @@ end
     @test isnothing(NLLSModel.partition_schur_problem(prob_bad, trues(length(prob_bad.variables)), false))
     @test isnothing(NLLSModel.partition_schur_problem(prob_bad, trues(length(prob_bad.variables))))
     _, _, _, H_bad = optimvars(prob_bad; numthreads=static(1))
-    @test !(H_bad isa BlockLinearSystems.SchurBlockMatrix)
+    @test !(H_bad isa BlockLinearSystems.SchurBlockHessian)
 
     # B) Calling with no eliminable variables when reduction=:eliminate throws ArgumentError
     prob_no_elim = create_ba_problem(2, 2, 1.0)
@@ -188,7 +188,7 @@ end
 
     # 4. Dense Schur Solver (optimvars)
     f_ds, fdf_ds!, x0_ds, H_ds = optimvars(prob_schur; numthreads=static(1), reduction=:eliminate, storage=:dense)
-    @test H_ds isa BlockLinearSystems.SchurBlockMatrix
+    @test H_ds isa BlockLinearSystems.SchurBlockHessian
     @test H_ds.R isa Matrix{Float64}
     tot_dim_ds = H_ds.structure.nr + sum(H_ds.structure.e_dims)
     g_ds = zeros(tot_dim_ds)
@@ -198,7 +198,7 @@ end
 
     # 5. Sparse Schur Solver (optimvars)
     f_ss, fdf_ss!, x0_ss, H_ss = optimvars(prob_schur; numthreads=static(1), reduction=:eliminate, storage=:sparse)
-    @test H_ss isa BlockLinearSystems.SchurBlockMatrix
+    @test H_ss isa BlockLinearSystems.SchurBlockHessian
     @test H_ss.R isa BlockLinearSystems.SparseBlockLinearSystem
     g_ss = zeros(tot_dim_ds)
     c_ss = fdf_ss!(g_ss, H_ss, x0_ss)

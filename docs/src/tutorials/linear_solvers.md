@@ -36,7 +36,7 @@ res = optimize!(problem, options)
 Whether eliminable variables (`iseliminable`, for example bundle-adjustment landmarks) are eliminated by a Schur complement is a
 choice about the layout of the linear system, so it is made where the system is built: by keywords of
 `optimize!(model, options; reduction, storage)` and of [`optimvars`](@ref), not in `OptimizationOptions`. The optimizer
-eliminates exactly when the Hessian prototype it is given is a `SchurBlockMatrix`. `linsolver` names only the solver for
+eliminates exactly when the Hessian prototype it is given is a `SchurBlockHessian`. `linsolver` names only the solver for
 the system that is left (the reduced system, after elimination).
 
 - `reduction = :auto` (default) eliminates when the model has eliminable variables and the structure fits (each eliminable

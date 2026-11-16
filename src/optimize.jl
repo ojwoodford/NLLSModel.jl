@@ -133,7 +133,7 @@ struct MultiVarSchurFDF{LS, P, U, PL}
     unfixed_inds::U
     plan::PL # SchurThreadPlan when linearizing on several threads, otherwise nothing
 end
-@inline function (f::MultiVarSchurFDF)(g, H_schur::SchurBlockMatrix, vars)
+@inline function (f::MultiVarSchurFDF)(g, H_schur::SchurBlockHessian, vars)
     full_vars = sync_unfixed_vars!(f.problem, f.unfixed_inds, vars)
     if f.linsystem isa LinearSystemShared
         c = schur_threaded!(f.linsystem, f.plan, H_schur, g, full_vars, f.problem.costs)
@@ -261,12 +261,12 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
 
         H = if is_dense
             R_dense = zeros(Float64, structure.nr, structure.nr)
-            SchurBlockMatrix(structure, R_dense, E_data, C_data)
+            SchurBlockHessian(structure, R_dense, E_data, C_data)
         else
             R_sys = SparseBlockLinearSystem{Float64}(TransposedPattern(pattern.block_pattern), structure.r_dims, structure.r_dims)
             # The pattern (and analysed factor, if any) travel with the matrix to the linear system
             carried = isnothing(analysed) ? pattern : merge(pattern, (S_factor = analysed,))
-            SchurBlockMatrix(structure, R_sys, E_data, C_data; pattern=carried)
+            SchurBlockHessian(structure, R_sys, E_data, C_data; pattern=carried)
         end
 
         nblocks_tot = partition.nrblocks + partition.neblocks

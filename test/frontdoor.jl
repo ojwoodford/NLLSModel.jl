@@ -141,7 +141,7 @@ issolved(model, targets, which=eachindex(targets); atol=1e-6) = all(k -> isappro
         Random.seed!(3)
         model = optlandmark_problem(4, 20)
         _, _, _, H = optimvars(model; numthreads=static(1), storage)
-        @test H isa BlockLinearSystems.SchurBlockMatrix
+        @test H isa BlockLinearSystems.SchurBlockHessian
         @test (H.R isa Matrix) == (storage === :dense)
         c0 = NLLSModel.cost(model)
         result = optimize!(model, FDOptions; storage)
@@ -269,7 +269,7 @@ issolved(model, targets, which=eachindex(targets); atol=1e-6) = all(k -> isappro
         Random.seed!(9)
         ba = optlandmark_problem(4, 20) # Has eliminable variables
         plain, _ = chainproblem(5, 2, 9) # Has none
-        issch(model; kwargs...) = optimvars(model; numthreads=static(1), kwargs...)[4] isa BlockLinearSystems.SchurBlockMatrix
+        issch(model; kwargs...) = optimvars(model; numthreads=static(1), kwargs...)[4] isa BlockLinearSystems.SchurBlockHessian
 
         @testset "each reduction value" begin
             @test issch(ba) && issch(ba; reduction=:auto) && issch(ba; reduction=:eliminate)

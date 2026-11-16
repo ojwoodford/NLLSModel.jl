@@ -1,6 +1,6 @@
 using NLLSModel, Test, Static, StaticArrays, SparseArrays, Random, LinearAlgebra
 using SecondOrderOptimization
-import BlockLinearSystems: SchurBlockMatrix, SchurBlockJacobian
+import BlockLinearSystems: SchurBlockHessian, SchurBlockJacobian
 import OptimizationVariableInterface
 
 # E1: eliminable variables of any size BlockLinearSystems takes (1 to 255 dimensions), on the normal and the tall path.
@@ -90,10 +90,10 @@ end
         cn = solvedcost(model; reduction=:none)
         @test cn < 0.01 * c0
         # :auto eliminates, as :eliminate does
-        @test optimvars(model; numthreads=static(1))[4] isa SchurBlockMatrix
+        @test optimvars(model; numthreads=static(1))[4] isa SchurBlockHessian
         @test optimvars_nls(model; numthreads=static(1))[5] isa SchurBlockJacobian
         for storage in (:dense, :sparse)
-            @test optimvars(model; numthreads=static(1), reduction=:eliminate, storage)[4] isa SchurBlockMatrix
+            @test optimvars(model; numthreads=static(1), reduction=:eliminate, storage)[4] isa SchurBlockHessian
             @test solvedcost(model; reduction=:eliminate, storage) ≈ cn rtol=1e-8
             @test solvedcost(model; formulation=:tall, reduction=:eliminate, storage) ≈ cn rtol=1e-8
         end

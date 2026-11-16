@@ -75,7 +75,7 @@ end
 function schur_thread_buffer(ls::MultiVariateLSSchur_ls)
     A = ls.A
     R_copy = A.R isa Matrix ? similar(A.R) : copy_structure(A.R)
-    return MultiVariateLSSchur_ls(SchurBlockMatrix(A.structure, R_copy, Float64[], Float64[]), zeros(Float64, length(ls.b)))
+    return MultiVariateLSSchur_ls(SchurBlockHessian(A.structure, R_copy, Float64[], Float64[]), zeros(Float64, length(ls.b)))
 end
 
 # Like `sharedlinearsystem`, but the extra buffers carry no E and C storage
@@ -120,7 +120,7 @@ function schur_thread_task!(args::SchurThreadArgs{LinearSystemShared{F, V, N}}, 
         MultiVariateLSSchur_ls(H, g)
     else
         buf = linsystem.ls[t]
-        MultiVariateLSSchur_ls(SchurBlockMatrix(H.structure, buf.A.R, H.E_data, H.C_data), buf.b)
+        MultiVariateLSSchur_ls(SchurBlockHessian(H.structure, buf.A.R, H.E_data, H.C_data), buf.b)
     end
     zero_schur_R!(ls_t.A.R)
     fill!(ls_t.b, 0.0)
@@ -128,7 +128,7 @@ function schur_thread_task!(args::SchurThreadArgs{LinearSystemShared{F, V, N}}, 
 end
 
 # Cost, gradient and Hessian of a Schur problem on N threads
-function schur_threaded!(linsystem::LinearSystemShared{F, V, N}, plan, H::SchurBlockMatrix, g, vars, costs::CostStruct)::Float64 where {F, V, N}
+function schur_threaded!(linsystem::LinearSystemShared{F, V, N}, plan, H::SchurBlockHessian, g, vars, costs::CostStruct)::Float64 where {F, V, N}
     if plan === nothing || !plan_is_valid(plan, costs)
         # Costs changed since the plan was made: fall back to one thread
         ls = LinearSystem{F, V}(linsystem.x, MultiVariateLSSchur_ls(H, g))

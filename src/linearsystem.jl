@@ -124,7 +124,7 @@ struct MultiVariateLSSchur_x
 end
 
 struct MultiVariateLSSchur_ls{BType}
-    A::SchurBlockMatrix{Float64, BType}
+    A::SchurBlockHessian{Float64, BType}
     b::Vector{Float64}
 end
 
@@ -193,7 +193,7 @@ function BlockLinearSystems.copy_structure(ls::MultiVariateLSSchur_ls)
     else
         copy_structure(A.R)
     end
-    A_new = SchurBlockMatrix(A.structure, R_copy, similar(A.E_data), similar(A.C_data))
+    A_new = SchurBlockHessian(A.structure, R_copy, similar(A.E_data), similar(A.C_data))
     return MultiVariateLSSchur_ls(A_new, zeros(Float64, length(ls.b)))
 end
 BlockLinearSystems.copy_structure(ls::LinearSystem{F, V}) where {F, V} = LinearSystem{F, V}(ls.x, copy_structure(ls.ls))
@@ -290,7 +290,7 @@ function updatesymlinearsystem!(linsystem::MultiVariateLS, g::AbstractVector, H:
     updatesymA!(getA(linsystem), H, vars, varflags, blockindices)
 end
 
-function updatesymschur!(H_schur::SchurBlockMatrix{Float64}, g_full::Vector{Float64}, g::AbstractVector, H::AbstractArray, vars, varflags, boffsets, blockindices)
+function updatesymschur!(H_schur::SchurBlockHessian{Float64}, g_full::Vector{Float64}, g::AbstractVector, H::AbstractArray, vars, varflags, boffsets, blockindices)
     updateb!(g_full, g, vars, varflags, boffsets, blockindices)
 
     structure = H_schur.structure

@@ -205,7 +205,7 @@ Constructs the objective function `f`, in-place gradient/Hessian evaluator `fdf!
   `Matrix{Float64}`, zero-filled. The gradient buffer `g` is the matching vector type, an `MVector{N, Float64}` or a
   `Vector{Float64}`, which `zero(H[:, 1])` builds. Buffers of exactly these types (`deepcopy(H)` and `zero(H[:, 1])`)
   are filled in place; any other `AbstractMatrix`/`AbstractVector` is filled through an internal copy on every call.
-- several variables: a `SchurBlockMatrix` when variables are eliminated, a `SparseMatrixCSC{Float64, Int}` for a sparse
+- several variables: a `SchurBlockHessian` when variables are eliminated, a `SparseMatrixCSC{Float64, Int}` for a sparse
   system, and `nothing` for a dense one (pass a `Matrix{Float64}` and a `Vector{Float64}`).
 
 Wrap the returned 4-tuple in a `HessianObjective` and pass it to `SecondOrderOptimization.optimize!`, then write the
@@ -218,7 +218,7 @@ syncvars!(model, fdf!, x0)
 (`optimize!` needs a mutable `x0`; for a single variable of static size use `optimize`, which returns `(x, result)`, and
 sync `x`.)
 
-`reduction` and `storage` together decide `H`: it is a `SchurBlockMatrix` exactly when elimination happens, and the
+`reduction` and `storage` together decide `H`: it is a `SchurBlockHessian` exactly when elimination happens, and the
 optimizer eliminates exactly when it is handed one. Under elimination, `storage = :auto` chooses the reduced system's
 storage from the predicted fill of a Cholesky factor.
 
