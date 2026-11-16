@@ -21,7 +21,7 @@ import BlockLinearSystems:
     SparseBlockLinearSystem, DenseBlockLinearSystem, TransposedPattern,
     block, zero!, copy_structure,
     symmetrifyfull, symmetrifyfull!, sparse_with_map, copyto!,
-    block_sparse_nnz, computestartindices, find_diag_inds,
+    block_sparse_nnz, computestartindices,
     SchurStructure, SchurBlockHessian, build_schur_pattern, sort_schur_blocks,
     threadargs, fromthreadargs
 

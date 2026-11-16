@@ -93,7 +93,6 @@ struct MultiVariateLSsparse_x
     boffsets::Vector{Int} # One per block in b
     hessian::SparseMatrixCSC{Float64, Int} # Storage for sparse hessian
     sparseindices::Vector{Int}
-    diag_inds::Vector{Int}
 end
 
 struct MultiVariateLSsparse_ls
@@ -139,28 +138,23 @@ function MultiVariateLSsparse(A::SparseBlockLinearSystem, blockindices, storehes
     if storehessian
         x = Vector{Float64}(undef, blen)
         hessian, sparseindices = sparse_with_map(A; symmetric=true)
-        diag_inds = find_diag_inds(hessian)
     else
         x = Vector{Float64}(undef, 1)
         sparseindices = Vector{Int}()
         hessian = spzeros(1, 1)
-        diag_inds = Vector{Int}()
     end
     return LinearSystem(
-        MultiVariateLSsparse_x(x, blockindices, boffsets, hessian, sparseindices, diag_inds),
+        MultiVariateLSsparse_x(x, blockindices, boffsets, hessian, sparseindices),
         MultiVariateLSsparse_ls(A, zeros(Float64, blen))
     )
 end
 
-function MultiVariateLSsparse(A::SparseBlockLinearSystem, b, x, blockindices, boffsets, hessian, sparseindices, diag_inds::Vector{Int}=find_diag_inds(hessian))
+function MultiVariateLSsparse(A::SparseBlockLinearSystem, b, x, blockindices, boffsets, hessian, sparseindices)
     return LinearSystem(
-        MultiVariateLSsparse_x(x, blockindices, boffsets, hessian, sparseindices, diag_inds),
+        MultiVariateLSsparse_x(x, blockindices, boffsets, hessian, sparseindices),
         MultiVariateLSsparse_ls(A, b)
     )
 end
-MultiVariateLSsparse(A::SparseBlockLinearSystem, b, x, blockindices, boffsets, hessian, sparseindices, ::Nothing, diag_inds::Vector{Int}=find_diag_inds(hessian)) =
-    MultiVariateLSsparse(A, b, x, blockindices, boffsets, hessian, sparseindices, diag_inds)
-Base.getproperty(x::MultiVariateLSsparse_x, s::Symbol) = s === :ldlfac ? nothing : getfield(x, s)
 
 function MultiVariateLSdense(blocksizes, blockindices)
     boffsets = computestartindices(blocksizes)
@@ -196,10 +190,6 @@ function BlockLinearSystems.copy_structure(ls::MultiVariateLSSchur_ls)
 end
 BlockLinearSystems.copy_structure(ls::LinearSystem{F, V}) where {F, V} = LinearSystem{F, V}(ls.x, copy_structure(ls.ls))
 BlockLinearSystems.copy_structure(ls::LinearSystemShared{F, V, N}) where {F, V, N} = LinearSystemShared{F, V, N}(ls.x, SVector{N, V}(ntuple(i -> copy_structure(ls.ls[i]), Val(N))), MVector{N, Float64}(undef))
-
-# The blocks of one linear system with the unknowns (and solver state) of another
-sharex(ls::LinearSystem{F, V}, from) where {F, V} = LinearSystem{F, V}(from.x, ls.ls)
-sharex(ls::LinearSystemShared{F, V, N}, from) where {F, V, N} = LinearSystemShared{F, V, N}(from.x, ls.ls, ls.costs)
 
 sharedlinearsystem(ls::LinearSystem, ::StaticInt{1}) = ls
 sharedlinearsystem(ls::LinearSystemShared, ::StaticInt) = ls
