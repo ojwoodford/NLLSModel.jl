@@ -14,10 +14,10 @@ const TALL_TABLE = Dict(
     (:eliminate, :dense) => (SchurBlockJacobian{Float64, Matrix{Float64}}, (:auto, :qr, :cholesky, :ldl, :lsmr)),
     (:eliminate, :sparse) => (SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}, (:auto, :qr, :cholesky, :ldl, :lsmr)),
 )
-const TALL_ITERATORS = (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton)
-# Every linsolver symbol an extension accepts, and every iterator
+# Every iterator; every row takes each of them (gradient descent since SecondOrderOptimization IT2)
+const TALL_ITERATORS = (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton, :gradientdescent)
+# Every linsolver symbol an extension accepts
 const ALL_LINSOLVERS = (:auto, :cholesky, :ldl, :qr, :cg, :minres, :krylov, :lsmr, :pardiso)
-const ALL_ITERATORS = (TALL_ITERATORS..., :gradientdescent)
 
 # A cost that counts its evaluations (the residual, and the residual under autodiff)
 const TALL_EVALS = Threads.Atomic{Int}(0)
@@ -46,8 +46,8 @@ end
 
     @testset "reduction = $reduction, storage = $storage" for ((reduction, storage), (proto, linsolvers)) in TALL_TABLE
         @test optimvars_nls(model; reduction, storage, numthreads=static(1))[5] isa proto
-        for linsolver in ALL_LINSOLVERS, iterator in ALL_ITERATORS
-            listed = linsolver in linsolvers && iterator in TALL_ITERATORS
+        for linsolver in ALL_LINSOLVERS, iterator in TALL_ITERATORS
+            listed = linsolver in linsolvers
             TALL_EVALS[] = 0
             outcome = try
                 options = OptimizationOptions(; iterator, linsolver, maxiters=200)
@@ -60,7 +60,14 @@ end
                 @test outcome isa Tuple
                 outcome isa Tuple || continue
                 c, result = outcome
-                @test c ≈ cn rtol=(linsolver === :lsmr ? 1e-6 : 1e-8)
+                if iterator === :gradientdescent
+                    # Gradient descent does not reach the minimum in 200 iterations (on either formulation it stalls about
+                    # 3.5e-5 above it after some 17 000), so its cost is not compared with the normal path's: it must
+                    # reduce the cost as the other iterators do
+                    @test c < 0.1 * c0
+                else
+                    @test c ≈ cn rtol=(linsolver === :lsmr ? 1e-6 : 1e-8)
+                end
                 @test c ≈ result.bestcost rtol=1e-12
             else
                 @test outcome isa ArgumentError

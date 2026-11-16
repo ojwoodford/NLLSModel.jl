@@ -381,14 +381,21 @@ end
         @test optimize!(deepcopy(big), TallOptions; formulation=:tall, numthreads=static(1), storage=:dense, max_dense_bytes=n) isa OptimizationResult
     end
 
-    @testset "rejected by the optimizer" begin
+    @testset "a linsolver the optimizer rejects; gradient descent it accepts" begin
         model = curvefit()
-        for options in (OptimizationOptions(iterator=:gradientdescent), OptimizationOptions(iterator=:levenbergmarquardt, linsolver=:cholesky))
-            err = try optimize!(deepcopy(model), options; formulation=:tall, numthreads=static(1)); nothing catch e e end
-            @test err isa ArgumentError
+        # A linsolver not in the table: :cholesky with a plain Jacobian
+        options = OptimizationOptions(iterator=:levenbergmarquardt, linsolver=:cholesky)
+        err = try optimize!(deepcopy(model), options; formulation=:tall, numthreads=static(1)); nothing catch e e end
+        @test err isa ArgumentError
+        # It is fine for the normal equations
+        @test optimize!(deepcopy(model), options; numthreads=static(1)) isa OptimizationResult
+        # Gradient descent is accepted on the tall path (SecondOrderOptimization IT2), as on the normal one
+        c0 = NLLSModel.cost(model)
+        for formulation in (:tall, :normal)
+            m = deepcopy(model)
+            @test optimize!(m, OptimizationOptions(iterator=:gradientdescent); formulation, numthreads=static(1)) isa OptimizationResult
+            @test NLLSModel.cost(m) < c0
         end
-        # They are fine for the normal equations
-        @test optimize!(deepcopy(model), OptimizationOptions(iterator=:gradientdescent); numthreads=static(1)) isa OptimizationResult
     end
 
     # Z3: iterators that linearize at the first trial evaluate resjac! at a point that may then be rejected; with the optimizer's
