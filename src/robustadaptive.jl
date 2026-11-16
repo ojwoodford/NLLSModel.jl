@@ -1,5 +1,3 @@
-using Static, StaticArrays
-
 struct ContaminatedGaussian{T<:Real} <: AbstractAdaptiveRobustifier
     invsigma1::ZeroToInfScalar{T}
     invsigma2::ZeroToInfScalar{T}

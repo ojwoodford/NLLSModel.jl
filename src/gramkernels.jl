@@ -1,5 +1,3 @@
-using LoopVectorization: @turbo
-
 # Native kernels for the gradient and Gauss-Newton Hessian of one residual (A1).
 #
 #     gramgrad!(H, g, J, r, dc, c2)

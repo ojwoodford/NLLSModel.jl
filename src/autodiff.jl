@@ -1,6 +1,3 @@
-import ForwardDiff, DiffResults
-using Static, StaticArrays
-
 # Decisions on the autodiff path, compile-time decisions where possible.
 # `staticduals`: every unfixed variable has a static size, totalling at most MAX_STATIC_VAR, and the residual a static
 # length M. The Jacobian is then computed with duals of static width, with no ForwardDiff configuration.

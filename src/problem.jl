@@ -1,6 +1,3 @@
-using Static, SparseArrays
-import OptimizationVariableInterface: nvars
-
 mutable struct Model{VarTypes, CostTypes, CostVecs, TCT<:Tuple}
     # User provided
     costs::CostStruct{TCT, CostVecs} # Set of cost and residual blocks that define the problem

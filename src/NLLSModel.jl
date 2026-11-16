@@ -13,6 +13,8 @@ using FastNorm
 using OptimizationVariableInterface
 using SIRBSDispatch
 using Polyester: @batch
+using LoopVectorization: @turbo
+import ForwardDiff, DiffResults
 using Static, StaticArrays, SparseArrays, LinearAlgebra
 
 import BlockLinearSystems:

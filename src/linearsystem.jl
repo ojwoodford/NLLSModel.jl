@@ -1,5 +1,3 @@
-using SparseArrays, Static, StaticArrays, LinearAlgebra
-
 struct LinearSystem{F, V}
     x::F
     ls::V

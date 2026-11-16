@@ -1,5 +1,3 @@
-using StaticArrays, Static, SparseArrays
-
 SR(first, last) = StaticArrays.SUnitRange(dynamic(first), dynamic(last))
 
 struct Bind{F, Args<:Tuple}

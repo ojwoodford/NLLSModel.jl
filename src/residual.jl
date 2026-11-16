@@ -1,5 +1,3 @@
-using Static
-
 # Simple residuals modelling measurement noise errors
 struct SimpleError2{N, T, V1, V2} <: AbstractResidual
     measurement::SVector{N, T} # Measurement

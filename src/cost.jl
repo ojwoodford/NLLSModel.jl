@@ -1,6 +1,3 @@
-using Static
-import ForwardDiff
-
 cost(problem::Model) = cost(problem.variables, problem.costs)
 cost(problem::Model, numthreads::Integer) = cost(problem.variables, problem.costs, static(numthreads))
 cost(problem::Model, numthreads::StaticInt) = cost(problem.variables, problem.costs, numthreads)

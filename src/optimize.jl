@@ -1,5 +1,3 @@
-using Static, StaticArrays, SparseArrays, LinearAlgebra
-
 # Conversions for unfixed
 convertunfixed(::Nothing, problem) = trues(length(problem.variables))
 convertunfixed(unfixed::Type, problem) = BitVector(isa(v, unfixed) for v in problem.variables)
