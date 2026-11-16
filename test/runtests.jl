@@ -31,6 +31,7 @@ threaded_allocs_ok(bytes, threaded=Threads.nthreads() > 1) =
     include("tallproblems.jl")
     include("tallkernels.jl")
     include("tallformulation.jl")
+    include("manyvariables.jl")
     include("tallcontract.jl")
     include("talliterators.jl")
     include("tallalloc.jl")

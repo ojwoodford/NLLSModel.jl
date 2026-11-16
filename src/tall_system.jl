@@ -425,7 +425,8 @@ end
     elseif dynamic(nvars_deps) <= 5
         return sirbsdispatch(static(0), maxflags - static(1), varflags, f)
     else
-        return f(varflags)
+        # Fall back on dynamic dispatch, as the normal path does (gradhesshelper!)
+        return f(static(varflags))
     end
 end
 
