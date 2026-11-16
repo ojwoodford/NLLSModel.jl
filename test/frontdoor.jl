@@ -222,6 +222,19 @@ issolved(model, targets, which=eachindex(targets); atol=1e-6) = all(k -> isappro
         @test issolved(model, targets)
     end
 
+    # AN5: a workspace with elimination on the normal path. Each call builds a new Schur structure, so whether a second
+    # call reuses the workspace is not tested (see the fixes file, "To decide").
+    @testset "a workspace with elimination, storage = :$storage" for storage in (:dense, :sparse)
+        Random.seed!(11)
+        ba = optlandmark_problem(4, 20)
+        solved(; kwargs...) = (model = deepcopy(ba); optimize!(model, FDOptions; reduction=:eliminate, storage, numthreads=static(1), kwargs...); NLLSModel.cost(model))
+        ref = solved()
+        @test ref < NLLSModel.cost(ba)
+        workspace = OptimizationWorkspace()
+        @test solved(; workspace) ≈ ref rtol=1e-10
+        @test solved(; workspace) ≈ ref rtol=1e-10 # The same workspace again
+    end
+
     # This package's static rule for one variable (`usesstaticsystem`, `MAX_STATIC_SYSTEM`), on its own: SecondOrderOptimization
     # has a twin, deliberately not shared, and the two may differ
     @testset "static rule for one variable: $name" for (name, V, n, isstatic) in (("1", SVector{1, Float64}, 1, true),
