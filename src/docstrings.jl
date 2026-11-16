@@ -240,14 +240,18 @@ cost
 """
     subproblem(problem::Model, unfixed) -> Model
 
-Extracts a subproblem containing only costs connected to `unfixed` variables.
+Extracts a subproblem containing only the costs that touch an unfixed variable. `unfixed` takes the forms that the
+`unfixed` keyword of `optimize!` and [`optimvars`](@ref) takes: a variable index, a variable type, a Boolean mask over the
+variables, a list of variable indices, or `nothing` (all variables). The subproblem shares `problem`'s variables.
 """
 subproblem
 
 """
     subproblem!(to::Model, from::Model, costindices) -> to
 
-Populates subproblem `to` in-place with the subset of costs from `from` indexed by `costindices`.
+Populates subproblem `to` in-place with the subset of costs from `from` indexed by `costindices`: indices into all the
+costs of `from`, counted across its cost types in order. They must be sorted in ascending order and between 1 and the
+number of costs; otherwise an `ArgumentError` is thrown.
 """
 subproblem!
 

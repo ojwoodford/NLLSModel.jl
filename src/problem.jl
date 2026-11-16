@@ -40,19 +40,17 @@ function Base.show(io::IO, x::Model)
            ",\n             and ", countcosts(costnum, x.costs), " residual blocks of total dimension ", countcosts(resnum, x.costs), ".")
 end
 
+# The costs of `incosts` that touch an unfixed variable (`unfixed` as `convertunfixed` returns it: an index or a mask)
 function selectcosts!(outcosts::CostStruct, incosts::Vector, unfixed::Integer)
-    selectcosts!(outcosts, incosts, [i for (i, r) in enumerate(incosts) if in(unfixed, varindices(r))])
+    selectcostindices!(outcosts, incosts, [i for (i, r) in enumerate(incosts) if in(unfixed, varindices(r))])
 end
 
 function selectcosts!(outcosts::CostStruct, incosts::Vector, unfixed::BitVector)
-    selectcosts!(outcosts, incosts, [i for (i, r) in enumerate(incosts) if any(j -> unfixed[j], varindices(r))])
+    selectcostindices!(outcosts, incosts, [i for (i, r) in enumerate(incosts) if any(j -> unfixed[j], varindices(r))])
 end
 
-function selectcosts!(outcosts::CostStruct, incosts::Vector{T}, unfixed::Union{Vector{Bool}, SubArray{Bool}}) where T
-    selectcosts!(outcosts, incosts, BitVector(unfixed))
-end
-
-function selectcosts!(outcosts::CostStruct, incosts::Vector{T}, vec::Vector) where T
+# The costs of `incosts` at the cost indices `vec`
+function selectcostindices!(outcosts::CostStruct, incosts::Vector{T}, vec::Vector) where T
     outvec = empty!(get(outcosts, T))
     if !isempty(vec)
         append!(outvec, @inbounds(view(incosts, vec)))
@@ -61,6 +59,7 @@ end
 
 # Produce a subproblem containing only the relevant costs
 function subproblem(problem::Model{VT, CT}, unfixed) where {VT, CT}
+    unfixed = convertunfixed(unfixed, problem)
     coststruct = CostStruct{CT}()
     for costs in values(problem.costs)
         selectcosts!(coststruct, costs, unfixed)
@@ -68,7 +67,8 @@ function subproblem(problem::Model{VT, CT}, unfixed) where {VT, CT}
     return Model{VT, CT}(problem.variables, coststruct)
 end
 
-function selectcosts!(outcosts::CostStruct, incosts::Vector{T}, costindices, lastcost, index) where T
+# The costs at the sorted, in-range indices `costindices` into all costs of `incosts`, in order (starting from `index`)
+function selectcostindices!(outcosts::CostStruct, incosts::Vector{T}, costindices, lastcost, index) where T
     tocostvec = get!(outcosts, T)::Vector{T}
     empty!(tocostvec)
     firstind = lastcost
@@ -81,16 +81,20 @@ function selectcosts!(outcosts::CostStruct, incosts::Vector{T}, costindices, las
     return lastcost, index
 end
 
-function selectcosts!(outcosts::CostStruct, incosts::CostStruct, costindices)
+function selectcostindices!(outcosts::CostStruct, incosts::CostStruct, costindices)
     lastcost = 0
     index = 1
     for costs in values(incosts)
-        lastcost, index = selectcosts!(outcosts, costs, costindices, lastcost, index)
+        lastcost, index = selectcostindices!(outcosts, costs, costindices, lastcost, index)
     end
 end
 
 function subproblem!(to::Model{VT, CT}, from::Model{VT, CT}, costindices::AbstractVector) where {VT, CT}
-    selectcosts!(to.costs, from.costs, costindices)
+    issorted(costindices) || throw(ArgumentError("subproblem!: the cost indices must be sorted in ascending order"))
+    ncosts = countcosts(costnum, from.costs)
+    isempty(costindices) || (first(costindices) >= 1 && last(costindices) <= ncosts) ||
+        throw(ArgumentError("subproblem!: the cost indices must be between 1 and the number of costs, $ncosts"))
+    selectcostindices!(to.costs, from.costs, costindices)
     return to
 end
 

@@ -38,6 +38,54 @@ Base.eltype(::DiffResidual) = Float64
     @test which(NLLSModel.robustifydcost, Tuple{typeof(k), Float64}).sig.parameters[2] <: NLLSModel.Scaled{<:Real, NLLSModel.NoRobust}
 end
 
+# A difference of two variables of either type
+struct EitherDiff <: NLLSModel.AbstractResidual
+    i::Int
+    j::Int
+end
+NLLSModel.ndeps(::EitherDiff) = static(2)
+NLLSModel.nres(::EitherDiff) = static(1)
+NLLSModel.varindices(res::EitherDiff) = SVector(res.i, res.j)
+NLLSModel.getvars(res::EitherDiff, vars::Vector) = (vars[res.i], vars[res.j])
+NLLSModel.computeresidual(::EitherDiff, a, b) = a - b
+Base.eltype(::EitherDiff) = Float64
+
+@testset "subproblem: each form of unfixed selects the costs touching those variables (AN2)" begin
+    # Cost k does not touch variable k, so variable indices read as cost indices select other costs. Variables 1 and 3 are
+    # of another type, for the type form.
+    problem = Model(Union{Float64, Float32}, EitherDiff)
+    for v in (1.0f0, 2.0, 4.0f0, 8.0, 16.0)
+        NLLSModel.addvariable!(problem, v)
+    end
+    for (i, j) in ((2, 3), (3, 4), (4, 5), (5, 2))
+        NLLSModel.addcost!(problem, EitherDiff(i, j))
+    end
+    pairs(model) = sort([(c.i, c.j) for costs in values(model.costs) for c in costs])
+    touching(mask) = [(i, j) for (i, j) in ((2, 3), (3, 4), (4, 5), (5, 2)) if mask[i] || mask[j]]
+    for (name, unfixed, mask) in (
+            ("a list of indices", [1, 3], Bool[1, 0, 1, 0, 0]),
+            ("a list of one index beyond the cost count", [5], Bool[0, 0, 0, 0, 1]),
+            ("an index", 4, Bool[0, 0, 0, 1, 0]),
+            ("a type", Float32, Bool[1, 0, 1, 0, 0]),
+            ("a Boolean vector", Bool[0, 1, 0, 0, 0], Bool[0, 1, 0, 0, 0]),
+            ("a BitVector", BitVector([0, 0, 0, 0, 1]), Bool[0, 0, 0, 0, 1]),
+            ("nothing", nothing, Bool[1, 1, 1, 1, 1]))
+        @testset "$name" begin
+            sub = NLLSModel.subproblem(problem, unfixed)
+            @test pairs(sub) == touching(mask)
+            @test pairs(sub) == pairs(NLLSModel.subproblem(problem, mask))
+            @test sub.variables === problem.variables
+        end
+    end
+    # subproblem! takes cost indices, sorted and in range
+    to = NLLSModel.subproblem(problem, nothing)
+    @test pairs(NLLSModel.subproblem!(to, problem, [1, 3])) == [(2, 3), (4, 5)]
+    @test pairs(NLLSModel.subproblem!(to, problem, Int[])) == []
+    for bad in ([3, 1], [0, 2], [2, 5], [1, 1, 2, 9])
+        @test_throws ArgumentError NLLSModel.subproblem!(to, problem, bad)
+    end
+end
+
 @testset "block sparse nnz with large blocks" begin
     # B9: products of UInt8 block sizes must not wrap
     pattern = sparse([true true; false true])
