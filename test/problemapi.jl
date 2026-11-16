@@ -21,7 +21,7 @@ Base.eltype(::DiffResidual) = Float64
     # M4: the cost container has a concrete type
     @test isconcretetype(fieldtype(typeof(problem), :costs))
     # B8: duplicated variable indices are rejected
-    @test_throws AssertionError NLLSModel.addcost!(problem, DiffResidual(2, 2))
+    @test_throws ArgumentError NLLSModel.addcost!(problem, DiffResidual(2, 2))
     # B11: Boolean (non-Bit) vectors are masks of unfixed variables
     sub = NLLSModel.subproblem(problem, [true, true, false, false])
     @test NLLSModel.countcosts(NLLSModel.costnum, sub.costs) == 1
@@ -84,6 +84,50 @@ Base.eltype(::EitherDiff) = Float64
     for bad in ([3, 1], [0, 2], [2, 5], [1, 1, 2, 9])
         @test_throws ArgumentError NLLSModel.subproblem!(to, problem, bad)
     end
+end
+
+# Residuals that break one rule of addcost! each (AN8)
+struct BadRes{K} <: NLLSModel.AbstractResidual end
+NLLSModel.ndeps(::BadRes) = static(1)
+NLLSModel.ndeps(::BadRes{:ndeps}) = 1 # not static
+NLLSModel.nres(::BadRes) = static(1)
+NLLSModel.nres(::BadRes{:nres}) = static(0)
+NLLSModel.varindices(::BadRes) = SVector(1)
+NLLSModel.varindices(::BadRes{:varindices}) = SVector(1, 2)
+NLLSModel.getvars(::BadRes, vars::Vector) = (vars[1]::Float64,)
+NLLSModel.getvars(::BadRes{:getvars}, vars::Vector) = [vars[1]] # not a tuple
+NLLSModel.computeresidual(::BadRes, a) = SVector(a)
+Base.eltype(::BadRes) = Float64
+struct BadAdaptive <: NLLSModel.AbstractAdaptiveResidual end
+NLLSModel.ndeps(::BadAdaptive) = static(1)
+NLLSModel.nres(::BadAdaptive) = static(1)
+NLLSModel.varindices(::BadAdaptive) = SVector(1)
+NLLSModel.getvars(::BadAdaptive, vars::Vector) = (vars[1]::Float64,) # not an adaptive robustifier
+Base.eltype(::BadAdaptive) = Float64
+
+@testset "input checks throw ArgumentError, naming the type (AN8)" begin
+    msg(f) = try f(); "no error" catch e; e isa ArgumentError ? e.msg : "not an ArgumentError: $(typeof(e))" end
+    for (K, text) in ((:ndeps, "ndeps()"), (:varindices, "varindices()"), (:getvars, "getvars"), (:nres, "nres()"))
+        problem = Model(Float64, BadRes{K})
+        NLLSModel.addvariable!(problem, 1.0)
+        m = msg(() -> NLLSModel.addcost!(problem, BadRes{K}()))
+        @test occursin(text, m) && occursin("BadRes{:$K}", m)
+    end
+    problem = Model(Float64, DiffResidual)
+    NLLSModel.addvariable!(problem, 1.0)
+    NLLSModel.addvariable!(problem, 2.0)
+    m = msg(() -> NLLSModel.addcost!(problem, DiffResidual(2, 2)))
+    @test occursin("same variable more than once", m) && occursin("DiffResidual", m)
+    problem = Model(Float64, BadAdaptive)
+    NLLSModel.addvariable!(problem, 1.0)
+    m = msg(() -> NLLSModel.addcost!(problem, BadAdaptive()))
+    @test occursin("adaptive robustifier", m) && occursin("BadAdaptive", m)
+    # A variable with no dimensions
+    problem = Model(Vector{Float64}, DiffResidual)
+    m = msg(() -> NLLSModel.addvariable!(problem, Float64[]))
+    @test occursin("nvars()", m) && occursin("Vector{Float64}", m)
+    # A model with no variables
+    @test occursin("no variables", msg(() -> optimvars(Model(Float64, DiffResidual))))
 end
 
 @testset "block sparse nnz with large blocks" begin

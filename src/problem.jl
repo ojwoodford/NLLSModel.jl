@@ -95,17 +95,21 @@ function subproblem!(to::Model{VT, CT}, from::Model{VT, CT}, costindices::Abstra
     return to
 end
 
+# A user's cost or variable that breaks a rule of addcost! or addvariable!
+inputerror(msg, ::Type{T}, what) where T = throw(ArgumentError("$msg ($what of type $T)"))
+
 function addcost!(problem::Model, cost::Cost) where Cost <: AbstractCost
     N = ndeps(cost)
-    @assert isa(N, StaticInt) && N > 0 && N <= MAX_ARGS "Problem with ndeps()"
-    @assert length(varindices(cost)) == N "Problem with varindices()"
-    @assert allunique(varindices(cost)) "A cost cannot depend on the same variable more than once"
+    isa(N, StaticInt) && N > 0 && N <= MAX_ARGS || inputerror("Problem with ndeps()", Cost, "cost")
+    length(varindices(cost)) == N || inputerror("Problem with varindices()", Cost, "cost")
+    allunique(varindices(cost)) || inputerror("A cost cannot depend on the same variable more than once", Cost, "cost")
     vars = getvars(cost, problem.variables)
-    @assert isa(vars, Tuple) && isconcretetype(typeof(vars)) && length(vars) == N "getvars(::$(typeof(cost)), vars) should return a concretely typed tuple of length $(dynamic(N)), but returned $(typeof(vars))."
-    @assert (!(Cost <: AbstractAdaptiveResidual) || isa(vars[1], AbstractAdaptiveRobustifier)) "Adaptive residual without adaptive robustifier"
+    isa(vars, Tuple) && isconcretetype(typeof(vars)) && length(vars) == N ||
+        throw(ArgumentError("getvars(::$(typeof(cost)), vars) should return a concretely typed tuple of length $(dynamic(N)), but returned $(typeof(vars))."))
+    !(Cost <: AbstractAdaptiveResidual) || isa(vars[1], AbstractAdaptiveRobustifier) || inputerror("Adaptive residual without adaptive robustifier", Cost, "cost")
     if Cost <: AbstractResidual
         M = nres(cost)
-        @assert (isa(M, Integer) || isa(M, StaticInt)) && M > 0 "Problem with nres()"
+        (isa(M, Integer) || isa(M, StaticInt)) && M > 0 || inputerror("Problem with nres()", Cost, "cost")
     end
     push!(problem.costs, cost)
     problem.varcostmapvalid = false
@@ -114,7 +118,7 @@ end
 
 function addvariable!(problem::Model, variable)
     N = nvars(variable)
-    @assert (isa(N, Integer) || isa(N, StaticInt)) && N > 0 "Problem with nvars()"
+    (isa(N, Integer) || isa(N, StaticInt)) && N > 0 || inputerror("Problem with nvars()", typeof(variable), "variable")
     push!(problem.variables, variable)
     problem.varcostmapvalid = false
     return length(problem.variables)

@@ -237,7 +237,7 @@ function optimvars_dispatch(problem::Model, unfixed::Integer, numthreads::Static
 end
 
 function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads::StaticInt, reduction::Symbol, storage::Symbol, max_dense_bytes::Int, min_work::Integer, min_work_cost::Integer)
-    @assert length(problem.variables) > 0
+    isempty(problem.variables) && throw(ArgumentError("The model has no variables"))
     nblocks = sum(unfixed)
     if nblocks == 1
         return optimvars_dispatch(problem, findfirst(unfixed), numthreads, reduction, storage, max_dense_bytes, min_work, min_work_cost)

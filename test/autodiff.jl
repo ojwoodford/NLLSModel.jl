@@ -17,6 +17,19 @@ NLLSModel.getvars(::WideLinear{M, N1, N2}, vars::AbstractVector) where {M, N1, N
 NLLSModel.computeresidual(r::WideLinear, x, y) = r.A * vcat(x, y) - r.b
 Base.eltype(::WideLinear) = Float64
 
+# The same residual without Base.eltype, and a cost without it (AN8)
+struct NoEltype{M} <: NLLSModel.AbstractResidual
+    m::M
+end
+NLLSModel.ndeps(::NoEltype) = static(1)
+NLLSModel.nres(r::NoEltype) = r.m
+NLLSModel.varindices(::NoEltype) = SVector(1)
+NLLSModel.computeresidual(r::NoEltype, x) = x[1:NLLSModel.dynamic(r.m)]
+struct NoEltypeCost <: NLLSModel.AbstractCost end
+NLLSModel.ndeps(::NoEltypeCost) = static(1)
+NLLSModel.varindices(::NoEltypeCost) = SVector(1)
+NLLSModel.computecost(::NoEltypeCost, x) = sum(abs2, x)
+
 @testset "autodiff.jl" begin
     rng = MersenneTwister(4)
     # (rows, size of x, size of y): 12 inputs, 13 inputs, and the most a static evaluation takes (MAX_STATIC_VAR)
@@ -34,4 +47,14 @@ Base.eltype(::WideLinear) = Float64
         @test allocs_warm(computeresjac, static(3), cost, x, y) == 0
         @test allocs_warm(NLLSModel.computerescostgradhess, static(6), cost, NoRobust(), (x, y)) == 0
     end
+    # A residual or cost without Base.eltype: an ArgumentError on each autodiff path (AN8)
+    eltypemsg(f) = try f(); "no error" catch e; e isa ArgumentError ? e.msg : "not an ArgumentError: $(typeof(e))" end
+    for (path, r, x) in (("static", NoEltype(static(2)), SVector(1.0, 2.0)),
+                         ("wide", NoEltype(static(60)), randn(rng, SVector{60, Float64})),
+                         ("dynamic", NoEltype(2), [1.0, 2.0]))
+        @testset "computeresjac, $path" begin
+            @test occursin("Define Base.eltype()", eltypemsg(() -> computeresjac(static(1), r, x)))
+        end
+    end
+    @test occursin("Define Base.eltype()", eltypemsg(() -> NLLSModel.computecostgradhess(static(1), NoEltypeCost(), [1.0, 2.0])))
 end

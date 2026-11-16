@@ -85,10 +85,13 @@ function computeresjac(varflags, residual, vars::Vararg{Any, N}) where N
     return computeresjacdynamic(varflags, residual, vars)
 end
 
+# The element type is needed for the duals: a compile-time check on each autodiff path, thrown out of line
+@noinline noeltype(cost) = throw(ArgumentError("Define Base.eltype() for your residual type ($(typeof(cost)))"))
+
 # Automatic statically-sized Jacobian computation
 function computeresjacstatic(varflags::StaticInt, residual::AbstractResidual, vars)
     # Perform static (i.e. fixed size vector) auto-differentiation
-    @assert eltype(residual)!=Any "Define Base.eltype() for your residual type"
+    eltype(residual) != Any || noeltype(residual)
 
     # Construct ForwardDiff Dual arguments for the unfixed variables
     xdual = dualvars(vars, varflags, eltype(residual))
@@ -105,7 +108,7 @@ end
 # inferred, and nothing allocates once the buffers exist). The returned arrays are the buffers themselves: valid until
 # the next call on the same task with the same residual type and sizes.
 function computeresjacwide(varflags::StaticInt, residual::AbstractResidual, vars)
-    @assert eltype(residual)!=Any "Define Base.eltype() for your residual type"
+    eltype(residual) != Any || noeltype(residual)
     T = eltype(residual)
     ydual = computeresidual(residual, dualvars(vars, varflags, T)...)
     M = dynamic(nres(residual))
@@ -161,7 +164,7 @@ end
 # Automatic dynamically-sized Jacobian computation
 function computeresjacdynamic(varflags, residual::AbstractResidual, vars)
     # Perform dynamic (i.e. variable size vector) auto-differentiation
-    @assert eltype(residual)!=Any "Define Base.eltype() for your residual type"
+    eltype(residual) != Any || noeltype(residual)
 
     # Compute the number of free variables
     totalnumvars = dynamic(computetotalnumvars(varflags, vars))
@@ -205,7 +208,7 @@ computegradient(f, x::T) where T <: Number = map(first, computegradient(f ∘ fi
 # Automatic computation of the cost, gradient and Hessian
 function computecostgradhess(varflags, cost::AbstractCost, vars...)
     # Perform dynamic (i.e. variable size vector) auto-differentiation
-    @assert eltype(cost)!=Any "Define Base.eltype() for your residual type"
+    eltype(cost) != Any || noeltype(cost)
 
     # Compute the number of free variables
     totalnumvars = computetotalnumvars(varflags, vars)
