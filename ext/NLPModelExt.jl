@@ -454,8 +454,7 @@ end
 function NLPModels.objgrad!(nls::NLLSModelNLS, x::AbstractVector, g::AbstractVector)
     NLPModels.increment!(nls, :neval_obj)
     NLPModels.increment!(nls, :neval_grad)
-    cost = ensure_res!(nls, x)
-    ensure_jac!(nls, x)
+    cost = ensure_jac!(nls, x) # also fills the residual buffer
     mul!(g, transpose(nls.J_buf), nls.r_buf)
     return cost, g
 end

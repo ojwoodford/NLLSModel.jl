@@ -572,6 +572,44 @@ end
     @test isapprox(prob.variables[1], SVector(1.0, 1.0); atol=1e-4)
 end
 
+# A residual that counts its evaluations (AN3)
+const NLS_EVALS = Ref(0)
+struct CountedNLS{C} <: AbstractResidual
+    c::C
+end
+NLLSModel.ndeps(r::CountedNLS) = NLLSModel.ndeps(r.c)
+NLLSModel.nres(r::CountedNLS) = NLLSModel.nres(r.c)
+NLLSModel.varindices(r::CountedNLS) = NLLSModel.varindices(r.c)
+NLLSModel.getvars(r::CountedNLS, vars::AbstractVector) = NLLSModel.getvars(r.c, vars)
+NLLSModel.computeresidual(r::CountedNLS, args...) = (NLS_EVALS[] += 1; NLLSModel.computeresidual(r.c, args...))
+Base.eltype(::CountedNLS) = Float64
+
+@testset "NLS Interface - objgrad! evaluates each residual once (AN3)" begin
+    prob = Model(SVector{2, Float64}, Union{CountedNLS{TestRosenbrock1}, CountedNLS{TestRosenbrock2}})
+    addvariable!(prob, SVector(-1.2, 1.0))
+    addcost!(prob, CountedNLS(TestRosenbrock1()))
+    addcost!(prob, CountedNLS(TestRosenbrock2()))
+    ncosts = 2
+    nls = NLLSNLSModel(prob; numthreads=static(1))
+    evals(fun) = (NLS_EVALS[] = 0; fun(); NLS_EVALS[])
+    g, g2 = zeros(2), zeros(2)
+    # grad! at a new point: one pass over the costs
+    @test evals(() -> grad!(nls, [0.3, 0.4], g)) == ncosts
+    # objgrad! at a new point: one pass too
+    @test evals(() -> objgrad!(nls, [0.5, 0.6], g2)) == ncosts
+    # The same cost and gradient as obj and grad! on a fresh model
+    fresh = NLLSNLSModel(prob; numthreads=static(1))
+    x = [0.7, -0.2]
+    c = obj(fresh, x)
+    @test grad!(fresh, x, g) == g
+    @test objgrad!(nls, x, g2) == (c, g)
+    # obj, then objgrad! at the same point: one pass, and the same values
+    x = [-0.1, 0.9]
+    c = obj(nls, x)
+    @test evals(() -> objgrad!(nls, x, g2)) == ncosts
+    @test objgrad!(nls, x, g2)[1] == c && g2 == grad!(fresh, x, g)
+end
+
 @testset "NLS Interface - nls_callbacks & LeastSquaresOptim" begin
     # 1. Dense problem
     prob_dense = Model(SVector{2, Float64}, Union{TestRosenbrock1, TestRosenbrock2})
