@@ -63,8 +63,9 @@ const MAX_BLOCK_SZ = 32 # Maximum DoF of a variable and also maximum length of a
 """
     MAX_STATIC_VAR
 
-Maximum total size of the unfixed variables of a cost for the full static path (static-sized autodiff and the static
-multiply of `gramgrad`). Inherited from NLLSsolver; not measured.
+Maximum total size of the unfixed variables of a cost for static-sized autodiff (duals of static width), and so for the
+full static path (that autodiff and the static multiply of `gramgrad`). Above it, or with a run-time size, the cost is
+differentiated by ForwardDiff with a configuration cached per task. Inherited from NLLSsolver; not measured.
 """
 const MAX_STATIC_VAR = 64
 
@@ -72,8 +73,9 @@ const MAX_STATIC_VAR = 64
     MAX_STATIC_JAC
 
 Maximum rows × columns (`nres` times the total size of the unfixed variables) of the Jacobian of a cost for the full
-static path. It bounds the size of the static Jacobian that is built and unrolled; a cost above it takes the dynamic
-autodiff path and the static-column or `@turbo` kernel. A starting value, not measured.
+static path. It bounds the size of the static Jacobian that is built and unrolled. A cost above it (with static sizes, at
+most `MAX_STATIC_VAR` in all) is still differentiated with duals of static width, its Jacobian written into a `Matrix`
+buffer per task, and takes the static-column or `@turbo` kernel. A starting value, not measured.
 """
 const MAX_STATIC_JAC = 128
 

@@ -17,6 +17,7 @@ threaded_allocs_ok(bytes, threaded=Threads.nthreads() > 1) =
     include("CostStruct.jl")
     include("robust.jl")
     include("dynamicvars.jl")
+    include("autodiff.jl")
     include("nonsquaredcost.jl")
     include("adaptivecost.jl")
     include("multithreading.jl")

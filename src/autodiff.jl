@@ -1,10 +1,12 @@
 import ForwardDiff, DiffResults
 using Static, StaticArrays
 
-# Decision on whether to use the full static path (static-sized autodiff and the static multiply) - compile-time decision where possible.
-# Needs every unfixed variable to have a static size totalling at most MAX_STATIC_VAR, a static residual length M, and
+# Decisions on the autodiff path, compile-time decisions where possible.
+# `staticduals`: every unfixed variable has a static size, totalling at most MAX_STATIC_VAR, and the residual a static
+# length M. The Jacobian is then computed with duals of static width, with no ForwardDiff configuration.
+# `usestatic` (the full static path: the Jacobian built as a static matrix, and the static multiply): also
 # M * (total size) <= MAX_STATIC_JAC, which bounds the static Jacobian that is built and unrolled.
-function usestatic(varflags::StaticInt, residual, vars)::Bool
+function staticduals(varflags::StaticInt, residual, vars)::Bool
     M = nres(residual)
     dynamic(is_static(M)) || return false
     N = length(vars)
@@ -18,9 +20,11 @@ function usestatic(varflags::StaticInt, residual, vars)::Bool
             totalnumvars += nvi
         end
     end
-    return totalnumvars <= MAX_STATIC_VAR && M * totalnumvars <= MAX_STATIC_JAC ? true : false
+    return totalnumvars <= MAX_STATIC_VAR ? true : false
 end
-usestatic(varflags, residual, vars) = false
+staticduals(varflags, residual, vars) = false
+usestatic(varflags, residual, vars)::Bool =
+    staticduals(varflags, residual, vars) && nres(residual) * computetotalnumvars(varflags, vars) <= MAX_STATIC_JAC ? true : false
 
 # Count the number of variables across all unfixed variable blocks
 function computetotalnumvars(varflags::StaticInt, vars)
@@ -75,8 +79,14 @@ end
 end
 extractvaldual(dual::ForwardDiff.Dual{TG, T, N}) where {TG, T, N} = ForwardDiff.value(dual), SVector{N, T}(dual.partials.values...)'
 
-# Automatic Jacobian computation
-computeresjac(varflags, residual, vars...) = usestatic(varflags, residual, vars) ? computeresjacstatic(varflags, residual, vars) : computeresjacdynamic(varflags, residual, vars)
+# Automatic Jacobian computation: a static matrix (the full static path); a per-task Vector and Matrix filled from duals of
+# static width (static sizes, the Jacobian above MAX_STATIC_JAC); or ForwardDiff with a cached configuration (run-time sizes)
+# (`Vararg{Any, N}`: a vararg that is only passed on is not specialized otherwise)
+function computeresjac(varflags, residual, vars::Vararg{Any, N}) where N
+    usestatic(varflags, residual, vars) && return computeresjacstatic(varflags, residual, vars)
+    staticduals(varflags, residual, vars) && return computeresjacwide(varflags, residual, vars)
+    return computeresjacdynamic(varflags, residual, vars)
+end
 
 # Automatic statically-sized Jacobian computation
 function computeresjacstatic(varflags::StaticInt, residual::AbstractResidual, vars)
@@ -91,6 +101,32 @@ function computeresjacstatic(varflags::StaticInt, residual::AbstractResidual, va
 
     # Return the residual and jacobian
     return extractvaldual(ydual)
+end
+
+# Statically-sized autodiff with a Jacobian too large to build as a static matrix: the same dual evaluation as
+# `computeresjacstatic`, with the residual and Jacobian written into per-task buffers of concrete type (so the call is
+# inferred, and nothing allocates once the buffers exist). The returned arrays are the buffers themselves: valid until
+# the next call on the same task with the same residual type and sizes.
+function computeresjacwide(varflags::StaticInt, residual::AbstractResidual, vars)
+    @assert eltype(residual)!=Any "Define Base.eltype() for your residual type"
+    T = eltype(residual)
+    ydual = computeresidual(residual, dualvars(vars, varflags, T)...)
+    M = dynamic(nres(residual))
+    n = dynamic(computetotalnumvars(varflags, vars))
+    res, jac = widebuffers(residual, T, M, n)
+    @inbounds for i in 1:M
+        y = ydual[i]
+        res[i] = ForwardDiff.value(y)
+        for j in 1:n
+            jac[i, j] = ForwardDiff.partials(y, j)
+        end
+    end
+    return res, jac
+end
+
+function widebuffers(residual, ::Type{T}, M::Int, n::Int) where T
+    cache = get!(() -> Dict{Any, Any}(), task_local_storage(), :nllsmodel_widecache)::Dict{Any, Any}
+    return get!(() -> (zeros(T, M), zeros(T, M, n)), cache, (typeof(residual), M, n))::Tuple{Vector{T}, Matrix{T}}
 end
 
 # Buffers and ForwardDiff configuration for dynamically-sized autodiff, cached per task (so threads never share them).
