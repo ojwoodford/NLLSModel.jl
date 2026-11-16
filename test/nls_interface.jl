@@ -111,6 +111,15 @@ struct UnbuildableVec <: AbstractVector{Float64}
 end
 Base.size(v::UnbuildableVec) = size(v.data)
 Base.getindex(v::UnbuildableVec, i::Int) = v.data[i]
+# A unit 4-vector with 3 degrees of freedom, stored in ambient coordinates: longer than its nvars (AN4)
+struct AmbientVec <: AbstractVector{Float64}
+    data::SVector{4, Float64}
+end
+AmbientVec(x::AbstractVector) = AmbientVec(normalize(SVector{4, Float64}(x)))
+Base.size(::AmbientVec) = (4,)
+Base.getindex(v::AmbientVec, i::Int) = v.data[i]
+nvars(::AmbientVec) = static(3)
+update(v::AmbientVec, δ, start=1) = AmbientVec(v.data + SVector(δ[start], δ[start+1], δ[start+2], 0.0))
 struct EuclidRes <: AbstractResidual
     i::Int
 end
@@ -466,6 +475,14 @@ end
         @test occursin("cannot be packed", argmsg(ZeroToInfScalar(1.0))) && occursin("ZeroToInfScalar", argmsg(ZeroToInfScalar(1.0)))
         @test occursin("cannot be packed", argmsg(UnbuildableVec([1.0, 2.0], 0))) # An AbstractVector with no constructor from its values
         @test occursin("cannot be packed", argmsg(:symbol))
+        # A vector longer than its nvars (ambient coordinates) is rejected before it is packed (AN4)
+        lenmsg = "length(v) == nvars(v)"
+        @test occursin(lenmsg, argmsg(AmbientVec([1.0, 0.0, 0.0, 0.0]))) && occursin("AmbientVec", argmsg(AmbientVec([1.0, 0.0, 0.0, 0.0])))
+        prob_amb = Model(AmbientVec, EuclidRes)
+        addvariable!(prob_amb, AmbientVec([1.0, 0.0, 0.0, 0.0]))
+        addcost!(prob_amb, EuclidRes(1))
+        @test_throws lenmsg flat_optimvars_nls(prob_amb)
+        @test_throws lenmsg NLLSNLSModel(prob_amb)
         # Through flat_optimvars_nls, and once per variable type: 1 000 variables of one type, one check
         prob_rot = Model(WrappedAngle, AngleRes)
         addvariable!(prob_rot, WrappedAngle(3.1))

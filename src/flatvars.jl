@@ -146,6 +146,9 @@ function check_additive_variable(v)
     packerror() = ArgumentError("Variable of type $T cannot be packed into a flat Float64 vector: the flat-vector paths take a number or an AbstractVector of numbers (Float64, SVector, Vector{Float64}, or another AbstractVector type that can be built from a vector of its values)")
     hasmethod(pack_single_var!, Tuple{Vector{Float64}, T}) || throw(packerror())
     nv = Int(dynamic(nvars(v)))
+    # Packing writes length(v) values: a variable stored in more coordinates than it has degrees of freedom (a manifold
+    # type in ambient coordinates) does not pack into nvars(v) values
+    (v isa Number ? nv == 1 : length(v) == nv) || throw(ArgumentError("Variable of type $T has length $(length(v)) but nvars $nv: the flat-vector paths need length(v) == nvars(v)"))
     xv = zeros(Float64, nv)
     pack_single_var!(xv, v)
     try
