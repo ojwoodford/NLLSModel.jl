@@ -222,14 +222,16 @@ issolved(model, targets, which=eachindex(targets); atol=1e-6) = all(k -> isappro
         @test issolved(model, targets)
     end
 
-    @testset "static rule agrees with the optimizer: $name" for (name, V, n) in (("1", SVector{1, Float64}, 1), ("16", SVector{16, Float64}, 16), ("17", SVector{17, Float64}, 17), ("dynamic 3", Vector{Float64}, 3), ("dynamic 17", Vector{Float64}, 17))
+    # This package's static rule for one variable (`usesstaticsystem`, `MAX_STATIC_SYSTEM`), on its own: SecondOrderOptimization
+    # has a twin, deliberately not shared, and the two may differ
+    @testset "static rule for one variable: $name" for (name, V, n, isstatic) in (("1", SVector{1, Float64}, 1, true),
+            ("16", SVector{16, Float64}, 16, true), ("17", SVector{17, Float64}, 17, false), ("dynamic 3", Vector{Float64}, 3, false),
+            ("dynamic 17", Vector{Float64}, 17, false))
         model, _ = singleproblem(V, n, 8)
         _, fdf!, x0, H = optimvars(model; numthreads=static(1))
-        ours = typeof(fdf!.linsystem.ls) <: NLLSModel.UniVariateLSstatic_ls
-        theirs = SecondOrderOptimization.makelinearsystem(x0, H, :auto) isa SecondOrderOptimization.StaticLinearSystem
-        @test ours == theirs
-        @test ours == SecondOrderOptimization.usesstaticsystem(x0) # SecondOrderOptimization's one statement of the rule (MAX_STATIC_SYSTEM = 16)
-        @test ours == (V <: StaticVector && n <= 16)
+        @test NLLSModel.MAX_STATIC_SYSTEM == 16
+        @test NLLSModel.usesstaticsystem(x0) == isstatic
+        @test (typeof(fdf!.linsystem.ls) <: NLLSModel.UniVariateLSstatic_ls) == isstatic
     end
 
     # For one variable, the H that optimvars returns has the types of the linear system's own storage, so buffers built

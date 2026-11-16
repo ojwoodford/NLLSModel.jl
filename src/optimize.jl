@@ -209,13 +209,22 @@ function optimvars(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads
     return optimvars_dispatch(problem, convertunfixed(unfixed, problem), static(numthreads), reduction, storage, Int(max_dense_bytes), min_work, min_work_cost)
 end
 
+# The static rule for one variable's system: static (stack-allocated `StaticArrays`) when the variable's size is static and
+# at most MAX_STATIC_SYSTEM, dense otherwise. The value is that of the inline rule this replaced; not measured here.
+# SecondOrderOptimization has a twin (its `usesstaticsystem` and `MAX_STATIC_SYSTEM`), deliberately not shared: neither
+# package depends on the other except weakly (decided 2026-11-16, rules.md 4). The two may differ; when they do, the
+# optimizer converts the Hessian to its own system's storage, which costs a copy, not correctness.
+const MAX_STATIC_SYSTEM = 16
+usesstaticsystem(x0) = isstaticsize(nvars(x0))
+isstaticsize(n) = dynamic(is_static(n)) && n <= MAX_STATIC_SYSTEM
+
 function optimvars_dispatch(problem::Model, unfixed::Integer, numthreads::StaticInt, reduction::Symbol, storage::Symbol, max_dense_bytes::Int, min_work::Integer, min_work_cost::Integer)
     # One variable's system is always dense (or static)
     storage === :sparse && throw(ArgumentError("storage = :sparse is not available for a single unfixed variable: its Hessian is always dense; use :auto or :dense."))
     x0 = problem.variables[unfixed]
     varlen = nvars(x0)
     check_densefits("Hessian of a single variable", dynamic(varlen), dynamic(varlen), max_dense_bytes, "raise max_dense_bytes")
-    if dynamic(is_static(varlen)) && varlen <= 16
+    if usesstaticsystem(x0)
         ls = LinearSystem{UniVariateLSstatic_x{dynamic(varlen)}, UniVariateLSstatic_ls{dynamic(varlen), dynamic(varlen * varlen)}}((unfixed,), ())
     else
         ls = LinearSystem{UniVariateLSdynamic_x, UniVariateLSdynamic_ls}((unfixed, dynamic(varlen)), (dynamic(varlen),))
