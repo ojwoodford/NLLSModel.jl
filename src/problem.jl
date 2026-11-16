@@ -193,7 +193,7 @@ where `extra_blocks` lists the pairs of retained blocks that share a cost (in th
 or `nothing` if the problem does not have both retained and eliminable variables, or if its structure does not suit
 Schur reduction. With `explicit = true` (`reduction = :eliminate` in [`optimvars`](@ref)) a structure that does not fit
 throws an `ArgumentError` instead. Eliminated variables, like retained ones, may have any number of dimensions that
-BlockLinearSystems takes as a block, 1 to 255; a larger variable is an `ArgumentError` (from `block_dimension`).
+BlockLinearSystems takes as a block; it checks the sizes, and its `ArgumentError` names the block.
 """
 function partition_schur_problem(problem::Model, unfixed::AbstractVector, explicit::Bool=false)
     unfixed_raw = findall(unfixed)
@@ -217,8 +217,8 @@ function partition_schur_problem(problem::Model, unfixed::AbstractVector, explic
     elim_set = Set(unfixed_raw[findall(is_elim)])
     retained_set = Set(unfixed_raw[findall(!, is_elim)])
 
-    # Blocks of any size BlockLinearSystems takes (1 to 255 dimensions, checked by block_dimension), eliminated or retained
-    block_sizes = [block_dimension(problem.variables[i], i) for i in unfixed_raw]
+    # Blocks of any size BlockLinearSystems takes (it checks them), eliminated or retained
+    block_sizes = [block_dimension(problem.variables[i]) for i in unfixed_raw]
 
     # Map from original variable index to retained block index (1:nret)
     retained_raw_list = unfixed_raw[findall(!, is_elim)]
@@ -271,8 +271,8 @@ function partition_schur_problem(problem::Model, unfixed::AbstractVector, explic
     unfixed_inds = unfixed_raw[perm]
     sorted_sizes = block_sizes[perm]
 
-    r_dims = UInt8.(sorted_sizes[1:nret])
-    e_dims = UInt8.(sorted_sizes[nret+1:nblocks])
+    r_dims = sorted_sizes[1:nret]
+    e_dims = sorted_sizes[nret+1:nblocks]
 
     # Re-map the retained indices in the couplings to the new retained ordering
     old_to_new_retained = Dict{Int, Int}()

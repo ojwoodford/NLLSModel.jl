@@ -3,7 +3,8 @@ using SecondOrderOptimization
 import BlockLinearSystems: SchurBlockHessian, SchurBlockJacobian
 import OptimizationVariableInterface
 
-# E1: eliminable variables of any size BlockLinearSystems takes (1 to 255 dimensions), on the normal and the tall path.
+# E1: eliminable variables of any size BlockLinearSystems takes as a block, on the normal and the tall path (256 and 300
+# dimensions are in bigvariable.jl).
 # Needs warmallocs from tallalloc.jl, warmallocs_fdf and warmallocs_f from optimization.jl.
 
 # An eliminable variable of N dimensions

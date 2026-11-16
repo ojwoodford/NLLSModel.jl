@@ -29,7 +29,7 @@ Base.eltype(::DiffResidual) = Float64
     @test NLLSModel.countcosts(NLLSModel.costnum, sub.costs) == 1
     @test NLLSModel.convertunfixed([2, 3], problem) == BitVector([false, true, true, false])
     @test NLLSModel.convertunfixed(Float64, problem) == trues(4)
-    # M10: any variable size can be added; the 255 limit applies only to blocks of block linear systems (see test/bigvariable.jl)
+    # M10: any variable size can be added; only a block of a block linear system is limited, by BlockLinearSystems (see test/bigvariable.jl)
     bigproblem = Model(Vector{Float64}, DiffResidual)
     @test NLLSModel.addvariable!(bigproblem, zeros(256)) == 1
     # B10: scaled non-robust kernel fast path
@@ -73,7 +73,7 @@ end
 end
 
 @testset "per-thread linear system copies are memory capped" begin
-    A = NLLSModel.MultiVariateLSdense(UInt8[3, 3, 3], UInt[1, 2, 3])
+    A = NLLSModel.MultiVariateLSdense([3, 3, 3], UInt[1, 2, 3])
     ls = NLLSModel.LinearSystem(NLLSModel.MultiVariateLSdense_x(zeros(9), UInt[1, 2, 3], [1, 4, 7, 10]), A)
     one_copy = Base.summarysize(ls.ls)
     @test NLLSModel.threadcopylimit(ls, 8) == 8

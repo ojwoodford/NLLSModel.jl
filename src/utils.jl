@@ -26,22 +26,18 @@ end
 block_sparsity(problem, unfixed::AbstractVector{Bool}) = block_sparsity(problem, findall(unfixed))
 block_sparsity(problem, unfixed) = block_sparsity(problem, convert(Vector{Int}, findall(unfixed)))
 
-# Dimension of variable `index` as a block of a block linear system. BlockLinearSystems stores block sizes as UInt8,
-# so only variables of 1 to 255 dimensions can be blocks (any size is fine for a variable optimized on its own).
-function block_dimension(variable, index)
-    d = Int(dynamic(nvars(variable)))
-    1 <= d <= typemax(UInt8) || throw(ArgumentError("Variable $index has $d dimensions, but block linear systems support blocks of 1 to $(Int(typemax(UInt8))) dimensions. The variable can still be optimized on its own (unfixed = $index)."))
-    return d
-end
+# Dimension of a variable as a block of a block linear system, as an Int. BlockLinearSystems checks block sizes against
+# its own limit when it builds the system; any size is fine for a variable optimized on its own.
+block_dimension(variable) = Int(dynamic(nvars(variable)))
 
 function block_sizes_indices(variables, unfixed)
     unfixed_raw = findall(unfixed)
-    dims = [UInt8(block_dimension(variables[i], i)) for i in unfixed_raw]
+    dims = [block_dimension(variables[i]) for i in unfixed_raw]
 
     # Check if dimensions are already grouped into contiguous runs
     is_grouped = true
-    seen = Set{UInt8}()
-    prev = UInt8(0)
+    seen = Set{Int}()
+    prev = 0
     for d in dims
         if d != prev
             if d in seen

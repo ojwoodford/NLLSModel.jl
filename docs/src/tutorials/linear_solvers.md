@@ -40,7 +40,7 @@ eliminates exactly when the Hessian prototype it is given is a `SchurBlockHessia
 the system that is left (the reduced system, after elimination).
 
 - `reduction = :auto` (default) eliminates when the model has eliminable variables and the structure fits (each eliminable
-  variable coupled only to retained variables; a variable of any size, as for every block, 1 to 255 dimensions), and falls back to no elimination otherwise.
+  variable coupled only to retained variables; a variable of any size BlockLinearSystems takes as a block), and falls back to no elimination otherwise.
   `:eliminate` eliminates or throws an `ArgumentError`. `:none` never eliminates. Other values are an `ArgumentError`.
 - `storage = :auto` (default) stores the reduced system dense or sparse from the predicted fill of its Cholesky factor;
   `:dense` and `:sparse` force it. With nothing eliminated it chooses the storage of the Hessian itself in the same way:
