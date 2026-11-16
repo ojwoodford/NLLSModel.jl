@@ -195,6 +195,10 @@ end
         plain, _ = optimize(model, ElimOptions; formulation=:tall, reduction=:none, unfixed, numthreads=static(1))
         @test NLLSModel.cost(tall) ≈ NLLSModel.cost(normal) rtol=1e-8 atol=1e-10 * c0
         @test NLLSModel.cost(tall) ≈ NLLSModel.cost(plain) rtol=1e-8 atol=1e-10 * c0
+        # linsolver = :qr, a QR of the reduced Jacobian, dense or sparse (a sparse one since SecondOrderOptimization TP6)
+        tallqr, _ = optimize(model, OptimizationOptions(iterator=:levenbergmarquardt, linsolver=:qr, maxiters=200); formulation=:tall,
+            reduction=:eliminate, storage, unfixed, numthreads=static(1))
+        @test NLLSModel.cost(tallqr) ≈ NLLSModel.cost(normal) rtol=1e-8 atol=1e-10 * c0
         # The solution is written back through the partition (syncvars!)
         @test NLLSModel.cost(tall) ≈ rt.bestcost rtol=1e-12 atol=1e-10 * c0
         @test NLLSModel.cost(tall) < 0.1 * c0

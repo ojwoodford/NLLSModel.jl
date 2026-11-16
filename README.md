@@ -69,7 +69,7 @@ What it supports, by the `reduction` and `storage` it ends up with and the `lins
 | no elimination | dense | `Matrix{Float64}` | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
 | no elimination | sparse | `SparseMatrixCSC{Float64, Int}` | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
 | elimination | dense | `SchurBlockJacobian{Float64, Matrix{Float64}}` | `:auto`, `:qr`, `:cholesky`, `:ldl`; `:lsmr` (with Krylov.jl) |
-| elimination | sparse | `SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}` | `:auto`, `:cholesky`, `:ldl`; `:lsmr` (with Krylov.jl) |
+| elimination | sparse | `SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}` | `:auto`, `:qr`, `:cholesky`, `:ldl`; `:lsmr` (with Krylov.jl) |
 
 `reduction` and `storage` are as for the normal path, `:auto` included: elimination when the model has eliminable
 variables and the structure fits (on the tall path also: each eliminated variable is in a cost), the reduced system

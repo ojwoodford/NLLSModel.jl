@@ -12,7 +12,7 @@ const TALL_TABLE = Dict(
     (:none, :dense) => (Matrix{Float64}, (:auto, :qr, :lsmr)),
     (:none, :sparse) => (SparseMatrixCSC{Float64, Int}, (:auto, :qr, :lsmr)),
     (:eliminate, :dense) => (SchurBlockJacobian{Float64, Matrix{Float64}}, (:auto, :qr, :cholesky, :ldl, :lsmr)),
-    (:eliminate, :sparse) => (SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}, (:auto, :cholesky, :ldl, :lsmr)),
+    (:eliminate, :sparse) => (SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}, (:auto, :qr, :cholesky, :ldl, :lsmr)),
 )
 const TALL_ITERATORS = (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton)
 # Every linsolver symbol an extension accepts, and every iterator
