@@ -1,6 +1,6 @@
 using NLLSModel, Test, Static, StaticArrays, SparseArrays, Random, LinearAlgebra
 using SecondOrderOptimization
-import OptimizationVariableInterface: update!, copyvars
+import OptimizationVariableInterface: update, update!, copyvars
 
 # Z4: the tall evaluators allocate nothing per call on one thread (warm). Needs tallproblems.jl and Tgt from frontdoor.jl.
 # Variables of static size use autodiff; Vector variables use hand-written Jacobians (TlHand), since autodiff of a Vector variable
@@ -19,20 +19,11 @@ staticplain(; n=4) = (rng = MersenneTwister(5); m = Model(SVector{2, Float64}, T
     foreach(k -> addvariable!(m, randn(rng, SVector{2, Float64})), 1:n);
     foreach(k -> addcost!(m, Tgt(randn(rng, SVector{2, Float64}), k)), 1:n); m)
 
-# Warm, then the allocations of one call of each evaluator
-function warmallocs(model; unfixed=nothing, numthreads=static(1), min_work=5000)
-    f, res!, resjac!, x0, J = optimvars_nls(model; unfixed, numthreads, min_work, storage=:dense)
-    r = zeros(size(J, 1))
-    for _ in 1:3
-        resjac!(r, J, x0); res!(r, x0); f(x0)
-    end
-    return (@allocated resjac!(r, J, x0)), (@allocated res!(r, x0)), (@allocated f(x0))
-end
-
-# The same through a function barrier, so the measurement sees concrete types: `optimvars_nls`'s result is not inferred,
-# and on Julia 1.10 a call on a non-inferred value boxes its return value, which `@allocated` then counts
-function warmallocs_barrier(model; storage, kwargs...)
-    f, res!, resjac!, x0, J = optimvars_nls(model; storage, kwargs...)
+# The allocations of one warm call of each evaluator (resjac!, res!, f). `optimvars_nls`'s result is not inferred, so
+# each evaluator is measured in its own function barrier (`allocs_warm`, runtests.jl): on Julia 1.10, with all three in one
+# function, inference of that function gives up and the calls become dynamic, which `@allocated` would count.
+function warmallocs(model; numthreads=static(1), min_work=5000, storage=:dense, kwargs...)
+    f, res!, resjac!, x0, J = optimvars_nls(model; numthreads, min_work, storage, kwargs...)
     return evalallocs(f, res!, resjac!, x0, J)
 end
 # A warm call with the static copies the optimizer's static system passes, with and without prezeroed
@@ -43,20 +34,25 @@ function staticallocs(rj, r, J, x)
     b = @allocated prezeroedcall(rj, r, J, x)
     return a, b
 end
-# A warm solve of a single static variable (`optimize`, which returns the solution) through the static system
+# A warm solve of a single static variable (`optimize`, which returns the solution) through the static system. The
+# workspace is built here and the solve measured in a barrier that takes it: on Julia 1.10 the workspace's type is
+# inferred only as a union (static or dense system, chosen at run time), so a solve in the same function is a dynamic call.
+staticsolve(x0, obj, opts, ws) = SecondOrderOptimization.optimize(x0, obj, opts; workspace=ws)
 function staticsolve_allocs(f, rj, x0, J)
     opts = OptimizationOptions(iterator=:levenbergmarquardt, maxiters=10, reldcost=0.0, absdcost=0.0, dstep=0.0, gtol=0.0, maxstall=10^6)
     obj = JacobianObjective(f, AllocExt.TallResJac(rj), J)
     ws = OptimizationWorkspace(x0, obj, opts)
-    SecondOrderOptimization.optimize(x0, obj, opts; workspace=ws); SecondOrderOptimization.optimize(x0, obj, opts; workspace=ws)
-    return @allocated SecondOrderOptimization.optimize(x0, obj, opts; workspace=ws)
+    return allocs_warm(staticsolve, x0, obj, opts, ws)
 end
 function evalallocs(f, res!, resjac!, x0, J)
     r = zeros(NLLSModel.nresiduals(res!.problem))
-    for _ in 1:3
-        resjac!(r, J, x0); res!(r, x0); f(x0)
-    end
-    return (@allocated resjac!(r, J, x0)), (@allocated res!(r, x0)), (@allocated f(x0))
+    return allocs_warm(resjac!, r, J, x0), allocs_warm(res!, r, x0), allocs_warm(f, x0)
+end
+# A warm whole solve through the optimizer (`optimize!`), measured in a barrier: the bytes, and the result
+function solveallocs(x0, obj, opts, ws)
+    SecondOrderOptimization.optimize!(x0, obj, opts; workspace=ws)
+    a = @allocated res = SecondOrderOptimization.optimize!(x0, obj, opts; workspace=ws)
+    return a, res
 end
 
 @testset "tallalloc.jl" begin
@@ -98,9 +94,9 @@ end
         kw = (numthreads=static(nt), min_work=(nt == 1 ? 5000 : 0), storage=:sparse)
         _, _, rj, _, Jsp = optimvars_nls(staticplain(n=40); kw...)
         @test Jsp isa SparseMatrixCSC && rj.nthreads == nt # the fill is threaded when there are threads
-        @test warmallocs_barrier(staticrobust(Huber2oKernel(0.3); n=40); kw...) == (0, 0, 0)
-        @test warmallocs_barrier(staticplain(n=40); unfixed=[1, 3, 5], kw...) == (0, 0, 0)
-        @test warmallocs_barrier(handmodel(Huber2oKernel(0.3), HuberKernel(0.3)); kw...)[1:2] == (0, 0)
+        @test warmallocs(staticrobust(Huber2oKernel(0.3); n=40); kw...) == (0, 0, 0)
+        @test warmallocs(staticplain(n=40); unfixed=[1, 3, 5], kw...) == (0, 0, 0)
+        @test warmallocs(handmodel(Huber2oKernel(0.3), HuberKernel(0.3)); kw...)[1:2] == (0, 0)
     end
 
     # NTP3: the optimizer's static system hands resjac! an MMatrix and an MVector; a warm call allocates nothing (through a
@@ -116,29 +112,27 @@ end
         @test staticsolve_allocs(f, rj, x0, J) == 0
     end
 
-    # A whole solve: per iteration, the tall path allocates no more than the normal equations do on the same model
-    @testset "per iteration, no more than the normal equations: $name" for (name, make) in (
-            ("static", () -> staticrobust(Huber2oKernel(0.3))), ("Vector, hand-written", () -> handmodel(Huber2oKernel(0.3), NoRobust())))
-        opts(n) = OptimizationOptions(iterator=:levenbergmarquardt, maxiters=n, reldcost=0.0, absdcost=0.0, dstep=0.0, gtol=0.0, maxstall=10^6)
-        function periteration(formulation)
-            function run(n)
-                m = make()
-                if formulation === :tall
-                    f, _, rj, x0, J = optimvars_nls(m; numthreads=static(1), storage=:dense)
-                    obj = JacobianObjective(f, AllocExt.TallResJac(rj), J)
-                else
-                    f, fdf!, x0, H = optimvars(m; numthreads=static(1))
-                    obj = HessianObjective(f, fdf!; H)
-                end
-                ws = OptimizationWorkspace(x0, obj, opts(n))
-                SecondOrderOptimization.optimize!(x0, obj, opts(n); workspace=ws) # warm
-                a = @allocated res = SecondOrderOptimization.optimize!(x0, obj, opts(n); workspace=ws)
-                return a, res.niterations
-            end
-            a1, i1 = run(20); a2, i2 = run(60)
-            @test (i1, i2) == (20, 60) # No early termination
-            return (a2 - a1) / (i2 - i1)
+    # A whole solve allocates exactly what the model's variables must, in either formulation. The optimizer makes each trial
+    # point with `update`, once per variable per linear solve; for a `Vector` variable that builds a new vector
+    # (OptimizationVariableInterface's `update`), for a static one nothing. Nothing else allocates, so the bytes are
+    # `result.linearsolves` times one `update` of every variable, whatever steps the iterator takes.
+    @testset "a whole solve allocates only the variables' updates: $name, $formulation" for (name, make) in (
+            ("static", () -> staticrobust(Huber2oKernel(0.3))), ("Vector, hand-written", () -> handmodel(Huber2oKernel(0.3), NoRobust()))),
+            formulation in (:tall, :normal)
+        opts = OptimizationOptions(iterator=:levenbergmarquardt, maxiters=60, reldcost=0.0, absdcost=0.0, dstep=0.0, gtol=0.0, maxstall=10^6)
+        m = make()
+        if formulation === :tall
+            f, _, rj, x0, J = optimvars_nls(m; numthreads=static(1), storage=:dense)
+            obj = JacobianObjective(f, AllocExt.TallResJac(rj), J)
+        else
+            f, fdf!, x0, H = optimvars(m; numthreads=static(1))
+            obj = HessianObjective(f, fdf!; H)
         end
-        @test periteration(:tall) <= periteration(:normal)
+        a, res = solveallocs(x0, obj, opts, OptimizationWorkspace(x0, obj, opts))
+        @test res.niterations == 60 # No early termination
+        step = zeros(nvars(x0))
+        perupdate = sum(v -> allocs_warm(update, v, step, 1), x0)
+        @test (perupdate == 0) == (name == "static")
+        @test a == res.linearsolves * perupdate
     end
 end

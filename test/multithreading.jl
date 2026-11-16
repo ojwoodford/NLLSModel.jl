@@ -68,13 +68,13 @@ alloc_ephemeral(ls, ind) = @allocated NLLSModel.LinearSystem(ls, ind)
         back = NLLSModel.fromthreadargs(a)
         @test back === nested
         @test back[1][1] === mv && back[2] === vv
-        @test (@allocated NLLSModel.threadargs(nested)) == 0
-        @test (@allocated NLLSModel.fromthreadargs(a)) == 0
+        @test allocs_warm(NLLSModel.threadargs, nested) == 0
+        @test allocs_warm(NLLSModel.fromthreadargs, a) == 0
         abstractfield = (Any[1], Ref{Any}(2.0), Some{Any}(vv), Some{Any}(nothing), Some{Any}((1, mv)), Some{Union{Nothing, Vector{Vector{Float64}}}}(vv))
         b = NLLSModel.threadargs(abstractfield)
         @test isbits(b)
         @test NLLSModel.fromthreadargs(b) === abstractfield
-        @test (@allocated NLLSModel.threadargs(abstractfield)) == 0
+        @test allocs_warm(NLLSModel.threadargs, abstractfield) == 0
         bitsunion = (Some{Union{Nothing, Int}}(3), mv)
         c = NLLSModel.threadargs(bitsunion)
         @test !isbits(c) # Stored inline, so passed as it is

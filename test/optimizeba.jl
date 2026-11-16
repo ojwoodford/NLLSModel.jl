@@ -84,8 +84,8 @@ end
     c_sp = fdf_sp!(g_sp, H_sp, x0_sp)
     @test c_sp ≈ f_sp(x0_sp)
     @test isapprox(Matrix(H_sp), Matrix(H_sp)'; atol=1e-14)
-    @test (@allocated f_sp(x0_sp)) == 0
-    @test (@allocated fdf_sp!(g_sp, H_sp, x0_sp)) == 0
+    @test allocs_warm(f_sp, x0_sp) == 0
+    @test allocs_warm(fdf_sp!, g_sp, H_sp, x0_sp) == 0
 
     # Test interleaved variable addition (Cam, Pt, Cam, Pt...)
     # Variables added in arbitrary order should be mapped to an RLE-structured linear system
@@ -194,7 +194,7 @@ end
     g_ds = zeros(tot_dim_ds)
     c_ds = fdf_ds!(g_ds, H_ds, x0_ds)
     @test isapprox(c_ds, f_ds(x0_ds); atol=1e-12)
-    @test (@allocated fdf_ds!(g_ds, H_ds, x0_ds)) == 0
+    @test allocs_warm(fdf_ds!, g_ds, H_ds, x0_ds) == 0
 
     # 5. Sparse Schur Solver (optimvars)
     f_ss, fdf_ss!, x0_ss, H_ss = optimvars(prob_schur; numthreads=static(1), reduction=:eliminate, storage=:sparse)
@@ -203,7 +203,7 @@ end
     g_ss = zeros(tot_dim_ds)
     c_ss = fdf_ss!(g_ss, H_ss, x0_ss)
     @test isapprox(c_ss, f_ss(x0_ss); atol=1e-12)
-    @test (@allocated fdf_ss!(g_ss, H_ss, x0_ss)) == 0
+    @test allocs_warm(fdf_ss!, g_ss, H_ss, x0_ss) == 0
 
     # Verify dense and sparse Schur Hessians match on quadratic form
     dx_rand = randn(tot_dim_ds)

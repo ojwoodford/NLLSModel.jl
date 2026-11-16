@@ -40,7 +40,7 @@ end
         @test gs ≈ gd
         @test Matrix(Hs_) ≈ Matrix(Hd_)
         # Static variables must stay allocation free
-        @test (@allocated fdfs!(gs, Hs_, xs)) == 0
+        @test allocs_warm(fdfs!, gs, Hs_, xs) == 0
     end
 
     # Assembly of a single cost's blocks
@@ -57,8 +57,8 @@ end
         boffsets = ls.x.boffsets
         NLLSModel.updatesymA!(A, a, vars, static(3), blockindices)
         NLLSModel.updateb!(b_vec, b, vars, static(3), boffsets, blockindices)
-        @test (@allocated NLLSModel.updatesymA!(A, a, vars, static(3), blockindices)) == 0
-        @test (@allocated NLLSModel.updateb!(b_vec, b, vars, static(3), boffsets, blockindices)) == 0
+        @test allocs_warm(NLLSModel.updatesymA!, A, a, vars, static(3), blockindices) == 0
+        @test allocs_warm(NLLSModel.updateb!, b_vec, b, vars, static(3), boffsets, blockindices) == 0
     end
 end
 

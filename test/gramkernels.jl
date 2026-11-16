@@ -55,7 +55,7 @@ import SecondOrderOptimization: optimize!, OptimizationOptions
         end
         Jt = collect(J')'
         gram(H, g, Jt, r, 0.3, 0.0)
-        @test (@allocated gram(H, g, Jt, r, 0.3, 0.0)) == 0
+        @test allocs_warm(gram, H, g, Jt, r, 0.3, 0.0) == 0
         @test_throws DimensionMismatch gram(H, g, J, zeros(11), 1.0, 0.0)
         @test_throws DimensionMismatch gram(H, zeros(8), J, r, 1.0, 0.0)
         @test_throws DimensionMismatch gram(zeros(9, 8), g, J, r, 1.0, 0.0)
@@ -73,7 +73,7 @@ import SecondOrderOptimization: optimize!, OptimizationOptions
         for (dc, c2) in ((1.0, 0.0), (0.3, -0.05))
             H = fill(NaN, 7, 7); g = fill(NaN, 7)
             gram(H, g, ∇', r, dc, c2)
-            @test (@allocated gram(H, g, ∇', r, dc, c2)) == 0
+            @test allocs_warm(gram, H, g, ∇', r, dc, c2) == 0
             g_ref, H_ref = reference(reshape(∇, 1, 7), [r], dc, c2)
             @test H ≈ H_ref && g ≈ g_ref && H == H'
         end
@@ -247,14 +247,14 @@ end
     for (name, res, flags, kernel) in cases
         cg(flags, res, kernel, (x,))
         cg(flags, res, kernel, (x,))
-        @test (@allocated cg(flags, res, kernel, (x,))) == 0
+        @test allocs_warm(cg, flags, res, kernel, (x,)) == 0
     end
     # Adaptive kernel (hand-written Jacobian)
     ares = GramAdaptiveHand{9}(randn(rng, 9), zeros(9), zeros(9, 24))
     akernel = ContaminatedGaussian(0.5, 5.0, 0.4)
     cg(static(3), ares, akernel, (x,))
     cg(static(3), ares, akernel, (x,))
-    @test (@allocated cg(static(3), ares, akernel, (x,))) == 0
+    @test allocs_warm(cg, static(3), ares, akernel, (x,)) == 0
 end
 
 @testset "no BLAS call for a Matrix Jacobian" begin
@@ -563,7 +563,7 @@ end
         res = StatHand{M, :svector}(randn(MersenneTwister(42), M), 24, NoRobust())
         cg(res, (x,))
         cg(res, (x,))
-        @test (@allocated cg(res, (x,))) == 0
+        @test allocs_warm(cg, res, (x,)) == 0
     end
 end
 

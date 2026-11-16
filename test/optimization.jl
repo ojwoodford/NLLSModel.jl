@@ -98,9 +98,11 @@ end
         @test fdf1!(g1, H1, x1) ≈ fdf2!(g2, H2, x2) rtol=1e-13
         @test g1 ≈ g2 rtol=1e-12
         @test f1(x1) ≈ f2(x2) rtol=1e-13
-        # Threaded, a warm call allocates nothing: the linearization, and the cost (threaded too, above its floor)
+        # Threaded, a warm call allocates nothing: the linearization, and the cost (threaded too, above its floor). The
+        # linearization takes the threaded path (four buffers) even on one Julia thread, so rules.md 21's 1.10 exception
+        # applies to it.
         @test f4.nthreads > 1
-        @test warmallocs_fdf(fdf4!, g4, H4, x4) == 0
+        @test threaded_allocs_ok(warmallocs_fdf(fdf4!, g4, H4, x4), length(fdf4!.linsystem.ls) > 1)
         @test warmallocs_f(f4, x4) == 0
     end
 end
