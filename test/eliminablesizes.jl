@@ -85,7 +85,9 @@ end
 @testset "eliminablesizes.jl" begin
     opts = OptimizationOptions(iterator=:levenbergmarquardt, maxiters=200)
     solvedcost(model; kwargs...) = NLLSModel.cost(first(optimize(model, opts; numthreads=static(1), kwargs...)))
-    @testset "eliminated variables of $N dimensions" for N in (1, 3, 4, 8, 9, 12)
+    # One size per tier BlockLinearSystems' kernels have: closed form (1 to 3), static (to 8, the last), dynamic (9, the
+    # first). BlockLinearSystems tests every size at kernel level; this package has no threshold of its own in this range
+    @testset "eliminated variables of $N dimensions" for N in (1, 8, 9)
         model = sizedmodel(N)
         c0 = NLLSModel.cost(model)
         cn = solvedcost(model; reduction=:none)
