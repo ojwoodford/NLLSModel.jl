@@ -1,3 +1,7 @@
+using NLLSModel, Test, Static, StaticArrays, SparseArrays, Random, LinearAlgebra
+using OptimizationVariableInterface, BlockLinearSystems
+using OptimizationVariableInterface: nvars
+
 # Simple affine projection transform
 NLLSModel.generatemeasurement(pose::SVector{6, T}, X::SVector{3, U}) where {T, U} = SVector(dot(@inbounds(view(pose, NLLSModel.SR(1, 3))), X), dot(@inbounds(view(pose, NLLSModel.SR(4, 6))), X))
 

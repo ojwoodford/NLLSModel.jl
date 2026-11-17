@@ -1,3 +1,6 @@
+using NLLSModel, Test, Static, StaticArrays, Random, LinearAlgebra
+using SecondOrderOptimization
+
 # Each variable near a target
 struct ManyPrior{V} <: NLLSModel.AbstractResidual
     t::SVector{2, Float64}

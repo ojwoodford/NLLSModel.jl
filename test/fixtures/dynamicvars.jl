@@ -1,3 +1,5 @@
+using NLLSModel, Test, Static, Random, LinearAlgebra
+
 struct LinearResidual <: NLLSModel.AbstractResidual
     y::Float64
     X::Vector{Float64}

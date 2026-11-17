@@ -1,7 +1,8 @@
 using NLLSModel, Test, Static, StaticArrays, Random
 using OptimizationVariableInterface: update!, update
 
-include("fixtures/adaptivecost.jl")
+include("fixtures/loader.jl")
+fixture("adaptivecost")
 
 @testset "adaptivecost.jl" begin
     # Create the problem

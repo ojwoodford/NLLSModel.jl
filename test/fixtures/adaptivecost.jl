@@ -1,3 +1,6 @@
+using NLLSModel, Test, Static, StaticArrays, Random
+using OptimizationVariableInterface: update!, update
+
 struct SimpleResidual <: NLLSModel.AbstractAdaptiveResidual
     data::Float64
     varind::Int

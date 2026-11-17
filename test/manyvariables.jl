@@ -1,10 +1,11 @@
 using NLLSModel, Test, Static, StaticArrays, Random, LinearAlgebra
 using SecondOrderOptimization
 
+include("fixtures/loader.jl")
+fixture("manyvariables")
+
 # AN1: a cost with more than 5 variables, some of them fixed (no value dispatch on which: the variable flags are a run-time
 # value), on both paths. Variables of static size (SVector{2}) and of run-time size (Vector{Float64} of length 2).
-
-include("fixtures/manyvariables.jl")
 
 @testset "manyvariables.jl" begin
     nt = Threads.nthreads()

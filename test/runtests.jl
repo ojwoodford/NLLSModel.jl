@@ -1,7 +1,4 @@
 using Test
-using OptimizationVariableInterface: nvars, update, update!
-
-include("fixtures/allocations.jl")
 
 # Each test file is included through `timed_include`, which logs its wall time and compile time in seconds
 # (`compile_time` is reported by `@timed` from Julia 1.11; NaN before) and keeps them for a table at the end.
@@ -42,7 +39,6 @@ try
     timed_include("optimizeba.jl")
     timed_include("optimization.jl")
     timed_include("frontdoor.jl")
-    timed_include("fixtures/tallproblems.jl")
     timed_include("tallkernels.jl")
     timed_include("tallformulation.jl")
     timed_include("manyvariables.jl")

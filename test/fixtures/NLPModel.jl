@@ -1,3 +1,10 @@
+using Test
+using NLLSModel
+using NLPModels
+using Static, StaticArrays, SparseArrays, LinearAlgebra
+import OptimizationVariableInterface
+import OptimizationVariableInterface: nvars, syncvars!
+
 # Define sample residuals for tests
 struct Rosenbrock1 <: AbstractResidual end
 NLLSModel.ndeps(::Rosenbrock1) = static(1)

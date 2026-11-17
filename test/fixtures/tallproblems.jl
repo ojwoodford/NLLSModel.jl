@@ -2,7 +2,9 @@ using NLLSModel, Test, Static, StaticArrays, Random, LinearAlgebra
 import OptimizationVariableInterface
 import OptimizationVariableInterface: nvars, update, update!, copyvars
 
-# Test problems shared by tallkernels.jl and tallformulation.jl. Needs Tgt from frontdoor.jl.
+fixture("frontdoor")
+
+# Test problems shared by tallkernels.jl and tallformulation.jl.
 
 # --- Test problems ---------------------------------------------------------------------------------------------------
 

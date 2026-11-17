@@ -1,3 +1,9 @@
+using NLLSModel, Test, Static, StaticArrays, SparseArrays, Random, LinearAlgebra
+using SecondOrderOptimization
+import OptimizationVariableInterface: update, update!, copyvars
+
+fixture("allocations", "frontdoor", "tallproblems")
+
 const AllocExt = Base.get_extension(NLLSModel, :SecondOrderOptimizationExt)
 
 function staticrobust(kernel; n=4)

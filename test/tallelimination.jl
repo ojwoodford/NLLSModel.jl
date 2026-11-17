@@ -4,10 +4,10 @@ import BlockLinearSystems
 import BlockLinearSystems: SchurBlockJacobian, coupling_block, eliminated_block, residual_block, copy_structure
 import OptimizationVariableInterface
 
-# NTP2: elimination on the tall path, by QR (a SchurBlockJacobian prototype). Needs optlandmark_problem and OptLandmark from
-# optimization.jl, chainproblem from frontdoor.jl, and warmallocs and AllocExt from tallalloc.jl.
+include("fixtures/loader.jl")
+fixture("allocations", "frontdoor", "tallelimination")
 
-include("fixtures/tallelimination.jl")
+# NTP2: elimination on the tall path, by QR (a SchurBlockJacobian prototype).
 
 @testset "tallelimination.jl" begin
     @testset "the prototype: $name" for (name, make, unfixed) in ELIM_MODELS

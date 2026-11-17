@@ -1,3 +1,11 @@
+using Test
+using NLLSModel
+using NLPModels
+using Static, StaticArrays, SparseArrays, LinearAlgebra
+import OptimizationVariableInterface: nvars, update, update!, syncvars!, ZeroToInfScalar
+import JSOSolvers
+import LeastSquaresOptim
+
 struct TestRosenbrock1 <: AbstractResidual end
 NLLSModel.ndeps(::TestRosenbrock1) = static(1)
 NLLSModel.nres(::TestRosenbrock1) = static(1)

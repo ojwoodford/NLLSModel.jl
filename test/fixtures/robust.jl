@@ -1,3 +1,5 @@
+using NLLSModel, Test, StaticArrays
+
 # Generic function for testing a robustifier
 function testrobustifier(kernel, costs, expected, firstorder=false)
     for (i, cost) in enumerate(costs)

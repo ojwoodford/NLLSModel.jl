@@ -1,3 +1,10 @@
+using NLLSModel, Test, Static, StaticArrays, SparseArrays, Random, LinearAlgebra
+using SecondOrderOptimization
+import BlockLinearSystems
+import OptimizationVariableInterface
+
+fixture("optimization")
+
 # Pins a variable of any type to a target (nonlinear, with its minimum at the target)
 struct Tgt{V} <: NLLSModel.AbstractResidual
     t::V

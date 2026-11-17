@@ -1,3 +1,6 @@
+using NLLSModel, Test, Static, StaticArrays, LinearAlgebra, Random
+import SecondOrderOptimization: optimize!, OptimizationOptions
+
 # ---- computerescostgradhess against the previous implementation (BLAS products and reweighting passes) ----
 function reference_costgradhess(varflags, residual, kernel, vars)
     varflagsres = varflags >> static(1)

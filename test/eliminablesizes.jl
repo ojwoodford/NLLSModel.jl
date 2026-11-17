@@ -3,11 +3,11 @@ using SecondOrderOptimization
 import BlockLinearSystems: SchurBlockHessian, SchurBlockJacobian
 import OptimizationVariableInterface
 
+include("fixtures/loader.jl")
+fixture("allocations", "eliminablesizes")
+
 # E1: eliminable variables of any size BlockLinearSystems takes as a block, on the normal and the tall path (256
 # dimensions: bigvariable.jl).
-# Needs warmallocs from tallalloc.jl, warmallocs_fdf and warmallocs_f from optimization.jl.
-
-include("fixtures/eliminablesizes.jl")
 
 @testset "eliminablesizes.jl" begin
     opts = OptimizationOptions(iterator=:levenbergmarquardt, maxiters=200)

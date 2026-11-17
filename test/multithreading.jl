@@ -1,6 +1,7 @@
 using Test, Static, StaticArrays, SparseArrays, LinearAlgebra, NLLSModel
 
-include("fixtures/multithreading.jl")
+include("fixtures/loader.jl")
+fixture("allocations", "multithreading")
 
 @testset "multithreading.jl" begin
     # chunk_indices: chunks are contiguous, cover 1:len exactly, and differ in size by at most 1

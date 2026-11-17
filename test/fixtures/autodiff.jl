@@ -1,3 +1,5 @@
+using NLLSModel, Test, Static, StaticArrays, Random
+
 # r = A [x; y] - b, for an x of N1 and a y of N2 dimensions, M rows
 struct WideLinear{M, N1, N2, L, ML} <: NLLSModel.AbstractResidual
     A::SMatrix{M, L, Float64, ML}

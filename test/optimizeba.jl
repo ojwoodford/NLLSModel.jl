@@ -2,7 +2,8 @@ using NLLSModel, Test, Static, StaticArrays, SparseArrays, Random, LinearAlgebra
 using OptimizationVariableInterface, BlockLinearSystems
 using OptimizationVariableInterface: nvars
 
-include("fixtures/optimizeba.jl")
+include("fixtures/loader.jl")
+fixture("allocations", "optimizeba")
 
 @testset "optimizeba.jl" begin
     # Generate some test data for a dense problem

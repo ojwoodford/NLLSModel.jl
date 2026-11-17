@@ -1,7 +1,8 @@
 using NLLSModel, Test, Static, StaticArrays, LinearAlgebra
 using OptimizationVariableInterface: update!
 
-include("fixtures/nonsquaredcost.jl")
+include("fixtures/loader.jl")
+fixture("nonsquaredcost")
 
 @testset "nonsquaredcost.jl" begin
     # Generate some test data

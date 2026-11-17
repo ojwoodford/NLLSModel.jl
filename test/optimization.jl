@@ -3,7 +3,8 @@ using SecondOrderOptimization
 import BlockLinearSystems
 import OptimizationVariableInterface
 
-include("fixtures/optimization.jl")
+include("fixtures/loader.jl")
+fixture("allocations", "optimization", "optimizeba")
 
 @testset "optimization.jl" begin
     # Every linear system and iterator takes steps that reduce the cost of a noise-free bundle adjustment problem

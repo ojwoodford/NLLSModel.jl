@@ -1,3 +1,10 @@
+using NLLSModel, Test, Static, StaticArrays, SparseArrays, Random, LinearAlgebra
+using SecondOrderOptimization
+import OptimizationVariableInterface
+import OptimizationVariableInterface: nvars, update, update!, copyvars
+
+fixture("tallproblems")
+
 const TallExt = Base.get_extension(NLLSModel, :SecondOrderOptimizationExt)
 const TallOptions = OptimizationOptions(iterator=:levenbergmarquardt, maxiters=200)
 

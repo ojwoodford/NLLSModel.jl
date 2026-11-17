@@ -1,3 +1,11 @@
+using NLLSModel, Test, Static, StaticArrays, SparseArrays, Random, LinearAlgebra
+using SecondOrderOptimization, NLPModels
+import BlockLinearSystems
+import BlockLinearSystems: SchurBlockJacobian, coupling_block, eliminated_block, residual_block, copy_structure
+import OptimizationVariableInterface
+
+fixture("optimization", "tallalloc")
+
 # A pose chain with landmarks. Poses (x, y, θ) are retained, linked by odometry and anchored by a prior on the first; landmarks
 # (x, y) are eliminable, each seen by two or three poses. The odometry and the prior involve no eliminated variable, so their
 # rows go in free tables: one per set of retained variables.

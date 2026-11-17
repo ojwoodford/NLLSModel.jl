@@ -1,3 +1,6 @@
+using NLLSModel, Test, Static, StaticArrays, LinearAlgebra, SparseArrays
+using NLPModels, SecondOrderOptimization
+
 const KW_OPTIONS = OptimizationOptions(iterator=:levenbergmarquardt, maxiters=50)
 
 # Every keyword of the set, at a valid value; each entry point takes them all

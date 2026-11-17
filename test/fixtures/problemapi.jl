@@ -1,3 +1,5 @@
+using NLLSModel, Test, Static, StaticArrays, SparseArrays, LinearAlgebra
+
 struct DiffResidual <: NLLSModel.AbstractResidual
     i::Int
     j::Int

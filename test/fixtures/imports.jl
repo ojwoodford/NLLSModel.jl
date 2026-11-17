@@ -1,3 +1,5 @@
+using Test
+
 # Every name in an `import M: a, b` or `using M: a, b` list of the package and of its extensions is referenced in the
 # module that imports it (rules.md 11: no unused imports). A reference is a bare use of the name outside import and
 # using statements; `M.a` does not count, since it needs no import. The package's `src/` files form one module; each

@@ -1,6 +1,7 @@
 using NLLSModel, Test
 
-include("fixtures/CostStruct.jl")
+include("fixtures/loader.jl")
+fixture("CostStruct")
 
 @testset "CostStruct.jl" begin
     # Generate random data

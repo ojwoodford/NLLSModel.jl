@@ -1,3 +1,5 @@
+using NLLSModel, Test, Static, StaticArrays, SparseArrays, LinearAlgebra
+
 # Chain residual between neighbouring 2-vectors, with static (SVector) or run-time (Vector) sized variables
 struct ChainRes{V} <: NLLSModel.AbstractResidual
     meas::SVector{2, Float64}

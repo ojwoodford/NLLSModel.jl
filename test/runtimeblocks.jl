@@ -1,6 +1,7 @@
 using NLLSModel, Test, Static, StaticArrays, SparseArrays, LinearAlgebra
 
-include("fixtures/runtimeblocks.jl")
+include("fixtures/loader.jl")
+fixture("allocations", "runtimeblocks")
 
 @testset "runtimeblocks.jl" begin
     for n in (6, 60) # dense and sparse linear systems

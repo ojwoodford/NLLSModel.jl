@@ -6,11 +6,12 @@ import OptimizationVariableInterface: nvars, update, update!, syncvars!, ZeroToI
 import JSOSolvers
 import LeastSquaresOptim
 
+include("fixtures/loader.jl")
+fixture("nls_interface")
+
 # ---------------------------------------------------------------------------
 # Test Residual Definitions
 # ---------------------------------------------------------------------------
-
-include("fixtures/nls_interface.jl")
 
 # ---------------------------------------------------------------------------
 # Test Suites

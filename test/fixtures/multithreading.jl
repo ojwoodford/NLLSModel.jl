@@ -1,3 +1,5 @@
+using Test, Static, StaticArrays, SparseArrays, LinearAlgebra, NLLSModel
+
 myfun(x) = x * x * x
 NLLSModel.computecost(::StaticInt, ::AbstractVector, x::Float64) = myfun(x)
 NLLSModel.computecost(::AbstractVector, x::Float64) = myfun(x)

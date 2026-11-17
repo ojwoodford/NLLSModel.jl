@@ -1,3 +1,8 @@
+using NLLSModel, Test, Static, StaticArrays, SparseArrays, LinearAlgebra, Random
+import SecondOrderOptimization
+import SecondOrderOptimization: optimize!, OptimizationOptions, HessianObjective
+import OptimizationVariableInterface, BlockLinearSystems
+
 # Pins a variable of any size to a measurement
 struct PinRes <: NLLSModel.AbstractResidual
     meas::Vector{Float64}

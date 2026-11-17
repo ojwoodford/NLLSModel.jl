@@ -1,6 +1,7 @@
 using NLLSModel, Test, Static, StaticArrays, SparseArrays, LinearAlgebra
 
-include("fixtures/problemapi.jl")
+include("fixtures/loader.jl")
+fixture("problemapi")
 
 @testset "problem API" begin
     problem = Model(Float64, DiffResidual)

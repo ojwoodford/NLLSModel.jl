@@ -3,10 +3,10 @@ using SecondOrderOptimization
 import OptimizationVariableInterface
 import OptimizationVariableInterface: nvars, update, update!, copyvars
 
-# optimize!(model, options; formulation = :tall): the residual-and-Jacobian path. Needs Tgt, Lnk, singleproblem, mixedproblem
-# and chainproblem from frontdoor.jl, and tallproblems.jl.
+include("fixtures/loader.jl")
+fixture("frontdoor", "tallformulation", "tallproblems")
 
-include("fixtures/tallformulation.jl")
+# optimize!(model, options; formulation = :tall): the residual-and-Jacobian path.
 
 # --- Tests ------------------------------------------------------------------------------------------------------------
 

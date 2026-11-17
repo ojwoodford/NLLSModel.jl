@@ -1,4 +1,11 @@
-# Eliminable landmark (for the Schur solvers); needs create_ba_problem-style helpers from optimizeba.jl
+using NLLSModel, Test, Static, StaticArrays, SparseArrays, Random, LinearAlgebra
+using SecondOrderOptimization
+import BlockLinearSystems
+import OptimizationVariableInterface
+
+fixture("optimizeba")
+
+# Eliminable landmark (for the Schur solvers)
 struct OptLandmark{T}
     p::SVector{3, T}
 end

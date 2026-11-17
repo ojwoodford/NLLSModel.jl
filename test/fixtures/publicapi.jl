@@ -1,3 +1,5 @@
+using NLLSModel, Test
+
 # rules.md 1 and 10: a name is public (exported, documented, in the API reference) or internal (none of these).
 # Adding or dropping an export is a visible change to this list.
 const PUBLIC_NAMES = sort([

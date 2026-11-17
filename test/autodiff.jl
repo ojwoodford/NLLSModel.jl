@@ -1,10 +1,11 @@
 using NLLSModel, Test, Static, StaticArrays, Random
 
+include("fixtures/loader.jl")
+fixture("allocations", "autodiff")
+
 # Autodiff of a cost whose sizes are all static but whose Jacobian is above MAX_STATIC_JAC (so not built as a static
 # matrix): the Jacobian is exact and nothing allocates per call, with fewer and with more inputs than ForwardDiff's
-# default chunk (12). Needs allocs_warm from runtests.jl.
-
-include("fixtures/autodiff.jl")
+# default chunk (12).
 
 @testset "autodiff.jl" begin
     rng = MersenneTwister(4)

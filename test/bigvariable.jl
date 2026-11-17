@@ -3,11 +3,12 @@ import SecondOrderOptimization
 import SecondOrderOptimization: optimize!, OptimizationOptions, HessianObjective
 import OptimizationVariableInterface, BlockLinearSystems
 
+include("fixtures/loader.jl")
+fixture("bigvariable")
+
 # Variables of any size. A variable that becomes a block of a block linear system is limited only by BlockLinearSystems,
 # which checks block sizes itself (this package states no limit); a variable optimized on its own, or on the plain
 # residual-and-Jacobian path, has none.
-
-include("fixtures/bigvariable.jl")
 
 @testset "bigvariable.jl" begin
     # A variable of any size can be added

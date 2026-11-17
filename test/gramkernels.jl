@@ -1,6 +1,9 @@
 using NLLSModel, Test, Static, StaticArrays, LinearAlgebra, Random
 import SecondOrderOptimization: optimize!, OptimizationOptions
 
+include("fixtures/loader.jl")
+fixture("allocations", "gramkernels")
+
 # A1: the native gradient and Gauss-Newton Hessian kernels
 @testset "gramkernels.jl" begin
     gram = NLLSModel.gramgrad!
@@ -89,8 +92,6 @@ import SecondOrderOptimization: optimize!, OptimizationOptions
         end
     end
 end
-
-include("fixtures/gramkernels.jl")
 
 @testset "computerescostgradhess equals the previous implementation" begin
     rng = MersenneTwister(11)

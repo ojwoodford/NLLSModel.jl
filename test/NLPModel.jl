@@ -5,7 +5,8 @@ using Static, StaticArrays, SparseArrays, LinearAlgebra
 import OptimizationVariableInterface
 import OptimizationVariableInterface: nvars, syncvars!
 
-include("fixtures/NLPModel.jl")
+include("fixtures/loader.jl")
+fixture("NLPModel")
 
 @testset "NLPModelExt - Single-Variable Dense Model" begin
     prob = Model(SVector{2, Float64}, Union{Rosenbrock1, Rosenbrock2})

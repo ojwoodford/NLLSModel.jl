@@ -3,10 +3,11 @@ using SecondOrderOptimization
 import BlockLinearSystems
 import OptimizationVariableInterface
 
-# The front door: optimize!(model, options) and optimize(model, options) (the extension), and the `reduction` and `storage`
-# keywords of optimvars. Needs optlandmark_problem from optimization.jl.
+include("fixtures/loader.jl")
+fixture("frontdoor", "optimization")
 
-include("fixtures/frontdoor.jl")
+# The front door: optimize!(model, options) and optimize(model, options) (the extension), and the `reduction` and `storage`
+# keywords of optimvars.
 
 @testset "frontdoor.jl" begin
     @testset "variables hold the solution: $name" for (name, V, n) in (("static 1", SVector{1, Float64}, 1), ("static 16", SVector{16, Float64}, 16), ("static 17", SVector{17, Float64}, 17), ("dynamic Vector", Vector{Float64}, 17), ("short Vector", Vector{Float64}, 3))

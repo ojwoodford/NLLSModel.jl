@@ -1,6 +1,7 @@
 using NLLSModel, Test, StaticArrays
 
-include("fixtures/robust.jl")
+include("fixtures/loader.jl")
+fixture("robust")
 
 @testset "robust.jl" begin
     # islinearkernel (internal): NoRobust, and Scaled of a linear kernel with a finite non-negative height

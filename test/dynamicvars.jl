@@ -1,6 +1,7 @@
 using NLLSModel, Test, Static, Random, LinearAlgebra
 
-include("fixtures/dynamicvars.jl")
+include("fixtures/loader.jl")
+fixture("dynamicvars")
 
 @testset "dynamicvars.jl" begin
     # Generate some test data

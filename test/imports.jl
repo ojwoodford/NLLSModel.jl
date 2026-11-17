@@ -1,6 +1,7 @@
 using Test
 
-include("fixtures/imports.jl")
+include("fixtures/loader.jl")
+fixture("imports")
 
 @testset "Imports" begin
     root = dirname(@__DIR__)

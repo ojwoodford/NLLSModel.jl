@@ -1,3 +1,5 @@
+using NLLSModel, Static
+
 # Allocation checks (rules.md 21). `allocs_warm(f, args...)`: the bytes of one call of `f(args...)` after two warm calls,
 # measured in a function barrier so that `@allocated` sees concrete types. On Julia 1.10 a call on a value of
 # non-inferred type (a destructured `optimvars` result, a testset local) boxes, and `@allocated` would count that too.
@@ -13,7 +15,7 @@ warmallocs_fdf(fdf!, g, H, x) = (fdf!(g, H, x); @allocated fdf!(g, H, x))
 warmallocs_f(f, x) = (f(x); @allocated f(x))
 
 # The allocations of one warm call of each evaluator (resjac!, res!, f). `optimvars_nls`'s result is not inferred, so
-# each evaluator is measured in its own function barrier (`allocs_warm`, runtests.jl): on Julia 1.10, with all three in one
+# each evaluator is measured in its own function barrier (`allocs_warm`, above): on Julia 1.10, with all three in one
 # function, inference of that function gives up and the calls become dynamic, which `@allocated` would count.
 function warmallocs(model; numthreads=static(1), min_work=5000, storage=:dense, kwargs...)
     f, res!, resjac!, x0, J = optimvars_nls(model; numthreads, min_work, storage, kwargs...)

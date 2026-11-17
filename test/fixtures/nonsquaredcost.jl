@@ -1,3 +1,6 @@
+using NLLSModel, Test, Static, StaticArrays, LinearAlgebra
+using OptimizationVariableInterface: update!
+
 const NDIMS = 3
 struct LinearResidualStatic <: NLLSModel.AbstractResidual
     y::SVector{NDIMS, Float64}

@@ -1,6 +1,7 @@
 using NLLSModel, Test
 
-include("fixtures/publicapi.jl")
+include("fixtures/loader.jl")
+fixture("publicapi")
 
 @testset "Public API" begin
     @test sort(names(NLLSModel)) == PUBLIC_NAMES

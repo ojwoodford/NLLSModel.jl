@@ -1,3 +1,11 @@
+using NLLSModel, Test, Static, StaticArrays, SparseArrays, Random, LinearAlgebra
+using SecondOrderOptimization
+import BlockLinearSystems: SchurBlockHessian, SchurBlockJacobian
+import OptimizationVariableInterface
+import OptimizationVariableInterface: nvars
+
+fixture("allocations")
+
 # An eliminable variable of N dimensions
 struct SizedLandmark{N, T}
     p::SVector{N, T}

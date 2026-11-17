@@ -1,10 +1,10 @@
 using NLLSModel, Test, Static, StaticArrays, LinearAlgebra, SparseArrays
 using NLPModels, SecondOrderOptimization
 
-# One keyword set for every way of building or optimizing a model (K1). Needs spymodel and offthread from
-# tallformulation.jl.
+include("fixtures/loader.jl")
+fixture("keywords", "tallformulation")
 
-include("fixtures/keywords.jl")
+# One keyword set for every way of building or optimizing a model (K1).
 
 @testset "keywords.jl" begin
     model = spymodel(400, 2)

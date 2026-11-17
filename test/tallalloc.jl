@@ -2,11 +2,12 @@ using NLLSModel, Test, Static, StaticArrays, SparseArrays, Random, LinearAlgebra
 using SecondOrderOptimization
 import OptimizationVariableInterface: update, update!, copyvars
 
-# Z4: the tall evaluators allocate nothing per call on one thread (warm). Needs tallproblems.jl and Tgt from frontdoor.jl.
+include("fixtures/loader.jl")
+fixture("allocations", "frontdoor", "tallalloc", "tallproblems")
+
+# Z4: the tall evaluators allocate nothing per call on one thread (warm).
 # Variables of static size use autodiff; Vector variables use hand-written Jacobians (TlHand), since autodiff of a Vector variable
 # allocates in `update`, in either formulation.
-
-include("fixtures/tallalloc.jl")
 
 @testset "tallalloc.jl" begin
     @testset "one thread, a warm call allocates nothing: static variables, $name" for (name, make) in (

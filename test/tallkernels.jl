@@ -1,7 +1,10 @@
 using NLLSModel, Test, Static, StaticArrays, Random, LinearAlgebra
 import OptimizationVariableInterface
 
-# R1: the kernel decides how each cost's rows enter the tall system. Needs tallproblems.jl.
+include("fixtures/loader.jl")
+fixture("tallproblems")
+
+# R1: the kernel decides how each cost's rows enter the tall system.
 
 @testset "tallkernels.jl" begin
     # R1: per kernel, the tall rows reproduce the normal-equations linearization

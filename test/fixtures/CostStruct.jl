@@ -1,3 +1,5 @@
+using NLLSModel, Test
+
 function fillcoststruct(cs, floats, ints)
     # Fill the CostStruct with the data
     Nf = length(floats)
