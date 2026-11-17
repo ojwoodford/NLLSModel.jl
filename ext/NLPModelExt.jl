@@ -48,8 +48,11 @@ function NLLSModel.NLPLSModel(problem::Model; unfixed=nothing, numthreads=Static
     # Never use the Schur path here: the model works on the full (non-reduced) system
     NLLSModel.check_reduction(reduction)
     reduction === :eliminate && throw(ArgumentError("NLPLSModel works on the full system: reduction = :eliminate is not supported; use :auto or :none."))
-    f, fdf!, x0, H_temp = optimvars(problem; unfixed, numthreads, reduction=:none, storage, max_dense_bytes, min_work, min_work_cost)
     conv_unfixed = NLLSModel.convertunfixed(unfixed, problem)
+    # The solver's x is the flat vector of the variables' values, and the gradient is with respect to the update's step:
+    # the two agree only for variables that pack into a flat vector and update by addition, as on the flat paths
+    NLLSModel.check_flat_variables(problem, conv_unfixed)
+    f, fdf!, x0, H_temp = optimvars(problem; unfixed, numthreads, reduction=:none, storage, max_dense_bytes, min_work, min_work_cost)
 
     if conv_unfixed isa Integer
         is_single = true

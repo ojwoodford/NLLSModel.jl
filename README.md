@@ -16,7 +16,7 @@ Nonlinear Least Squares (NLLS) and factor-graph modeling in Julia.
 - **Block-Dense & Block-Sparse Linear Systems**: Uses `DenseBlockLinearSystem` and `SparseBlockLinearSystem` from `BlockLinearSystems.jl` for fast, zero-allocation Hessian assembly.
 - **One-Call Solving**: `optimize!(model, options)` solves a `Model` with `SecondOrderOptimization.jl` and writes the solution back into it (load `SecondOrderOptimization`).
 - **Optimizer-Agnostic Problem Interface**: For advanced use, extract `(f, fdf!, x0, H) = optimvars(problem; unfixed=unfixed, numthreads=numthreads)` for integration with other second order optimizers, such as `Optim.jl`.
-- **NLPModels.jl Ecosystem**: Load `NLPModels` to wrap any `Model` as an `AbstractNLPModel` via `NLPLSModel(problem)` and solve with `JSOSolvers.jl` (`trunk`, `tron`), `Ipopt.jl`, or `Optim.jl`.
+- **NLPModels.jl Ecosystem**: Load `NLPModels` to wrap a `Model` as an `AbstractNLPModel` via `NLPLSModel(problem)` and solve with `JSOSolvers.jl` (`trunk`, `tron`), `Ipopt.jl`, or `Optim.jl`. These solvers see a flat vector, so every unfixed variable must pack into one and update by plain addition (numbers, `SVector`, `Vector`); manifold variables are solved with `optimize!`.
 
 ## Quick Start
 

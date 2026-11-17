@@ -2,6 +2,7 @@ using Test
 using NLLSModel
 using NLPModels
 using Static, StaticArrays, SparseArrays, LinearAlgebra
+import OptimizationVariableInterface
 import OptimizationVariableInterface: nvars, syncvars!
 
 # Define sample residuals for tests
@@ -287,4 +288,55 @@ NLLSModel.generatemeasurement(camera::SVector{6, T}, pt::SVector{2, U}) where {T
     @test nlp_e isa AbstractNLPModel
     @test nlp_e.meta.nvar == 12 + 6
     @test isfinite(obj(nlp_e, nlp_e.meta.x0))
+end
+
+# Variables NLPLSModel cannot take (AN9): a struct holding its coordinates, which does not pack into a flat vector (as a
+# bundle-adjustment point type might), and a vector whose update is multiplicative, not addition
+struct OpaquePoint
+    p::SVector{3, Float64}
+end
+nvars(::OpaquePoint) = static(3)
+OptimizationVariableInterface.update(v::OpaquePoint, δ, start=1) = OpaquePoint(v.p + SVector(δ[start], δ[start+1], δ[start+2]))
+struct ScaleVec <: AbstractVector{Float64}
+    data::SVector{2, Float64}
+end
+ScaleVec(x::AbstractVector) = ScaleVec(SVector{2, Float64}(x))
+Base.size(::ScaleVec) = (2,)
+Base.getindex(v::ScaleVec, i::Int) = v.data[i]
+nvars(::ScaleVec) = static(2)
+OptimizationVariableInterface.update(v::ScaleVec, δ, start=1) = ScaleVec(v.data .* exp.(SVector(δ[start], δ[start+1])))
+# A residual on one variable of any type, counting its evaluations
+const NLP_EVALS = Ref(0)
+struct CountedPrior <: AbstractResidual
+    i::Int
+end
+NLLSModel.ndeps(::CountedPrior) = static(1)
+NLLSModel.nres(::CountedPrior) = static(1)
+NLLSModel.varindices(r::CountedPrior) = SVector(r.i)
+NLLSModel.getvars(r::CountedPrior, vars::Vector) = (vars[r.i],)
+NLLSModel.computeresidual(::CountedPrior, x::OpaquePoint) = (NLP_EVALS[] += 1; SVector(sum(x.p) - 1.0))
+NLLSModel.computeresidual(::CountedPrior, x) = (NLP_EVALS[] += 1; SVector(sum(x) - 1.0))
+Base.eltype(::CountedPrior) = Float64
+
+@testset "NLPLSModel checks its variables up front, as the flat paths do (AN9)" begin
+    errmsg(f) = try f(); "no error" catch e; e isa ArgumentError ? e.msg : "not an ArgumentError: $(typeof(e))" end
+    for (v, what) in ((OpaquePoint(SVector(0.1, 0.2, 0.3)), "cannot be packed"), (ScaleVec([2.0, 3.0]), "plain addition"))
+        T = typeof(v)
+        prob = Model(Union{SVector{2, Float64}, T}, CountedPrior)
+        addvariable!(prob, SVector(0.5, 0.5))
+        addvariable!(prob, v)
+        addcost!(prob, CountedPrior(1))
+        addcost!(prob, CountedPrior(2))
+        # The same error, naming the type, as the flat paths give, and nothing evaluated
+        NLP_EVALS[] = 0
+        msg = errmsg(() -> NLPLSModel(prob))
+        @test occursin(what, msg) && occursin(string(T), msg)
+        @test msg == errmsg(() -> NLLSModel.check_additive_variable(v))
+        @test NLP_EVALS[] == 0
+        @test errmsg(() -> AbstractNLPModel(prob)) == msg
+        # Fixed, the variable is not checked
+        nlp = NLPLSModel(prob; unfixed=1)
+        @test nlp.meta.nvar == 2
+        @test obj(nlp, [0.25, 0.25]) ≈ 0.5 * ((0.5 - 1)^2 + (sum(v isa OpaquePoint ? v.p : v) - 1)^2)
+    end
 end

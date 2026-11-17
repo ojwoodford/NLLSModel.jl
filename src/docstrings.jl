@@ -420,6 +420,10 @@ nlp = NLPLSModel(problem)
 # Arguments
 - `problem::Model`: The nonlinear least-squares problem to wrap.
 
+Every unfixed variable must update by plain addition and pack into a flat `Float64` vector (as for
+[`flat_optimvars_nls`](@ref)), since the solver steps by adding to the flat vector of the variables' values; otherwise it
+throws an `ArgumentError`, before anything is evaluated.
+
 It works on the full system: `reduction = :auto` means `:none`, and `:eliminate` is an `ArgumentError`. `name` is the name
 given to the model's metadata (default `"NLPLSModel"`).
 
