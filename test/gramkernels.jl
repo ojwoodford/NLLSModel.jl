@@ -16,7 +16,7 @@ import SecondOrderOptimization: optimize!, OptimizationOptions
             # Every kernel: static columns (SVector r), @turbo (Vector r), plain loops (non-strided J)
             variants = Any[(Matrix(J), copy(r))]
             M <= NLLSModel.MAX_STATIC_ROWS && push!(variants, (Matrix(J), SVector{M, T}(r)))
-            push!(variants, (Matrix(J), SVector{M, T}(r))) # Above the row limit: not strided, so plain loops
+            M > NLLSModel.MAX_STATIC_ROWS && push!(variants, (Matrix(J), SVector{M, T}(r))) # Above the row limit: not strided, so plain loops
             push!(variants, (collect(J')', r)) # An Adjoint (plain loops)
             for (Jv, rv) in variants
                 H = fill(T(NaN), n, n)
