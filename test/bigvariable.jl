@@ -139,11 +139,12 @@ end
     @test resjac!(r, Jm, x0) ≈ f(x0)
     @test size(J, 2) == 256
 
-    # Variables of 256 and 300 dimensions are blocks: retained, in the plain system (dense and sparse) and in a Schur system,
-    # and eliminated; every route reaches the same cost
+    # A variable of 256 dimensions (past the old limit of 255) is a block: retained, in the plain system (dense and sparse) and
+    # in a Schur system, and eliminated; every route reaches the same cost. The variables are Vectors, so any size past the
+    # limit runs the same code
     opts = OptimizationOptions(iterator=:levenbergmarquardt, maxiters=100)
     solved(problem; kwargs...) = NLLSModel.cost(first(SecondOrderOptimization.optimize(problem, opts; numthreads=static(1), kwargs...)))
-    @testset "a retained block of $n dimensions" for n in (256, 300)
+    @testset "a retained block of $n dimensions" for n in (256,)
         problem = bigproblem(n)
         problem.costs[PinRes][2] = PinRes([1.5, 2.0, 3.0], 2) # In conflict with the link to variable 1, so the minimum is not zero
         c0 = NLLSModel.cost(problem)
@@ -161,7 +162,7 @@ end
             @test solved(schur; formulation=:tall, reduction=:eliminate, storage) ≈ solved(schur; reduction=:none) atol=1e-12
         end
     end
-    @testset "eliminated blocks of $n dimensions" for n in (256, 300)
+    @testset "eliminated blocks of $n dimensions" for n in (256,)
         problem = bigelimproblem(n)
         c0 = NLLSModel.cost(problem)
         cn = solved(problem; reduction=:none)
