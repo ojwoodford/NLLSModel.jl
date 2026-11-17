@@ -4,8 +4,11 @@ import BlockLinearSystems: SchurBlockJacobian
 
 # NTP4: the table of what `formulation = :tall` supports (the front door's docstring, `TALL_FORMULATION_DOC` in
 # src/keywords.jl, the README and docs/src/index.md), as data. Every listed combination reaches the normal path's cost on a
-# model with eliminable variables; every other one throws before any residual is evaluated. Needs posechain and its costs
-# from tallelimination.jl.
+# model with eliminable variables; every other one throws before any residual is evaluated. Which (prototype, solver,
+# iterator) combinations work is the optimizer's table, tested there: this package never inspects `linsolver` or
+# `iterator`, so each row runs every listed solver with :levenbergmarquardt and every iterator with :auto, and each
+# unlisted solver once, with :levenbergmarquardt (rejection depends on the solver, never on the iterator). Needs
+# posechain and its costs from tallelimination.jl.
 
 # (reduction, storage) => (the Jacobian prototype, the linsolver values the optimizer accepts with it)
 const TALL_TABLE = Dict(
@@ -48,6 +51,7 @@ end
         @test optimvars_nls(model; reduction, storage, numthreads=static(1))[5] isa proto
         for linsolver in ALL_LINSOLVERS, iterator in TALL_ITERATORS
             listed = linsolver in linsolvers
+            (iterator === :levenbergmarquardt || (listed && linsolver === :auto)) || continue
             TALL_EVALS[] = 0
             outcome = try
                 options = OptimizationOptions(; iterator, linsolver, maxiters=200)
