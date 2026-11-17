@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
 jobs:
   test:
-    name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
+    name: Julia ${{ matrix.version }} - ${{ matrix.threads }} thread(s) - ${{ matrix.test_args || 'all groups' }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -28,6 +28,25 @@ jobs:
           - ubuntu-latest
         arch:
           - x64
+        threads:
+          - '1'
+        test_args:
+          - ''          # every test group (test/runtests.jl)
+        include:
+          # The threaded paths are only taken with more than one thread: on 4 threads, only the thread-dependent test
+          # group runs (rules.md 30)
+          - version: '1.10'
+            os: ubuntu-latest
+            arch: x64
+            threads: '4'
+            test_args: 'threaded'
+          - version: '1'
+            os: ubuntu-latest
+            arch: x64
+            threads: '4'
+            test_args: 'threaded'
+    env:
+      JULIA_NUM_THREADS: ${{ matrix.threads }}
     steps:
       - uses: actions/checkout@v7
       - uses: julia-actions/setup-julia@v3
@@ -37,6 +56,8 @@ jobs:
       - uses: julia-actions/cache@v3
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
+        with:
+          test_args: ${{ matrix.test_args }}
       - uses: julia-actions/julia-processcoverage@v1
       - uses: codecov/codecov-action@v7
         with:
