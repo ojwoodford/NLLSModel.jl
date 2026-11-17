@@ -72,53 +72,6 @@ fixture("allocations", "frontdoor", "tallelimination")
         @test rj(Float64[], copy_structure(J), x0) ≈ NLLSModel.cost(model) rtol=1e-12
     end
 
-    @testset "threads: the tall floor's rule, the same tables" begin
-        nt = Threads.nthreads()
-        model = posechain(40, 60)
-        w = NLLSModel.workestimates(model, nothing)
-        _, _, rj1, x1, J1 = optimvars_nls(model; reduction=:eliminate, numthreads=static(1))
-        _, _, rjn, xn, Jn = optimvars_nls(model; reduction=:eliminate, numthreads=static(8), min_work=w.tall ÷ 2)
-        @test rjn.layout.work == w.tall
-        @test rjn.nthreads == NLLSModel.threadcount(w.tall, w.tall ÷ 2, 8, NLLSModel.costsplit(model.costs)) == 2
-        @test optimvars_nls(model; reduction=:eliminate, numthreads=static(8))[3].nthreads ==
-            NLLSModel.threadcount(w.tall, NLLSModel.MIN_WORK_PER_THREAD_TALL, 8, NLLSModel.costsplit(model.costs))
-        @test rjn(Float64[], Jn, xn) ≈ rj1(Float64[], J1, x1) rtol=1e-13
-        @test Jn.data == J1.data # Each cost's rows are written by one thread, the same values
-    end
-
-    @testset "zero allocation per resjac!: $name" for (name, make, unfixed) in ELIM_MODELS
-        nt = Threads.nthreads()
-        for storage in (:dense, :sparse)
-            @test warmallocs(make(); unfixed, reduction=:eliminate, storage, numthreads=static(1), min_work=5000) == (0, 0, 0)
-            @test warmallocs(make(); unfixed, reduction=:eliminate, storage, numthreads=static(nt), min_work=0) == (0, 0, 0)
-        end
-    end
-
-    # A whole solve with a dense reduced system (QR of the reduced Jacobian, or Cholesky of its normal equations), serial and
-    # threaded. A sparse reduced system allocates inside CHOLMOD (rules.md 21's exception), so it is not checked here.
-    #
-    # BlockLinearSystems' kernels thread whenever Julia has more than one thread (whatever `numthreads` says), and on Julia
-    # 1.10 each threaded call may allocate (rules.md 21's exception, up to 2 048 bytes per thread per call). A whole solve
-    # makes some hundred such calls, a number its result does not report, so that bound cannot be applied to a solve.
-    # Fully serial (NLLSModel on one thread, BlockLinearSystems' threading off through its `SCHUR_THREAD_MIN_WORK`), a solve
-    # allocates nothing on every version. With threads it allocates nothing from Julia 1.11 on; on 1.10 its threaded calls
-    # are bounded per call by BlockLinearSystems' own tests, and the solve is not checked here.
-    @testset "a whole solve: zero allocation, $name, $linsolver" for (name, make) in (
-            ("bundle adjustment", () -> (Random.seed!(6); optlandmark_problem(6, 40))), ("pose chain with landmarks", () -> posechain(40, 60))),
-            linsolver in (:auto, :cholesky)
-        minwork = BlockLinearSystems.SCHUR_THREAD_MIN_WORK[]
-        try
-            BlockLinearSystems.SCHUR_THREAD_MIN_WORK[] = typemax(Int)
-            @test elim_warmbytes(make; numthreads=static(1), linsolver) == 0
-        finally
-            BlockLinearSystems.SCHUR_THREAD_MIN_WORK[] = minwork
-        end
-        if VERSION >= v"1.11" || Threads.nthreads() == 1
-            @test elim_warmbytes(make; numthreads=static(1), linsolver) == 0
-            @test elim_warmbytes(make; numthreads=static(Threads.nthreads()), linsolver) == 0
-        end
-    end
-
     @testset "reduction = :auto and :eliminate on the tall path" begin
         ba = optlandmark_problem(4, 20)
         plain, _ = chainproblem(5, 2, 9) # No eliminable variables

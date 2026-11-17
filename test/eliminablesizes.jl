@@ -27,14 +27,10 @@ fixture("allocations", "eliminablesizes")
             @test solvedcost(model; reduction=:eliminate, storage) ≈ cn rtol=1e-8
             @test solvedcost(model; formulation=:tall, reduction=:eliminate, storage) ≈ cn rtol=1e-8
         end
-        # Zero allocation per evaluation, serial and threaded (rules.md 21's 1.10 bound for a threaded call)
-        nt = Threads.nthreads()
+        # Zero allocation per evaluation, serial (threaded: eliminablesizes_threaded.jl)
         for storage in (:dense, :sparse)
             @test normalallocs(model; numthreads=static(1), reduction=:eliminate, storage)[1:2] == (0, 0)
-            a = normalallocs(model; numthreads=static(nt), reduction=:eliminate, storage, min_work=0, min_work_cost=0)
-            @test threaded_allocs_ok(a[1], a[3]) && threaded_allocs_ok(a[2], a[4])
             @test warmallocs(model; reduction=:eliminate, storage, numthreads=static(1)) == (0, 0, 0)
-            @test warmallocs(model; reduction=:eliminate, storage, numthreads=static(nt), min_work=0) == (0, 0, 0)
         end
     end
 end

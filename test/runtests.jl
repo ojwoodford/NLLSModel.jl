@@ -20,37 +20,32 @@ function print_file_times()
             lpad(round(sum(x -> x[3], FILE_TIMES; init = 0.0); digits = 1), 8))
 end
 
+# Test groups, chosen by name in ARGS (`Pkg.test(test_args = ["serial"])`, or ARGS set before including this file); all
+# of them when ARGS is empty. `threaded`: the tests whose behaviour depends on the thread count, the only ones that need
+# running on more than one thread. `integration`: the third-party solvers. The full check before a push: all groups on
+# one thread, then `threaded` on four.
+const TEST_GROUPS = (
+    serial = ["imports.jl", "publicapi.jl", "CostStruct.jl", "robust.jl", "dynamicvars.jl", "autodiff.jl", "nonsquaredcost.jl",
+        "adaptivecost.jl", "gramkernels.jl", "problemapi.jl", "runtimeblocks.jl", "bigvariable.jl", "optimizeba.jl",
+        "optimization.jl", "frontdoor.jl", "tallkernels.jl", "tallformulation.jl", "tallcontract.jl", "talliterators.jl",
+        "tallalloc.jl", "tallelimination.jl", "eliminablesizes.jl", "tallcombinations.jl", "NLPModel.jl", "nls_interface.jl",
+        "keywords.jl"],
+    threaded = ["multithreading.jl", "gramkernels_threaded.jl", "runtimeblocks_threaded.jl", "optimization_threaded.jl",
+        "frontdoor_threaded.jl", "tallformulation_threaded.jl", "manyvariables.jl", "tallalloc_threaded.jl",
+        "tallelimination_threaded.jl", "eliminablesizes_threaded.jl", "nls_interface_threaded.jl", "keywords_threaded.jl"],
+    integration = ["nls_integration.jl"],
+)
+const SELECTED_GROUPS = isempty(ARGS) ? collect(keys(TEST_GROUPS)) : Symbol.(ARGS)
+for g in SELECTED_GROUPS
+    haskey(TEST_GROUPS, g) || error("unknown test group $g; the groups are $(join(keys(TEST_GROUPS), ", "))")
+end
+
 # The table is printed even when a test fails
 try
 @testset "NLLSModel Tests" verbose = true begin
-    timed_include("imports.jl")
-    timed_include("publicapi.jl")
-    timed_include("CostStruct.jl")
-    timed_include("robust.jl")
-    timed_include("dynamicvars.jl")
-    timed_include("autodiff.jl")
-    timed_include("nonsquaredcost.jl")
-    timed_include("adaptivecost.jl")
-    timed_include("multithreading.jl")
-    timed_include("gramkernels.jl")
-    timed_include("problemapi.jl")
-    timed_include("runtimeblocks.jl")
-    timed_include("bigvariable.jl")
-    timed_include("optimizeba.jl")
-    timed_include("optimization.jl")
-    timed_include("frontdoor.jl")
-    timed_include("tallkernels.jl")
-    timed_include("tallformulation.jl")
-    timed_include("manyvariables.jl")
-    timed_include("tallcontract.jl")
-    timed_include("talliterators.jl")
-    timed_include("tallalloc.jl")
-    timed_include("tallelimination.jl")
-    timed_include("eliminablesizes.jl")
-    timed_include("tallcombinations.jl")
-    timed_include("NLPModel.jl")
-    timed_include("nls_interface.jl")
-    timed_include("keywords.jl")
+    for g in SELECTED_GROUPS, f in TEST_GROUPS[g]
+        timed_include(f)
+    end
 end
 finally
     print_file_times()
