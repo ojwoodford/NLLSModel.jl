@@ -1,8 +1,11 @@
-import ForwardDiff, DiffResults
-using Static, StaticArrays
-
-# Decision on whether to use static-sized autodiff - compile-time decision where possible
-function usestatic(varflags::StaticInt, vars)::Bool
+# Decisions on the autodiff path, compile-time decisions where possible.
+# `staticduals`: every unfixed variable has a static size, totalling at most MAX_STATIC_VAR, and the residual a static
+# length M. The Jacobian is then computed with duals of static width, with no ForwardDiff configuration.
+# `usestatic` (the full static path: the Jacobian built as a static matrix, and the static multiply): also
+# M * (total size) <= MAX_STATIC_JAC, which bounds the static Jacobian that is built and unrolled.
+function staticduals(varflags::StaticInt, residual, vars)::Bool
+    M = nres(residual)
+    dynamic(is_static(M)) || return false
     N = length(vars)
     totalnumvars = static(0)
     @unroll for i in 1:MAX_ARGS
@@ -16,7 +19,9 @@ function usestatic(varflags::StaticInt, vars)::Bool
     end
     return totalnumvars <= MAX_STATIC_VAR ? true : false
 end
-usestatic(varflags, vars) = false
+staticduals(varflags, residual, vars) = false
+usestatic(varflags, residual, vars)::Bool =
+    staticduals(varflags, residual, vars) && nres(residual) * computetotalnumvars(varflags, vars) <= MAX_STATIC_JAC ? true : false
 
 # Count the number of variables across all unfixed variable blocks
 function computetotalnumvars(varflags::StaticInt, vars)
@@ -71,13 +76,22 @@ end
 end
 extractvaldual(dual::ForwardDiff.Dual{TG, T, N}) where {TG, T, N} = ForwardDiff.value(dual), SVector{N, T}(dual.partials.values...)'
 
-# Automatic Jacobian computation
-computeresjac(varflags, residual, vars...) = usestatic(varflags, vars) ? computeresjacstatic(varflags, residual, vars) : computeresjacdynamic(varflags, residual, vars)
+# Automatic Jacobian computation: a static matrix (the full static path); a per-task Vector and Matrix filled from duals of
+# static width (static sizes, the Jacobian above MAX_STATIC_JAC); or ForwardDiff with a cached configuration (run-time sizes)
+# (`Vararg{Any, N}`: a vararg that is only passed on is not specialized otherwise)
+function computeresjac(varflags, residual, vars::Vararg{Any, N}) where N
+    usestatic(varflags, residual, vars) && return computeresjacstatic(varflags, residual, vars)
+    staticduals(varflags, residual, vars) && return computeresjacwide(varflags, residual, vars)
+    return computeresjacdynamic(varflags, residual, vars)
+end
+
+# The element type is needed for the duals: a compile-time check on each autodiff path, thrown out of line
+@noinline noeltype(cost) = throw(ArgumentError("Define Base.eltype() for your residual type ($(typeof(cost)))"))
 
 # Automatic statically-sized Jacobian computation
 function computeresjacstatic(varflags::StaticInt, residual::AbstractResidual, vars)
     # Perform static (i.e. fixed size vector) auto-differentiation
-    @assert eltype(residual)!=Any "Define Base.eltype() for your residual type"
+    eltype(residual) != Any || noeltype(residual)
 
     # Construct ForwardDiff Dual arguments for the unfixed variables
     xdual = dualvars(vars, varflags, eltype(residual))
@@ -89,32 +103,86 @@ function computeresjacstatic(varflags::StaticInt, residual::AbstractResidual, va
     return extractvaldual(ydual)
 end
 
+# Statically-sized autodiff with a Jacobian too large to build as a static matrix: the same dual evaluation as
+# `computeresjacstatic`, with the residual and Jacobian written into per-task buffers of concrete type (so the call is
+# inferred, and nothing allocates once the buffers exist). The returned arrays are the buffers themselves: valid until
+# the next call on the same task with the same residual type and sizes.
+function computeresjacwide(varflags::StaticInt, residual::AbstractResidual, vars)
+    eltype(residual) != Any || noeltype(residual)
+    T = eltype(residual)
+    ydual = computeresidual(residual, dualvars(vars, varflags, T)...)
+    M = dynamic(nres(residual))
+    n = dynamic(computetotalnumvars(varflags, vars))
+    res, jac = widebuffers(residual, T, M, n)
+    @inbounds for i in 1:M
+        y = ydual[i]
+        res[i] = ForwardDiff.value(y)
+        for j in 1:n
+            jac[i, j] = ForwardDiff.partials(y, j)
+        end
+    end
+    return res, jac
+end
+
+function widebuffers(residual, ::Type{T}, M::Int, n::Int) where T
+    cache = get!(() -> Dict{Any, Any}(), task_local_storage(), :nllsmodel_widecache)::Dict{Any, Any}
+    return get!(() -> (zeros(T, M), zeros(T, M, n)), cache, (typeof(residual), M, n))::Tuple{Vector{T}, Matrix{T}}
+end
+
+# Buffers and ForwardDiff configuration for dynamically-sized autodiff, cached per task (so threads never share them).
+# The residual and Jacobian returned from `computeresjacdynamic` are the buffers themselves (a `Vector` and a `Matrix`, or
+# a number and the adjoint of a gradient vector for a scalar residual): valid until the next call on the same task with
+# the same residual type, variable count and function.
+struct DynamicADBuffers{T, R, C}
+    scalar::Bool       # Whether computeresidual returns a number (rather than a vector)
+    x::Vector{T}       # The evaluation point (always zero)
+    res::Vector{T}     # Residual (vector case)
+    jac::Matrix{T}     # Jacobian (vector case)
+    result::R
+    config::C
+end
+
+function adcache()
+    return get!(() -> Dict{Any, Any}(), task_local_storage(), :nllsmodel_adcache)::Dict{Any, Any}
+end
+
+function makedynamicbuffers(f, residual, vars, totalnumvars, M)
+    T = eltype(residual)
+    x = zeros(T, totalnumvars)
+    # Scalar residuals are differentiated as gradients, which needs computeresidual to return a number
+    r0 = computeresidual(residual, vars...)
+    if M == 1 && r0 isa Number
+        result = DiffResults.GradientResult(x)
+        return DynamicADBuffers(true, x, T[], Matrix{T}(undef, 0, 0), result, ForwardDiff.GradientConfig(f, x))
+    end
+    res = zeros(T, M)
+    jac = zeros(T, M, totalnumvars)
+    result = DiffResults.DiffResult(res, (jac,))
+    return DynamicADBuffers(false, x, res, jac, result, ForwardDiff.JacobianConfig(f, x))
+end
+
 # Automatic dynamically-sized Jacobian computation
 function computeresjacdynamic(varflags, residual::AbstractResidual, vars)
     # Perform dynamic (i.e. variable size vector) auto-differentiation
-    @assert eltype(residual)!=Any "Define Base.eltype() for your residual type"
+    eltype(residual) != Any || noeltype(residual)
 
     # Compute the number of free variables
     totalnumvars = dynamic(computetotalnumvars(varflags, vars))
-
-    # Use the ForwardDiff API to compute the jacobian
     M = dynamic(nres(residual))
-    if M == 1
-        # Scalar residual
-        x = zeros(eltype(residual), totalnumvars)
-        result = DiffResults.GradientResult(x)
-        result = ForwardDiff.gradient!(result, bindleadingargs(computeresjachelper, varflags, residual, vars), x)
-        # Return the residual and jacobian
+
+    f = bindleadingargs(computeresjachelper, varflags, residual, vars)
+    key = (typeof(f), totalnumvars, M)
+    buffers = get!(() -> makedynamicbuffers(f, residual, vars, totalnumvars, M), adcache(), key)
+    return runDynamicAD(f, buffers)
+end
+
+function runDynamicAD(f, b::DynamicADBuffers)
+    if b.scalar
+        result = ForwardDiff.gradient!(b.result, f, b.x, b.config)
         return DiffResults.value(result), DiffResults.gradient(result)'
     end
-
-    # Vector residual
-    resultlength = (totalnumvars + 1) * M
-    resultstorage = zeros(eltype(residual), resultlength)
-    result = DiffResults.DiffResult(view(resultstorage, 1:M), (reshape(view(resultstorage, M+1:resultlength), M, totalnumvars),))
-    result = ForwardDiff.jacobian!(result, bindleadingargs(computeresjachelper, varflags, residual, vars), zeros(eltype(residual), totalnumvars))
-    # Return the residual and jacobian
-    return DiffResults.value(result), DiffResults.jacobian(result)
+    ForwardDiff.jacobian!(b.result, f, b.x, b.config)
+    return b.res, b.jac
 end
 
 computeresjachelper(varflags, residual, vars, x) = computeresidual(residual, updatevars(vars, varflags, x)...) 
@@ -140,7 +208,7 @@ computegradient(f, x::T) where T <: Number = map(first, computegradient(f ∘ fi
 # Automatic computation of the cost, gradient and Hessian
 function computecostgradhess(varflags, cost::AbstractCost, vars...)
     # Perform dynamic (i.e. variable size vector) auto-differentiation
-    @assert eltype(cost)!=Any "Define Base.eltype() for your residual type"
+    eltype(cost) != Any || noeltype(cost)
 
     # Compute the number of free variables
     totalnumvars = computetotalnumvars(varflags, vars)

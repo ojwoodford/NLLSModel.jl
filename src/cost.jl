@@ -1,17 +1,14 @@
-using Static
-import ForwardDiff
-
 cost(problem::Model) = cost(problem.variables, problem.costs)
 cost(problem::Model, numthreads::Integer) = cost(problem.variables, problem.costs, static(numthreads))
 cost(problem::Model, numthreads::StaticInt) = cost(problem.variables, problem.costs, numthreads)
-cost(problem::Model, options) = cost(problem.variables, problem.costs, options.numthreads)
 cost(vars::AbstractVector, costs::CostStruct)::Float64 = cost(vars, costs, static(1))
 cost(vars::AbstractVector, costs::CostStruct, ::StaticInt{1})::Float64 = cost_struct(vars, costs, static(1))
 cost(vars::AbstractVector, costs::CostStruct, numthreads::Integer)::Float64 = cost(vars, costs, static(numthreads))
 cost(vars::AbstractVector, costs::CostStruct, numthreads::StaticInt)::Float64 = cost_struct(vars, costs, numthreads)
 
 cost_struct(vars, costs::CostStruct, ::StaticInt{1}) = sum(bindleadingargs(computecost, vars), costs; init=0.0)
-cost_struct(vars, costs::CostStruct, numthreads::StaticInt) = cost_multithreaded(vars, costs, numthreads)
+cost_struct(vars, costs::CostStruct, numthreads::StaticInt) =
+    cost_multithreaded(vars, costs, threadcount(costestimate(costs), MIN_WORK_PER_THREAD_COST, dynamic(numthreads), costsplit(costs)))
 
 function cost_range(vars, costlist::AbstractVector, rng::AbstractUnitRange)::Float64
     tot = 0.0
@@ -34,7 +31,7 @@ function gradhesshelper!(linsystem, cost::AbstractCost, vars, blockind, varflags
     return c
 end
 function gradhesshelper!(linsystem, cost::AbstractCost, vars, blockind, varflags::StaticInt{0})::Float64
-    @warn "A cost for which all variables are fixed is being optimized. Remove such cost functions from the cost to avoid redundant computation, using the subproblem() method."
+    @warn "A cost for which all variables are fixed is being optimized. Remove such cost functions from the cost to avoid redundant computation, using the subproblem() method." maxlog=1
     return computecost(cost, vars...)
 end
 

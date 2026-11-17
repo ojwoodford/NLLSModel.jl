@@ -1,4 +1,5 @@
 using NLLSModel, Test, Static, StaticArrays, SparseArrays, Random, LinearAlgebra
+using OptimizationVariableInterface, BlockLinearSystems
 using OptimizationVariableInterface: nvars
 
 # Simple affine projection transform
@@ -57,19 +58,14 @@ end
     Random.seed!(1)
     problem = create_ba_problem(3, 5, 1.0)
 
-    # Test reordering the costs
     problem = perturb_ba_problem(problem, 0.003, 0.0)
-    costbefore = cost(problem)
-    landmarks = isa.(problem.variables, SVector{3, Float64})
-    NLLSModel.reordercostsforschur!(problem, landmarks)
-    @test cost(problem) ≈ costbefore
 
     # Zero-allocation cost evaluation
     costbefore, allocd = compute_cost(problem)
     @test allocd == 0
 
     # Test optimvars on dense BA problem
-    f_dense, fdf_dense!, x0_dense, H_dense = optimvars(problem, nothing, static(1))
+    f_dense, fdf_dense!, x0_dense, H_dense = optimvars(problem; numthreads=static(1))
     @test H_dense === nothing
     @test f_dense(x0_dense) ≈ costbefore
     dim_dense = nvars(x0_dense)
@@ -80,7 +76,7 @@ end
 
     # Test optimvars on sparse BA problem (zero-allocation f and fdf!)
     problem_sp = perturb_ba_problem(create_ba_problem(10, 50, 0.3), 0.001, 0.001)
-    f_sp, fdf_sp!, x0_sp, H_sp = optimvars(problem_sp, nothing, static(1))
+    f_sp, fdf_sp!, x0_sp, H_sp = optimvars(problem_sp; numthreads=static(1))
     @test H_sp isa SparseMatrixCSC{Float64, Int}
     dim_sp = nvars(x0_sp)
     @test size(H_sp) == (dim_sp, dim_sp)
@@ -88,6 +84,154 @@ end
     c_sp = fdf_sp!(g_sp, H_sp, x0_sp)
     @test c_sp ≈ f_sp(x0_sp)
     @test isapprox(Matrix(H_sp), Matrix(H_sp)'; atol=1e-14)
-    @test (@allocated f_sp(x0_sp)) == 0
-    @test (@allocated fdf_sp!(g_sp, H_sp, x0_sp)) == 0
+    @test allocs_warm(f_sp, x0_sp) == 0
+    @test allocs_warm(fdf_sp!, g_sp, H_sp, x0_sp) == 0
+
+    # Test interleaved variable addition (Cam, Pt, Cam, Pt...)
+    # Variables added in arbitrary order should be mapped to an RLE-structured linear system
+    problem_interleaved = Model(Union{SVector{6, Float64}, SVector{3, Float64}}, SimpleError2{2, Float64, SVector{6, Float64}, SVector{3, Float64}})
+    c1 = addvariable!(problem_interleaved, SVector(1.0, 0.0, 0.0, 0.0, 1.0, 0.0))
+    p1 = addvariable!(problem_interleaved, SVector(0.1, 0.2, 5.0))
+    c2 = addvariable!(problem_interleaved, SVector(1.1, 0.1, 0.0, 0.0, 1.0, 0.1))
+    p2 = addvariable!(problem_interleaved, SVector(0.2, 0.3, 5.5))
+    addcost!(problem_interleaved, SimpleError2{SVector{6, Float64}, SVector{3, Float64}}(NLLSModel.generatemeasurement(problem_interleaved.variables[c1], problem_interleaved.variables[p1]), c1, p1))
+    addcost!(problem_interleaved, SimpleError2{SVector{6, Float64}, SVector{3, Float64}}(NLLSModel.generatemeasurement(problem_interleaved.variables[c2], problem_interleaved.variables[p2]), c2, p2))
+    addcost!(problem_interleaved, SimpleError2{SVector{6, Float64}, SVector{3, Float64}}(NLLSModel.generatemeasurement(problem_interleaved.variables[c1], problem_interleaved.variables[p2]), c1, p2))
+
+    f_int, fdf_int!, x0_int, _ = optimvars(problem_interleaved; numthreads=static(1))
+    # Verify that x0_int is grouped by block dimension: 2 cameras of size 6, then 2 points of size 3
+    @test nvars(x0_int[1]) == 6
+    @test nvars(x0_int[2]) == 6
+    @test nvars(x0_int[3]) == 3
+    @test nvars(x0_int[4]) == 3
+    # Check that linear system internal block sizes form a BlockRLE with exactly 2 runs: [2 => 6, 2 => 3]
+    orig_A_int = NLLSModel.getA(fdf_int!.linsystem)
+    @test orig_A_int.rowblocksizes isa NLLSModel.BlockRLE
+    @test BlockLinearSystems.nruns(orig_A_int.rowblocksizes) == 2
+    @test orig_A_int.rowblocksizes.runlengths == [2, 2]
+    @test orig_A_int.rowblocksizes.blocksizes == [6, 3]
+
+    # M9: syncvars! writes a solution back in the block order optimvars used
+    orig_int = copy(problem_interleaved.variables)
+    x_new = [v .+ 1.0 for v in x0_int]
+    NLLSModel.syncvars!(problem_interleaved, fdf_int!, x_new)
+    @test problem_interleaved.variables[c1] ≈ orig_int[c1] .+ 1
+    @test problem_interleaved.variables[c2] ≈ orig_int[c2] .+ 1
+    @test problem_interleaved.variables[p1] ≈ orig_int[p1] .+ 1
+    @test problem_interleaved.variables[p2] ≈ orig_int[p2] .+ 1
+    NLLSModel.syncvars!(problem_interleaved, f_int, x0_int)
+    @test problem_interleaved.variables == orig_int
+
+    # Evaluate cost and derivatives on interleaved problem
+    cost_int = f_int(x0_int)
+    @test cost_int >= 0
+    dim_int = nvars(x0_int)
+    g_int = zeros(dim_int)
+    H_int = zeros(dim_int, dim_int)
+    @test isapprox(fdf_int!(g_int, H_int, x0_int), cost_int; atol=1e-12)
+    @test isapprox(H_int, H_int'; atol=1e-14)
+
+    # --------------------------------------------------------------------------
+    # Schur Complement Solver Integration Tests
+    # --------------------------------------------------------------------------
+    # 1. Custom Eliminable Landmark Type
+    struct Landmark3D{T}
+        p::SVector{3, T}
+    end
+    OptimizationVariableInterface.nvars(::Landmark3D) = static(3)
+    OptimizationVariableInterface.update(p::Landmark3D, step, offset=1) = Landmark3D(p.p + SVector(step[offset], step[offset+1], step[offset+2]))
+    OptimizationVariableInterface.iseliminable(::Type{<:Landmark3D}) = static(true)
+    NLLSModel.generatemeasurement(camera, pt::Landmark3D) = NLLSModel.generatemeasurement(camera, pt.p)
+
+    # 2. Build BA problem with Landmark3D
+    ncams = 4
+    nlms = 8
+    prob_schur = Model(Union{SVector{6, Float64}, Landmark3D{Float64}}, SimpleError2{2, Float64, SVector{6, Float64}, Landmark3D{Float64}})
+    camoffset = SVector(1.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+    for i in 1:ncams
+        addvariable!(prob_schur, randn(SVector{6, Float64}) .+ camoffset)
+    end
+    lmoffset = SVector(-0.5, -0.5, 10.0)
+    for i in 1:nlms
+        addvariable!(prob_schur, Landmark3D(rand(SVector{3, Float64}) .+ lmoffset))
+    end
+    for c in 1:ncams
+        camera = prob_schur.variables[c]::SVector{6, Float64}
+        for l in 1:nlms
+            if (c + l) % 2 == 0 || c == 1
+                l_idx = ncams + l
+                addcost!(prob_schur, SimpleError2{SVector{6, Float64}, Landmark3D{Float64}}(NLLSModel.generatemeasurement(camera, prob_schur.variables[l_idx]), c, l_idx))
+            end
+        end
+    end
+
+    # 3. Test Bipartite Validation
+    # A) Connecting 2 eliminable variables throws ArgumentError
+    NLLSModel.generatemeasurement(pt1::Landmark3D, pt2::Landmark3D) = SVector(pt1.p[1] - pt2.p[1], pt1.p[2] - pt2.p[2])
+    prob_bad = Model(Union{SVector{6, Float64}, Landmark3D{Float64}}, Union{SimpleError2{2, Float64, SVector{6, Float64}, Landmark3D{Float64}}, SimpleError2{2, Float64, Landmark3D{Float64}, Landmark3D{Float64}}})
+    addvariable!(prob_bad, randn(SVector{6, Float64}))
+    addvariable!(prob_bad, Landmark3D(SVector(1.0, 2.0, 3.0)))
+    addvariable!(prob_bad, Landmark3D(SVector(4.0, 5.0, 6.0)))
+    addcost!(prob_bad, SimpleError2{SVector{6, Float64}, Landmark3D{Float64}}(SVector(0.0, 0.0), 1, 2))
+    addcost!(prob_bad, SimpleError2{Landmark3D{Float64}, Landmark3D{Float64}}(SVector(0.0, 0.0), 2, 3))
+    @test_throws ArgumentError NLLSModel.partition_schur_problem(prob_bad, trues(length(prob_bad.variables)), true)
+
+    # A2) With automatic solver selection the same problem falls back to a non-Schur solver (B6)
+    @test isnothing(NLLSModel.partition_schur_problem(prob_bad, trues(length(prob_bad.variables)), false))
+    @test isnothing(NLLSModel.partition_schur_problem(prob_bad, trues(length(prob_bad.variables))))
+    _, _, _, H_bad = optimvars(prob_bad; numthreads=static(1))
+    @test !(H_bad isa BlockLinearSystems.SchurBlockHessian)
+
+    # B) Calling with no eliminable variables when reduction=:eliminate throws ArgumentError
+    prob_no_elim = create_ba_problem(2, 2, 1.0)
+    @test_throws ArgumentError NLLSModel.partition_schur_problem(prob_no_elim, trues(length(prob_no_elim.variables)), true)
+
+    # 4. Dense Schur Solver (optimvars)
+    f_ds, fdf_ds!, x0_ds, H_ds = optimvars(prob_schur; numthreads=static(1), reduction=:eliminate, storage=:dense)
+    @test H_ds isa BlockLinearSystems.SchurBlockHessian
+    @test H_ds.R isa Matrix{Float64}
+    tot_dim_ds = H_ds.structure.nr + sum(H_ds.structure.e_dims)
+    g_ds = zeros(tot_dim_ds)
+    c_ds = fdf_ds!(g_ds, H_ds, x0_ds)
+    @test isapprox(c_ds, f_ds(x0_ds); atol=1e-12)
+    @test allocs_warm(fdf_ds!, g_ds, H_ds, x0_ds) == 0
+
+    # 5. Sparse Schur Solver (optimvars)
+    f_ss, fdf_ss!, x0_ss, H_ss = optimvars(prob_schur; numthreads=static(1), reduction=:eliminate, storage=:sparse)
+    @test H_ss isa BlockLinearSystems.SchurBlockHessian
+    @test H_ss.R isa BlockLinearSystems.SparseBlockLinearSystem
+    g_ss = zeros(tot_dim_ds)
+    c_ss = fdf_ss!(g_ss, H_ss, x0_ss)
+    @test isapprox(c_ss, f_ss(x0_ss); atol=1e-12)
+    @test allocs_warm(fdf_ss!, g_ss, H_ss, x0_ss) == 0
+
+    # Verify dense and sparse Schur Hessians match on quadratic form
+    dx_rand = randn(tot_dim_ds)
+    val_dense = dot(dx_rand, H_ds, dx_rand)
+    val_sparse = dot(dx_rand, H_ss, dx_rand)
+    @test isapprox(val_dense, val_sparse; rtol=1e-12, atol=1e-12)
+
+    # 5b. Retained-retained cost with no shared eliminated variable (B1): sparse and dense Schur agree
+    NLLSModel.generatemeasurement(p1::SVector{6, T}, p2::SVector{6, U}) where {T, U} = SVector(p1[1] - p2[1], p1[4] - p2[5])
+    CT = Union{SimpleError2{2, Float64, SVector{6, Float64}, Landmark3D{Float64}}, SimpleError2{2, Float64, SVector{6, Float64}, SVector{6, Float64}}}
+    prob_rr = Model(Union{SVector{6, Float64}, Landmark3D{Float64}}, CT)
+    for i in 1:3
+        addvariable!(prob_rr, randn(SVector{6, Float64}) .+ camoffset)
+    end
+    for i in 1:4
+        addvariable!(prob_rr, Landmark3D(rand(SVector{3, Float64}) .+ lmoffset))
+    end
+    for cam in 1:2, l in 4:7 # landmarks are seen by poses 1 and 2 only
+        addcost!(prob_rr, SimpleError2{SVector{6, Float64}, Landmark3D{Float64}}(randn(SVector{2, Float64}), cam, l))
+    end
+    addcost!(prob_rr, SimpleError2{SVector{6, Float64}, SVector{6, Float64}}(randn(SVector{2, Float64}), 2, 3)) # relative-pose cost
+    @test NLLSModel.partition_schur_problem(prob_rr, trues(7), true).extra_blocks == [(2, 3)]
+    f_rd, fdf_rd!, x0_rd, H_rd = optimvars(prob_rr; numthreads=static(1), reduction=:eliminate, storage=:dense)
+    f_rs, fdf_rs!, x0_rs, H_rs = optimvars(prob_rr; numthreads=static(1), reduction=:eliminate, storage=:sparse)
+    tot_rr = H_rd.structure.nr + sum(H_rd.structure.e_dims)
+    g_rd = zeros(tot_rr); g_rs = zeros(tot_rr)
+    @test fdf_rd!(g_rd, H_rd, x0_rd) ≈ fdf_rs!(g_rs, H_rs, x0_rs)
+    @test g_rd ≈ g_rs
+    dx_rr = randn(tot_rr)
+    @test dot(dx_rr, H_rd, dx_rr) ≈ dot(dx_rr, H_rs, dx_rr)
 end

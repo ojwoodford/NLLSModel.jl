@@ -77,8 +77,8 @@ Base.eltype(::LinearCostDynamic) = Float64
 
     # Single-variable optimvars (static variable 1)
     sub1 = subproblem(problem, 1)
-    f1, fdf1!, x1, H1 = optimvars(sub1, 1)
-    @test H1 === nothing
+    f1, fdf1!, x1, H1 = optimvars(sub1; unfixed=1)
+    @test H1 isa MMatrix{NDIMS, NDIMS, Float64, NDIMS*NDIMS} # One static variable: the static system's own type
     g1 = zeros(MVector{NDIMS, Float64})
     H1_mat = zeros(MMatrix{NDIMS, NDIMS, Float64, NDIMS*NDIMS})
     c1 = fdf1!(g1, H1_mat, x1)

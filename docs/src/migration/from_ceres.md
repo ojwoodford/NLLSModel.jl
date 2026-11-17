@@ -61,7 +61,6 @@ problem = Model(Float64, CostResidual)
 idx = addvariable!(problem, 0.5)
 addcost!(problem, CostResidual(idx))
 
-f, fdf!, x0, H = optimvars(problem)
 options = OptimizationOptions(iterator = :levenbergmarquardt)
-x_opt, result = optimize(f, fdf!, x0, options; H = H)
+result = optimize!(problem, options) # Needs `using SecondOrderOptimization`; the solution is in problem.variables
 ```

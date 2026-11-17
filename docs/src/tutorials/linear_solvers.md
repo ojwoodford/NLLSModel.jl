@@ -30,3 +30,29 @@ options = OptimizationOptions(
 )
 res = optimize!(problem, options)
 ```
+
+## Eliminating Variables: `reduction` and `storage`
+
+Whether eliminable variables (`iseliminable`, for example bundle-adjustment landmarks) are eliminated by a Schur complement is a
+choice about the layout of the linear system, so it is made where the system is built: by keywords of
+`optimize!(model, options; reduction, storage)` and of [`optimvars`](@ref), not in `OptimizationOptions`. The optimizer
+eliminates exactly when the Hessian prototype it is given is a `SchurBlockHessian`. `linsolver` names only the solver for
+the system that is left (the reduced system, after elimination).
+
+- `reduction = :auto` (default) eliminates when the model has eliminable variables and the structure fits (each eliminable
+  variable coupled only to retained variables; a variable of any size BlockLinearSystems takes as a block), and falls back to no elimination otherwise.
+  `:eliminate` eliminates or throws an `ArgumentError`. `:none` never eliminates. Other values are an `ArgumentError`.
+- `storage = :auto` (default) stores the reduced system dense or sparse from the predicted fill of its Cholesky factor;
+  `:dense` and `:sparse` force it. With nothing eliminated it chooses the storage of the Hessian itself in the same way:
+  `:auto` decides from its block sparsity, `:dense` and `:sparse` force it.
+- `max_dense_bytes` (default 256 MiB) caps a dense matrix: `:auto` stores a larger one sparse, and `:dense` throws an
+  `ArgumentError` giving its size.
+
+```julia
+optimize!(problem, options; reduction = :eliminate, storage = :sparse)
+```
+
+The same keywords, with the same rule, apply to `formulation = :tall` (the residual and the Jacobian). There the
+eliminated variables are eliminated by QR of their rows of the Jacobian, so `JᵀJ` is not formed for them: the prototype
+handed to the optimizer is a `SchurBlockJacobian`, and `storage` chooses the storage of the reduced system the same way.
+The tall path also needs each eliminated variable to be in at least one cost.

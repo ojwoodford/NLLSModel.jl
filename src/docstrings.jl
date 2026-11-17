@@ -182,7 +182,6 @@ addvariable!
 
 """
     addcost!(problem::Model, cost::AbstractCost)
-    addresidual!(problem::Model, res::AbstractResidual)
 
 Appends a cost or residual block to `problem`.
 
@@ -194,21 +193,36 @@ addcost!(problem, my_residual)
 addcost!
 
 """
-    optimvars(problem::Model, unfixed=nothing, numthreads=StaticInt(Threads.nthreads())) -> (f, fdf!, x0, H)
+    optimvars(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, min_work=$MIN_WORK_PER_THREAD_NORMAL, min_work_cost=$MIN_WORK_PER_THREAD_COST) -> (f, fdf!, x0, H)
 
-Constructs the objective function `f`, in-place gradient/Hessian evaluator `fdf!`, initial variable state `x0`, and Hessian template `H` (`nothing` for static/dense systems or a `SparseMatrixCSC` for sparse systems) for `problem`.
+The normal way to solve a `Model` is `optimize!(model, options)` (needs `using SecondOrderOptimization`); `optimvars` is the
+advanced route, for custom outer loops, reusing a workspace, or other solvers.
 
-The returned 4-tuple can be passed directly to `SecondOrderOptimization.optimize`:
+Constructs the objective function `f`, in-place gradient/Hessian evaluator `fdf!`, initial variable state `x0`, and Hessian template `H` for `problem`.
+
+`H` is a prototype of the Hessian `fdf!(g, H, x)` fills, of the type the linear system stores it in:
+- one unfixed variable: an `MMatrix{N, N, Float64}` when its size `N` is static and at most 16, otherwise a
+  `Matrix{Float64}`, zero-filled. The gradient buffer `g` is the matching vector type, an `MVector{N, Float64}` or a
+  `Vector{Float64}`, which `zero(H[:, 1])` builds. Buffers of exactly these types (`deepcopy(H)` and `zero(H[:, 1])`)
+  are filled in place; any other `AbstractMatrix`/`AbstractVector` is filled through an internal copy on every call.
+- several variables: a `SchurBlockHessian` when variables are eliminated, a `SparseMatrixCSC{Float64, Int}` for a sparse
+  system, and `nothing` for a dense one (pass a `Matrix{Float64}` and a `Vector{Float64}`).
+
+Wrap the returned 4-tuple in a `HessianObjective` and pass it to `SecondOrderOptimization.optimize!`, then write the
+solution back into the model:
 ```julia
-f, fdf!, x0, H = optimvars(problem)
-x_opt, result = optimize(f, fdf!, x0, options; H=H)
+f, fdf!, x0, H = optimvars(model)
+result = optimize!(x0, HessianObjective(f, fdf!; H), options)
+syncvars!(model, fdf!, x0)
 ```
+(`optimize!` needs a mutable `x0`; for a single variable of static size use `optimize`, which returns `(x, result)`, and
+sync `x`.)
 
-# Arguments
-- `problem::Model`: The nonlinear least squares problem.
-- `unfixed`: Optional variable index (`Integer`), variable type (`DataType`), or boolean mask specifying which variables to optimize (defaults to `nothing`, optimizing all variables).
-- `numthreads`: Number of threads to use for parallel cost and derivative evaluation (`StaticInt` or `Integer`).
-"""
+`reduction` and `storage` together decide `H`: it is a `SchurBlockHessian` exactly when elimination happens, and the
+optimizer eliminates exactly when it is handed one. Under elimination, `storage = :auto` chooses the reduced system's
+storage from the predicted fill of a Cholesky factor.
+
+$KEYWORDS_DOC"""
 optimvars
 
 """
@@ -226,14 +240,18 @@ cost
 """
     subproblem(problem::Model, unfixed) -> Model
 
-Extracts a subproblem containing only costs connected to `unfixed` variables.
+Extracts a subproblem containing only the costs that touch an unfixed variable. `unfixed` takes the forms that the
+`unfixed` keyword of `optimize!` and [`optimvars`](@ref) takes: a variable index, a variable type, a Boolean mask over the
+variables, a list of variable indices, or `nothing` (all variables). The subproblem shares `problem`'s variables.
 """
 subproblem
 
 """
     subproblem!(to::Model, from::Model, costindices) -> to
 
-Populates subproblem `to` in-place with the subset of costs from `from` indexed by `costindices`.
+Populates subproblem `to` in-place with the subset of costs from `from` indexed by `costindices`: indices into all the
+costs of `from`, counted across its cost types in order. They must be sorted in ascending order and between 1 and the
+number of costs; otherwise an `ArgumentError` is thrown.
 """
 subproblem!
 
@@ -254,6 +272,12 @@ function ndeps end
     nres(cost::AbstractResidual) -> StaticInt or Int
 
 Dimensionality of the residual vector returned by `cost` (e.g. `static(M)` or an `Int`).
+
+Returning a `StaticInt` makes the two static kernels available (see "Performance" in the README):
+the full static multiply, which also needs every unfixed variable to have a static size
+(total `n <= MAX_STATIC_VAR`) and `M * n <= MAX_STATIC_JAC`; and, for costs that are not on that path, the
+static-column kernel, which needs `M <= MAX_STATIC_ROWS`. A run-time length (an `Int`) uses the `@turbo` kernel, or
+plain loops for a single-column Jacobian and for a Jacobian that is not a strided array of hardware floats.
 
 # Example
 ```julia
@@ -331,6 +355,10 @@ function robustifydkernel end
 
 Computes the residual vector (or scalar) for `cost` given its unpacked variables `vars...`.
 
+Residuals are evaluated on several threads at once, so this function (like [`computeresjac`](@ref) and
+[`computecostgradhess`](@ref)) must itself be single-threaded: no BLAS on large matrices and no `Threads.@threads`.
+If it needs BLAS, call `BLAS.set_num_threads(1)` in the application.
+
 # Example
 ```julia
 NLLSModel.computeresidual(r::MyResidual, x, y) = y - x - r.offset
@@ -343,6 +371,19 @@ function computeresidual end
 
 Computes the residual vector and Jacobian matrix for active variables indicated by bitmask `varflags`.
 Defaults to ForwardDiff automatic differentiation when not specialized.
+
+Rules for user code, because residuals are evaluated on several threads at once:
+- Arrays returned from `computeresjac` (or [`computecostgradhess`](@ref)) must not be shared with other residuals.
+  Returning arrays that the residual owns or that are local to the call is fine; a buffer reused by two residuals
+  evaluated at the same time is not.
+- The code must itself be single-threaded (no BLAS on large matrices, no `Threads.@threads`). If it needs BLAS, call
+  `BLAS.set_num_threads(1)` in the application.
+
+The residual can be a `Number`, a `Vector` or any `StaticVector` (`SVector`, `MVector`, ...). The Jacobian can be an
+`SMatrix`, a `Matrix` (or any strided matrix of hardware floats) or, for a scalar residual, the adjoint of the gradient
+vector. The two need not both be static or both dynamic: a static residual with a `Matrix` Jacobian is fine, as is a
+`Vector` residual with an `SMatrix`. The kernels for products of the Jacobian are chosen by the types of the residual and
+Jacobian and by the type of `nres` (see [`nres`](@ref)).
 """
 function computeresjac end
 
@@ -357,11 +398,15 @@ function computecost end
     computecostgradhess(varflags, cost::AbstractCost, vars...) -> (cost, grad, hess)
 
 Computes the scalar cost, gradient vector, and Hessian matrix for active variables indicated by bitmask `varflags`.
+
+The same rules apply as for [`computeresjac`](@ref): returned arrays must not be shared with other residuals, and the
+code must be single-threaded. For an [`AbstractResidual`](@ref) the gradient and Hessian are computed from the Jacobian
+without BLAS; the arrays returned alias per-task buffers and are valid until the same task evaluates its next cost.
 """
 function computecostgradhess end
 
 """
-    NLPLSModel(problem::Model; unfixed=nothing, numthreads=1, name="NLPLSModel")
+    NLPLSModel(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, min_work=$MIN_WORK_PER_THREAD_NORMAL, min_work_cost=$MIN_WORK_PER_THREAD_COST, name="NLPLSModel")
 
 Wraps a [`Model`](@ref) as an `NLPModels.AbstractNLPModel` for use with general
 nonlinear programming solvers such as `JSOSolvers`, `Ipopt`, and `Optim`.
@@ -375,18 +420,47 @@ nlp = NLPLSModel(problem)
 # Arguments
 - `problem::Model`: The nonlinear least-squares problem to wrap.
 
-# Keyword Arguments
-- `unfixed = nothing`: Boolean mask, integer, or vector indicating which variables are unfixed (optimized).
-- `numthreads = 1`: Number of threads for cost and gradient/Hessian evaluation.
-- `name = "NLPLSModel"`: Name string assigned to the model metadata.
+Every unfixed variable must update by plain addition and pack into a flat `Float64` vector (as for
+[`flat_optimvars_nls`](@ref)), since the solver steps by adding to the flat vector of the variables' values; otherwise it
+throws an `ArgumentError`, before anything is evaluated.
+
+It works on the full system: `reduction = :auto` means `:none`, and `:eliminate` is an `ArgumentError`. `name` is the name
+given to the model's metadata (default `"NLPLSModel"`).
 
 # Features
 - Automatically selects dense or block-sparse Hessian representations based on problem structure.
 - Implements `obj`, `grad!`, `objgrad!`, `hess_structure!`, `hess_coord!`, and `hprod!`.
 - Caches cost, gradient, and Gauss-Newton Hessian evaluations across queries at the same point.
 - Transfers solution vectors back to `problem.variables` via [`syncvars!`](@ref).
-"""
+
+$KEYWORDS_DOC"""
 NLPLSModel
+
+"""
+    NLLSNLSModel(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work=$MIN_WORK_PER_THREAD_TALL, min_work_cost=$MIN_WORK_PER_THREAD_COST, name="NLLSNLSModel")
+
+Wraps a [`Model`](@ref) as an `NLPModels.AbstractNLSModel{Float64, Vector{Float64}}`, which exposes the residual vector and
+its Jacobian, for nonlinear least-squares solvers that work on them directly, such as `JSOSolvers.trunk` and
+`JSOSolvers.tron`.
+
+Requires loading `NLPModels`:
+```julia
+using NLLSModel, NLPModels
+nls = NLLSNLSModel(problem)
+```
+
+Every cost must be a non-adaptive [`AbstractResidual`](@ref) with a linear kernel (`NoRobust`, or `Scaled` with a finite non-negative height), so that the
+cost is exactly `½‖r‖²`, which these solvers derive from `r`; otherwise it throws an `ArgumentError`. Every unfixed
+variable must update by plain addition and pack into a flat `Float64` vector (as for [`flat_optimvars_nls`](@ref)).
+
+It is built on the tall path ([`optimvars_nls`](@ref)): `reduction = :auto` means `:none`. The cost alone (`obj`) is
+evaluated by the cost function, threaded by `min_work_cost`; the residual and Jacobian by the tall fill, threaded by
+`min_work`. `name` is the name given to the model's metadata (default `"NLLSNLSModel"`).
+
+The solution is transferred back to `problem.variables` with [`syncvars!`](@ref).
+
+$KEYWORDS_DOC"""
+NLLSNLSModel
 
 """
     syncvars!(nlp, x::AbstractVector) -> Model

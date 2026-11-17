@@ -52,6 +52,14 @@ println("Optimal variables: ", prob.variables[1])
 
 ---
 
+## Which variables
+
+The solver works on a flat vector of the variables' values and steps by adding to it, so every unfixed variable must pack
+into a flat `Float64` vector (a number, or an `AbstractVector` of numbers that can be rebuilt from its values) and update by
+plain addition, as for [`NLLSNLSModel`](@ref) and [`flat_optimvars_nls`](@ref). `NLPLSModel` checks this when it is built
+and throws an `ArgumentError` naming the variable type otherwise. A model with manifold variables (rotations, unit vectors,
+variables updated multiplicatively) is solved with `optimize!`, which applies each variable's own `update`.
+
 ## Key Features
 
 ### 1. Automatic Sparsity & Decision
@@ -68,4 +76,4 @@ Evaluating gradient and Gauss-Newton Hessian simultaneously via $J^T r$ and $J^T
 `hprod!` computes $H v = (J^T J) v$ directly using in-place symmetric matrix-vector multiplication (`mul!(Hv, Symmetric(H, :L), v)`), allowing Krylov/CG-based solvers such as `JSOSolvers.trunk` to avoid explicit matrix factorizations.
 
 ### 4. Updating Variables with `syncvars!`
-Because `Model` variables can be stored as static vectors, numbers, or custom manifold/bounded variable blocks, [`syncvars!`](@ref) takes the flat solver solution vector and repopulates `prob.variables` in-place.
+Because `Model` variables can be stored as numbers, static vectors or dynamic vectors, [`syncvars!`](@ref) takes the flat solver solution vector and repopulates `prob.variables` in-place.

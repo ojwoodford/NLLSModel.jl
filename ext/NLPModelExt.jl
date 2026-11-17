@@ -8,60 +8,10 @@ using StaticArrays
 using Static
 using OptimizationVariableInterface
 import OptimizationVariableInterface: nvars, syncvars!
+import NLLSModel: islinear, flat_optimvars_nls, sync_flat_vars!
 
-# Packing helpers
-@inline function pack_single_var!(x_flat::Vector{Float64}, x0::StaticVector{N}) where N
-    @inbounds for k in 1:N
-        x_flat[k] = Float64(x0[k])
-    end
-end
-@inline pack_single_var!(x_flat::Vector{Float64}, x0::Number) = (@inbounds x_flat[1] = Float64(x0); nothing)
-@inline function pack_single_var!(x_flat::Vector{Float64}, x0::AbstractVector)
-    @inbounds for k in eachindex(x0)
-        x_flat[k] = Float64(x0[k])
-    end
-end
-
-@inline function pack_var!(x::Vector{Float64}, idx::Int, v::StaticVector{N}) where N
-    @inbounds for k in 1:N
-        x[idx + k - 1] = Float64(v[k])
-    end
-end
-@inline pack_var!(x::Vector{Float64}, idx::Int, v::Number) = (@inbounds x[idx] = Float64(v); nothing)
-@inline function pack_var!(x::Vector{Float64}, idx::Int, v::AbstractVector)
-    @inbounds for k in eachindex(v)
-        x[idx + k - 1] = Float64(v[k])
-    end
-end
-
-# Copy helpers
-copy_var(x::StaticVector) = x
-copy_var(x::Number) = x
-copy_var(x::Vector{T}) where T = copy(x)
-copy_var(x) = deepcopy(x)
-
-copy_vars_list(vars::Vector{T}) where T<:StaticVector = copy(vars)
-copy_vars_list(vars::Vector{T}) where T<:Number = copy(vars)
-copy_vars_list(vars::Vector) = deepcopy(vars)
-
-# Unpacking helpers
-@inline unpack_single_var(::StaticVector{N, T}, x) where {N, T} = SVector{N, T}(ntuple(k -> @inbounds(x[k]), Val(N)))
-@inline unpack_single_var(::Number, x) = @inbounds x[1]
-@inline function unpack_single_var(v::Vector{T}, x) where T
-    copyto!(v, x)
-    return v
-end
-@inline unpack_single_var(v, x) = typeof(v)(x)
-
-@inline unpack_var_elem(::StaticVector{N, T}, x, idx, _) where {N, T} = SVector{N, T}(ntuple(k -> @inbounds(x[idx + k - 1]), Val(N)))
-@inline unpack_var_elem(::Number, x, idx, _) = @inbounds x[idx]
-@inline function unpack_var_elem(v::Vector{T}, x, idx, bsz) where T
-    @inbounds for k in 1:bsz
-        v[k] = x[idx + k - 1]
-    end
-    return v
-end
-@inline unpack_var_elem(v, x, idx, bsz) = typeof(v)(view(x, idx:idx+bsz-1))
+# Packing, copying and unpacking helpers are shared with the flat-variable code in NLLSModel (src/flatvars.jl)
+import NLLSModel: pack_single_var!, pack_var!, copy_var, copy_vars_list, unpack_single_var, unpack_var_elem
 
 """
     NLLSModelNLP <: AbstractNLPModel{Float64, Vector{Float64}}
@@ -92,9 +42,17 @@ mutable struct NLLSModelNLP{P, F, FDF, X0, H, VarsBuf, BSZ, HIdx, UInd} <: Abstr
     cache_valid::Base.RefValue{Bool}
 end
 
-function NLLSModel.NLPLSModel(problem::Model; unfixed=nothing, numthreads=static(1), name="NLPLSModel")
-    f, fdf!, x0, H_temp = optimvars(problem, unfixed, numthreads)
+function NLLSModel.NLPLSModel(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction::Symbol=:auto,
+        storage::Symbol=:auto, max_dense_bytes::Integer=NLLSModel.MAX_DENSE_BYTES, min_work::Integer=NLLSModel.MIN_WORK_PER_THREAD_NORMAL,
+        min_work_cost::Integer=NLLSModel.MIN_WORK_PER_THREAD_COST, name="NLPLSModel")
+    # Never use the Schur path here: the model works on the full (non-reduced) system
+    NLLSModel.check_reduction(reduction)
+    reduction === :eliminate && throw(ArgumentError("NLPLSModel works on the full system: reduction = :eliminate is not supported; use :auto or :none."))
     conv_unfixed = NLLSModel.convertunfixed(unfixed, problem)
+    # The solver's x is the flat vector of the variables' values, and the gradient is with respect to the update's step:
+    # the two agree only for variables that pack into a flat vector and update by addition, as on the flat paths
+    NLLSModel.check_flat_variables(problem, conv_unfixed)
+    f, fdf!, x0, H_temp = optimvars(problem; unfixed, numthreads, reduction=:none, storage, max_dense_bytes, min_work, min_work_cost)
 
     if conv_unfixed isa Integer
         is_single = true
@@ -104,7 +62,9 @@ function NLLSModel.NLPLSModel(problem::Model; unfixed=nothing, numthreads=static
         unfixed_inds = findfirst(conv_unfixed)
     else
         is_single = false
-        unfixed_inds = all(conv_unfixed) ? nothing : findall(conv_unfixed)
+        # Use the block ordering optimvars used for x0 (variables are sorted by dimension when not already grouped)
+        _, _, ordered_inds, is_natural = NLLSModel.block_sizes_indices(problem.variables, conv_unfixed)
+        unfixed_inds = (all(conv_unfixed) && is_natural) ? nothing : ordered_inds
     end
 
     if is_single
@@ -324,5 +284,198 @@ end
 
 OptimizationVariableInterface.syncvars!(::Model, nlp::NLLSModelNLP, x::AbstractVector) =
     syncvars!(nlp, x)
+
+"""
+    NLLSModelNLS <: AbstractNLSModel{Float64, Vector{Float64}}
+
+Concrete adapter exposing an `NLLSModel.Model` as an `NLPModels.AbstractNLSModel`.
+Enables native tall NLS solvers such as `JSOSolvers.trunk` and `JSOSolvers.tron`.
+Restricted to costs with a linear kernel (`NoRobust`, or `Scaled` with a finite non-negative height).
+"""
+mutable struct NLLSModelNLS{P, L, F, RES, RESJAC, J} <: AbstractNLSModel{Float64, Vector{Float64}}
+    meta::NLPModelMeta{Float64, Vector{Float64}}
+    nls_meta::NLSMeta{Float64, Vector{Float64}}
+    counters::NLSCounters
+    problem::P
+    layout::L
+    f_flat::F
+    res_flat!::RES
+    resjac_flat!::RESJAC
+    r_buf::Vector{Float64}
+    J_buf::J
+    x_cached::Vector{Float64}
+    last_cost::Float64
+    res_valid::Bool
+    jac_valid::Bool
+end
+
+# Documented in src/docstrings.jl, which the docs build sees without loading NLPModels
+function NLLSModel.NLLSNLSModel(
+    problem::Model;
+    unfixed = nothing,
+    numthreads = StaticInt(Threads.nthreads()),
+    reduction::Symbol = :auto,
+    storage::Symbol = :auto,
+    max_dense_bytes::Integer = NLLSModel.MAX_DENSE_BYTES,
+    min_work::Integer = NLLSModel.MIN_WORK_PER_THREAD_TALL,
+    min_work_cost::Integer = NLLSModel.MIN_WORK_PER_THREAD_COST,
+    name::String = "NLLSNLSModel",
+)
+    reduction = NLLSModel.check_plain_reduction(reduction, "NLLSNLSModel")
+    flat = flat_optimvars_nls(problem; unfixed, numthreads, reduction, storage, max_dense_bytes, min_work, min_work_cost)
+
+    islinear(flat) || NLLSModel.throw_nonlinear("NLLSNLSModel", problem)
+
+    M = flat.layout_tall.M
+    N = flat.layout.n
+    nnzj = flat.J_proto isa SparseMatrixCSC ? length(flat.J_proto.nzval) : (M * N)
+
+    meta = NLPModelMeta(N; x0 = copy(flat.x0), nnzh = 0, hess_available = false, name = name)
+    nls_meta = NLSMeta(M, N; x0 = copy(flat.x0), nnzj = nnzj, nnzh = 0, hess_residual_available = false, hprod_residual_available = false)
+    counters = NLSCounters()
+    r_buf = Vector{Float64}(undef, M)
+    J_buf = copy(flat.J_proto)
+    x_cached = fill(NaN, N)
+
+    return NLLSModelNLS(
+        meta,
+        nls_meta,
+        counters,
+        problem,
+        flat.layout,
+        flat.f,
+        flat.res!,
+        flat.resjac!,
+        r_buf,
+        J_buf,
+        x_cached,
+        0.0,
+        false,
+        false,
+    )
+end
+
+function invalidate_if_moved!(nls::NLLSModelNLS, x::AbstractVector)
+    if x != nls.x_cached
+        copyto!(nls.x_cached, x)
+        nls.res_valid = false
+        nls.jac_valid = false
+    end
+end
+
+function ensure_res!(nls::NLLSModelNLS, x::AbstractVector)
+    invalidate_if_moved!(nls, x)
+    if !nls.res_valid
+        nls.last_cost = nls.res_flat!(nls.r_buf, x)
+        nls.res_valid = true
+    end
+    return nls.last_cost
+end
+
+function ensure_jac!(nls::NLLSModelNLS, x::AbstractVector)
+    invalidate_if_moved!(nls, x)
+    if !nls.jac_valid
+        nls.last_cost = nls.resjac_flat!(nls.r_buf, nls.J_buf, x; prezeroed=true)
+        nls.res_valid = true
+        nls.jac_valid = true
+    end
+    return nls.last_cost
+end
+
+function NLPModels.residual!(nls::NLLSModelNLS, x::AbstractVector, F::AbstractVector)
+    NLPModels.increment!(nls, :neval_residual)
+    ensure_res!(nls, x)
+    copyto!(F, nls.r_buf)
+    return F
+end
+
+function NLPModels.jac_structure_residual!(nls::NLLSModelNLS, rows::AbstractVector{<:Integer}, cols::AbstractVector{<:Integer})
+    if nls.J_buf isa SparseMatrixCSC
+        copyto!(rows, nls.J_buf.rowval)
+        colptr = nls.J_buf.colptr
+        N = nls.meta.nvar
+        for j in 1:N
+            for idx in colptr[j]:(colptr[j+1] - 1)
+                cols[idx] = j
+            end
+        end
+    else
+        M = nls.nls_meta.nequ
+        N = nls.meta.nvar
+        idx = 1
+        for j in 1:N
+            for i in 1:M
+                rows[idx] = i
+                cols[idx] = j
+                idx += 1
+            end
+        end
+    end
+    return rows, cols
+end
+
+function NLPModels.jac_coord_residual!(nls::NLLSModelNLS, x::AbstractVector, vals::AbstractVector)
+    NLPModels.increment!(nls, :neval_jac_residual)
+    ensure_jac!(nls, x)
+    if nls.J_buf isa SparseMatrixCSC
+        copyto!(vals, nls.J_buf.nzval)
+    else
+        copyto!(vals, nls.J_buf)
+    end
+    return vals
+end
+
+function NLPModels.jprod_residual!(nls::NLLSModelNLS, x::AbstractVector, v::AbstractVector, Jv::AbstractVector)
+    NLPModels.increment!(nls, :neval_jprod_residual)
+    ensure_jac!(nls, x)
+    mul!(Jv, nls.J_buf, v)
+    return Jv
+end
+
+function NLPModels.jtprod_residual!(nls::NLLSModelNLS, x::AbstractVector, v::AbstractVector, Jtv::AbstractVector)
+    NLPModels.increment!(nls, :neval_jtprod_residual)
+    ensure_jac!(nls, x)
+    mul!(Jtv, transpose(nls.J_buf), v)
+    return Jtv
+end
+
+# The cost alone is the cost function's (threaded by `min_work_cost`); the residual is computed only when a residual,
+# a Jacobian or a gradient is asked for. Every kernel is linear, so the cost equals ½‖r‖².
+function NLPModels.obj(nls::NLLSModelNLS, x::AbstractVector)
+    NLPModels.increment!(nls, :neval_obj)
+    x == nls.x_cached && nls.res_valid && return nls.last_cost
+    return nls.f_flat(x)
+end
+
+function NLPModels.grad!(nls::NLLSModelNLS, x::AbstractVector, g::AbstractVector)
+    NLPModels.increment!(nls, :neval_grad)
+    ensure_jac!(nls, x) # also fills the residual buffer
+    mul!(g, transpose(nls.J_buf), nls.r_buf)
+    return g
+end
+
+function NLPModels.objgrad!(nls::NLLSModelNLS, x::AbstractVector, g::AbstractVector)
+    NLPModels.increment!(nls, :neval_obj)
+    NLPModels.increment!(nls, :neval_grad)
+    cost = ensure_jac!(nls, x) # also fills the residual buffer
+    mul!(g, transpose(nls.J_buf), nls.r_buf)
+    return cost, g
+end
+
+function NLPModels.reset!(nls::NLLSModelNLS)
+    NLPModels.reset!(nls.counters)
+    nls.res_valid = false
+    nls.jac_valid = false
+    fill!(nls.x_cached, NaN)
+    return nls
+end
+
+function OptimizationVariableInterface.syncvars!(nls::NLLSModelNLS, x::AbstractVector)
+    sync_flat_vars!(nls.problem, nls.layout, x)
+    return nls.problem
+end
+
+OptimizationVariableInterface.syncvars!(::Model, nls::NLLSModelNLS, x::AbstractVector) =
+    syncvars!(nls, x)
 
 end # module NLPModelExt

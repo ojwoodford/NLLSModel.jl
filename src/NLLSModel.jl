@@ -1,19 +1,32 @@
+"""
+    NLLSModel
+
+Nonlinear least-squares (and general smooth cost) problems as a bipartite graph of variables and costs: build a
+[`Model`](@ref), and evaluate its cost, gradient and Gauss-Newton Hessian ([`optimvars`](@ref)) or its residual and
+Jacobian ([`optimvars_nls`](@ref)) for an optimizer. With SecondOrderOptimization loaded, `optimize!(model, options)`
+solves it directly.
+"""
 module NLLSModel
 
-using BlockMatrices
+using BlockLinearSystems
 using FastNorm
 using OptimizationVariableInterface
 using SIRBSDispatch
+using Polyester: @batch
+using LoopVectorization: @turbo
+import ForwardDiff, DiffResults
 using Static, StaticArrays, SparseArrays, LinearAlgebra
 
-import BlockMatrices:
-    BlockSparseMatrix, BlockDenseMatrix,
+import BlockLinearSystems:
+    SparseBlockLinearSystem, DenseBlockLinearSystem, TransposedPattern,
     block, zero!, copy_structure,
-    symmetrifyfull, makesparseindices,
-    sparse_dense_decision, computestartindices, find_diag_inds
+    symmetrifyfull, symmetrifyfull!, sparse_with_map, copyto!,
+    block_sparse_nnz, computestartindices,
+    SchurStructure, SchurBlockHessian, build_schur_pattern, sort_schur_blocks,
+    threadargs, fromthreadargs
 
 import OptimizationVariableInterface:
-    nvars, update, update!, syncvars!,
+    nvars, update, syncvars!,
     ZeroToInfScalar, ZeroToOneScalar
 
 import FastNorm: sqnorm
@@ -21,9 +34,10 @@ import SIRBSDispatch: sirbsdispatch
 
 # Export NLLSModel public interface
 # Problem construction & evaluation
-export Model, NLPLSModel
-export addvariable!, addcost!, addresidual!, subproblem, subproblem!
-export cost, optimvars, syncvars!
+export Model, NLPLSModel, NLLSNLSModel
+export addvariable!, addcost!, subproblem, subproblem!
+export cost, optimvars, optimvars_nls, flat_optimvars_nls, syncvars!
+export islinear
 
 # Cost and residual types & definition interface
 export AbstractCost, AbstractResidual, AbstractAdaptiveResidual
@@ -48,22 +62,52 @@ abstract type AbstractAdaptiveRobustifier <: AbstractRobustifier end # Robustifi
 # Constants
 const MAX_ARGS = 10 # Maximum number of variables a residual can depend on
 const MAX_BLOCK_SZ = 32 # Maximum DoF of a variable and also maximum length of a residual allowed for various operations, such as marginalization
-const MAX_STATIC_VAR = 64 # Maximum static variable size for static sized autodiff to be used
+"""
+    MAX_STATIC_VAR
+
+Maximum total size of the unfixed variables of a cost for static-sized autodiff (duals of static width), and so for the
+full static path (that autodiff and the static multiply of `gramgrad`). Above it, or with a run-time size, the cost is
+differentiated by ForwardDiff with a configuration cached per task. Inherited from NLLSsolver; not measured.
+"""
+const MAX_STATIC_VAR = 64
+
+"""
+    MAX_STATIC_JAC
+
+Maximum rows × columns (`nres` times the total size of the unfixed variables) of the Jacobian of a cost for the full
+static path. It bounds the size of the static Jacobian that is built and unrolled. A cost above it (with static sizes, at
+most `MAX_STATIC_VAR` in all) is still differentiated with duals of static width, its Jacobian written into a `Matrix`
+buffer per task, and takes the static-column or `@turbo` kernel. A starting value, not measured.
+"""
+const MAX_STATIC_JAC = 128
+
+"""
+    MAX_STATIC_ROWS
+
+Maximum static residual length (`nres` returning a `StaticInt`) for the static-column kernel of `gramgrad!`, which is
+used for costs that are not on the full static path. Longer (or run-time) residuals use the `@turbo` kernel. Tested
+independently of the number of columns. A starting value, not measured.
+"""
+const MAX_STATIC_ROWS = 16
 
 # Includes
 include("utils.jl")
 include("CostStruct.jl")
 include("problem.jl")
-const addresidual! = addcost!
 include("unroll.jl")
 include("linearsystem.jl")
 include("robust.jl")
 include("robustadaptive.jl")
+include("gramkernels.jl")
 include("residual.jl")
 include("autodiff.jl")
 include("cost.jl")
 include("multithreading.jl")
+include("schurthreading.jl")
+include("keywords.jl")
+include("flatvars.jl")
 include("optimize.jl")
+include("tall_system.jl")
 include("docstrings.jl")
 
 end # module NLLSModel

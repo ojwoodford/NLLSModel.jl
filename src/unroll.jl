@@ -14,6 +14,11 @@
 # LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR 
 # IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+# `if` conditions are constant-folded at expansion time. They are evaluated in an empty sandbox module (with only Base),
+# never in the caller's module, so a module-level global that shares a name with a local variable cannot make the macro
+# prune a branch wrongly. A condition that mentions anything but literals and Base functions fails to evaluate and is kept.
+const UNROLL_SANDBOX = Module(:UnrollSandbox)
+
 copy_and_substitute_tree(e, varname, newtext, mod) = e
 
 copy_and_substitute_tree(e::Symbol, varname, newtext, mod) =
@@ -54,7 +59,7 @@ macro unroll(expr)
     varname = expr.args[1].args[1]
     ret = Expr(:block)
     for k in Core.eval(__module__, expr.args[1].args[2])
-        e2 = copy_and_substitute_tree(expr.args[2], varname, k, __module__)
+        e2 = copy_and_substitute_tree(expr.args[2], varname, k, UNROLL_SANDBOX)
         push!(ret.args, e2)
     end
     esc(ret)

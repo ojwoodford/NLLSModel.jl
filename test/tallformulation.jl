@@ -1,0 +1,479 @@
+using NLLSModel, Test, Static, StaticArrays, SparseArrays, Random, LinearAlgebra
+using SecondOrderOptimization
+import OptimizationVariableInterface
+import OptimizationVariableInterface: nvars, update, update!, copyvars
+
+# optimize!(model, options; formulation = :tall): the residual-and-Jacobian path. Needs Tgt, Lnk, singleproblem, mixedproblem
+# and chainproblem from frontdoor.jl, and tallproblems.jl.
+
+const TallExt = Base.get_extension(NLLSModel, :SecondOrderOptimizationExt)
+const TallOptions = OptimizationOptions(iterator=:levenbergmarquardt, maxiters=200)
+
+# Records whether any residual was evaluated off the calling thread, to see whether an evaluation was threaded
+const SPY_CALLER = Ref(0)
+const SPY_OFFTHREAD = Threads.Atomic{Int}(0)
+struct SpyRes <: NLLSModel.AbstractResidual
+    t::Float64
+end
+NLLSModel.ndeps(::SpyRes) = static(1)
+NLLSModel.nres(::SpyRes) = static(1)
+NLLSModel.varindices(::SpyRes) = 1
+NLLSModel.getvars(::SpyRes, vars::AbstractVector) = (vars[1]::Float64,)
+function NLLSModel.computeresidual(r::SpyRes, x)
+    Threads.threadid() == SPY_CALLER[] || Threads.atomic_add!(SPY_OFFTHREAD, 1)
+    return SVector(x - r.t)
+end
+Base.eltype(::SpyRes) = Float64
+function spymodel(ncosts, nvars=1)
+    model = Model(Float64, SpyRes)
+    for _ in 1:nvars
+        addvariable!(model, 0.0)
+    end
+    for k in 1:ncosts
+        addcost!(model, SpyRes(sin(k)))
+    end
+    return model
+end
+# Whether `fun()` evaluated a residual off the calling thread
+function offthread(fun)
+    SPY_CALLER[] = Threads.threadid()
+    SPY_OFFTHREAD[] = 0
+    fun()
+    return SPY_OFFTHREAD[] > 0
+end
+
+# Compare the tall solve with the normal equations: same final cost (the gradient at an accurate minimum is rounding noise, so it
+# is not compared), and the variables to `atol`. `cost0` is the cost at the start, to give the tolerance for zero-residual problems.
+function sameoptimum(model, options=TallOptions; atol=1e-5, kwargs...)
+    c0 = NLLSModel.cost(model)
+    normal, rn = optimize(model, options; numthreads=static(1), kwargs...)
+    tall, rt = optimize(model, options; formulation=:tall, numthreads=static(1), kwargs...)
+    cn, ct = NLLSModel.cost(normal), NLLSModel.cost(tall)
+    ok = isapprox(ct, cn; rtol=1e-8, atol=1e-10 * c0) && isapprox(ct, rt.bestcost; rtol=1e-12) && samevars(tall, normal; atol) && rt.bestcost < c0
+    return ok, ct, cn
+end
+
+# --- Tests ------------------------------------------------------------------------------------------------------------
+
+@testset "tallformulation.jl" begin
+    @test TallExt isa Module
+
+    @testset "formulation is a keyword of optimize! only" begin
+        @test !(:formulation in fieldnames(typeof(TallOptions)))
+        model = curvefit()
+        @test_throws ArgumentError optimize!(model, TallOptions; formulation=:sparse)
+        @test_throws ArgumentError optimize!(model, TallOptions; formulation=:tall, reduction=:bogus)
+        # Not inferred from the linear solver: asking for the QR solver on the normal equations is the optimizer's business
+        r = optimize!(deepcopy(model), OptimizationOptions(iterator=:levenbergmarquardt, linsolver=:qr, maxiters=200); formulation=:normal, numthreads=static(1))
+        @test r isa OptimizationResult
+        # :normal is the default
+        a, ra = optimize(model, TallOptions; numthreads=static(1))
+        b, rb = optimize(model, TallOptions; formulation=:normal, numthreads=static(1))
+        @test a.variables == b.variables
+        @test ra.bestcost == rb.bestcost
+    end
+
+    @testset "same optimum as :normal: $name" for (name, make) in (
+            ("curve fit, one Vector", () -> curvefit()),
+            ("several variables of different sizes", () -> first(mixedproblem())),
+            ("chain of Vectors", () -> first(chainproblem(6, 3, 5))),
+            ("rotation", () -> rotproblem()),
+            ("rotation, Vector, SVector, Vector", () -> posemodel()),
+            ("Huber on every cost", () -> curvefit(huber=true, outliers=4)),
+            ("Huber on every cost, mixed variables", () -> posemodel(huber=true)))
+        ok, ct, cn = sameoptimum(make())
+        @test ok
+    end
+
+    @testset "same optimum as :normal: a single static variable of size 3 (through optimize)" begin
+        model, t = singleproblem(SVector{3, Float64}, 3, 7)
+        ok, _, _ = sameoptimum(model)
+        @test ok
+        solved, result = optimize(model, TallOptions; formulation=:tall)
+        @test solved.variables[1] ≈ t atol=1e-6
+        @test NLLSModel.cost(solved) ≈ result.bestcost atol=1e-12
+        # optimize! of a single static variable too
+        m2, t2 = singleproblem(SVector{3, Float64}, 3, 8)
+        r = optimize!(m2, TallOptions; formulation=:tall)
+        @test m2.variables[1] ≈ t2 atol=1e-6
+        @test NLLSModel.cost(m2) ≈ r.bestcost atol=1e-12
+    end
+
+    # NTP3: a small single static variable gets the optimizer's static tall system, which hands resjac! an MMatrix copy of
+    # the prototype (and an MVector for r); the evaluators take it as they take the Matrix
+    @testset "a single static variable: the optimizer's static system ($name)" for (name, kernel) in (("no kernel", nothing),
+            ("Huber2o", Huber2oKernel(0.3)))
+        model, t = singleproblem(SVector{3, Float64}, 3, 7)
+        if kernel !== nothing
+            robust = Model(SVector{3, Float64}, TlRob{Tgt{SVector{3, Float64}}, typeof(kernel)})
+            addvariable!(robust, model.variables[1])
+            addcost!(robust, TlRob(Tgt(t, 1), kernel))
+            model = robust
+        end
+        f, _, rj, x0, J = tlnls(model; numthreads=static(1))
+        @test x0 isa SVector{3, Float64} && J isa Matrix{Float64} # 3 × 3: under the optimizer's static cap
+        # As the front door builds it, with a spy on the arguments resjac! receives
+        seen = Set{Any}()
+        spy = (r, J, x) -> (push!(seen, (typeof(r), typeof(J))); TallExt.TallResJac(rj)(r, J, x))
+        x, res = SecondOrderOptimization.optimize(x0, JacobianObjective(f, spy, J), TallOptions)
+        @test seen == Set([(MVector{3, Float64}, MMatrix{3, 3, Float64, 9})])
+        # The front door reaches the normal path's cost and the spy's point
+        solved, rt = optimize(model, TallOptions; formulation=:tall)
+        normal, _ = optimize(model, TallOptions)
+        @test NLLSModel.cost(solved) ≈ NLLSModel.cost(normal) rtol=1e-8 atol=1e-14
+        @test solved.variables[1] ≈ x rtol=1e-12
+        @test rt.bestcost ≈ res.bestcost rtol=1e-12 atol=1e-20
+    end
+
+    @testset "same optimum, robust Huber with outliers is not the least-squares optimum" begin
+        # Guard against the Huber tests above passing because the kernel was silently ignored
+        ls = optimize(curvefit(outliers=4), TallOptions; formulation=:tall, numthreads=static(1))[1]
+        hub = optimize(curvefit(huber=true, outliers=4), TallOptions; formulation=:tall, numthreads=static(1))[1]
+        @test norm(ls.variables[1] - hub.variables[1]) > 1e-3
+    end
+
+    @testset "write-back (T2): the model holds the best point, not the last evaluated" begin
+        # The evaluators copy every point they evaluate into the model. A Levenberg-Marquardt run in practice ends on an accepted
+        # trial, so a rejected last evaluation is simulated: a callback that, like an evaluator at a rejected trial, leaves a
+        # worse point in the model after every iteration. Whatever it leaves, optimize! must put the best point in. (With every variable
+        # of several unfixed the evaluators write nothing into the model, x0 being model.variables itself: nothing to simulate.)
+        junk(v::Vector{Float64}) = v .+ 0.5
+        junk(v::SVector) = v .+ 0.5
+        junk(v::TlRot) = update(v, [0.3, -0.2, 0.1])
+        for (name, make, unfixed) in (("one variable", () -> curvefit(huber=true, outliers=3), nothing), ("a list", () -> posemodel(), [1, 3, 4]), ("a rotation", () -> posemodel(), 2))
+            for maxiters in (1, 2, 3, 200)
+                model = make()
+                lastjunk = Ref{Any}(nothing)
+                function leavejunk(cost, x_trial, unused...)
+                    k = unfixed isa Vector ? unfixed[1] : something(unfixed, 1)
+                    model.variables[k] = junk(model.variables[k])
+                    lastjunk[] = model.variables[k]
+                    return cost, 0
+                end
+                result = optimize!(model, OptimizationOptions(iterator=:levenbergmarquardt, maxiters=maxiters); formulation=:tall, numthreads=static(1), callback=leavejunk, unfixed)
+                @test NLLSModel.cost(model) ≈ result.bestcost rtol=1e-12
+                k = unfixed isa Vector ? unfixed[1] : something(unfixed, 1)
+                @test model.variables[k] != lastjunk[]
+            end
+        end
+        # Without it the model would be left on the last point evaluated: run the optimizer on the evaluators directly
+        m = posemodel()
+        f, _, resjac!, x0, J = tlnls(m; unfixed=[1, 3], numthreads=static(1), storage=:dense)
+        obj = JacobianObjective(f, TallExt.TallResJac(resjac!), J)
+        result = SecondOrderOptimization.optimize!(x0, obj, TallOptions)
+        resjac!(zeros(size(J, 1)), J, update!(deepcopy(x0), x0, fill(0.3, 4))) # A rejected trial, the last thing evaluated
+        @test !(NLLSModel.cost(m) ≈ result.bestcost)
+        syncvars!(m, resjac!, x0)
+        @test NLLSModel.cost(m) ≈ result.bestcost rtol=1e-12
+        # Each unfixed layout: one variable, a list, and all
+        for unfixed in (3, 2, [1, 4], nothing)
+            m = posemodel()
+            f, res!, resjac!, x0, J = tlnls(m; unfixed, numthreads=static(1), storage=:dense)
+            x = update!(deepcopy(x0), x0, fill(0.1, size(J, 2)))
+            for ev in (res!, resjac!)
+                resjac!(zeros(size(J, 1)), J, x0) # The model holds x0
+                syncvars!(m, ev, x)
+                f2, = tlnls(m; unfixed, numthreads=static(1), storage=:dense)
+                @test f2(x) ≈ f(x)
+                @test NLLSModel.cost(m) ≈ f(x)
+            end
+        end
+    end
+
+    @testset "unfixed = $name" for (name, unfixed, free) in (
+            ("nothing", nothing, 1:4),
+            ("an index", 4, [4]),
+            ("an index of a rotation", 2, [2]),
+            ("a list", [1, 3], [1, 3]),
+            ("a type", Vector{Float64}, [1, 4]),
+            ("a mask", Bool[0, 1, 1, 1], [2, 3, 4]))
+        model = posemodel()
+        start = deepcopy(model.variables)
+        result = optimize!(model, TallOptions; formulation=:tall, unfixed, numthreads=static(1))
+        for k in setdiff(1:4, free)
+            @test model.variables[k] == start[k] # Fixed variables are untouched, bit for bit
+        end
+        # The free variables are at the optimum: the same as the normal equations find
+        ref = deepcopy(posemodel())
+        optimize!(ref, TallOptions; unfixed, numthreads=static(1))
+        @test NLLSModel.cost(model) ≈ NLLSModel.cost(ref) rtol=1e-8
+        @test NLLSModel.cost(model) ≈ result.bestcost atol=1e-12
+        for k in free
+            @test isapprox(model.variables[k], ref.variables[k]; atol=1e-5)
+        end
+        @test any(k -> model.variables[k] != start[k], free)
+    end
+
+    @testset "keywords: used by :tall" begin
+        model = curvefit()
+        # numthreads
+        a, _ = optimize(model, TallOptions; formulation=:tall, numthreads=static(1), min_work=1)
+        b, _ = optimize(model, TallOptions; formulation=:tall, numthreads=static(4), min_work=1)
+        @test NLLSModel.cost(a) ≈ NLLSModel.cost(b) rtol=1e-10
+        # callback
+        calls = Ref(0)
+        counter(cost, unused...) = (calls[] += 1; (cost, 0))
+        optimize(model, TallOptions; formulation=:tall, numthreads=static(1), callback=counter)
+        @test calls[] > 0
+        # workspace: built for the same objective and reused
+        m = deepcopy(model)
+        f, _, resjac!, x0, J = tlnls(m; numthreads=static(1), storage=:dense)
+        obj = JacobianObjective(f, TallExt.TallResJac(resjac!), J)
+        ws = OptimizationWorkspace(x0, obj, TallOptions)
+        r1 = optimize!(deepcopy(model), TallOptions; formulation=:tall, numthreads=static(1), workspace=ws)
+        r2 = optimize!(deepcopy(model), TallOptions; formulation=:tall, numthreads=static(1), workspace=ws)
+        @test r1.bestcost == r2.bestcost
+        @test r1.bestcost ≈ optimize(model, TallOptions; formulation=:tall, numthreads=static(1))[2].bestcost rtol=1e-10
+        # min_work: the same answer however it is split
+        c, _ = optimize(model, TallOptions; formulation=:tall, numthreads=static(1), min_work=10^9)
+        @test NLLSModel.cost(c) ≈ NLLSModel.cost(a) rtol=1e-10
+    end
+
+    @testset "keywords: reduction" begin
+        # One variable: never partitioned, on either path, whatever the reduction (NTP2)
+        model = curvefit()
+        for reduction in (:auto, :none, :eliminate)
+            @test optimize!(deepcopy(model), TallOptions; formulation=:tall, reduction, numthreads=static(1)) isa OptimizationResult
+        end
+        # Several variables, none eliminable: :eliminate is the partition's error, from optimvars_nls, prefixed by the front door
+        err = try optimize!(posemodel(), TallOptions; formulation=:tall, reduction=:eliminate); nothing catch e e end
+        @test err isa ArgumentError
+        @test startswith(err.msg, "formulation = :tall:") && occursin("eliminable", err.msg)
+        # and the normal formulation still takes all three
+        @test optimize!(posemodel(), TallOptions; reduction=:none, numthreads=static(1)) isa OptimizationResult
+    end
+
+    @testset "keywords: min_work_cost, the floor of the cost function (A2)" begin
+        @testset "$(nvars) variable(s)" for nvars in (1, 2)
+            model = spymodel(400, nvars)
+            x = nvars == 1 ? 0.3 : [0.3, 0.0]
+            f0 = optimvars_nls(model; numthreads=static(4), min_work_cost=0)[1]
+            fbig = optimvars_nls(model; numthreads=static(4), min_work_cost=10^9)[1]
+            @test f0 isa (nvars == 1 ? NLLSModel.SingleVarCostFunc : NLLSModel.MultiVarCostFunc)
+            @test f0.work >= f0.min_work == 0 # Threaded
+            @test fbig.work < fbig.min_work   # Not
+            @test optimvars_nls(model)[1].min_work == NLLSModel.MIN_WORK_PER_THREAD_COST # Default unchanged
+            @test f0(x) ≈ fbig(x) rtol=1e-13
+            flat0 = flat_optimvars_nls(model; numthreads=static(4), min_work_cost=0)
+            flatbig = flat_optimvars_nls(model; numthreads=static(4), min_work_cost=10^9)
+            @test flat0.f(flat0.x0) ≈ flatbig.f(flatbig.x0) rtol=1e-13
+            if Threads.nthreads() > 1
+                @test offthread(() -> f0(x)) && !offthread(() -> fbig(x))
+                @test offthread(() -> flat0.f(flat0.x0)) && !offthread(() -> flatbig.f(flatbig.x0))
+            end
+        end
+        # nls_callbacks (internal) passes it on too
+        cb0 = NLLSModel.nls_callbacks(spymodel(400); numthreads=static(4), min_work_cost=0)
+        cbbig = NLLSModel.nls_callbacks(spymodel(400); numthreads=static(4), min_work_cost=10^9)
+        @test cb0.f([0.3]) ≈ cbbig.f([0.3]) rtol=1e-13
+        Threads.nthreads() > 1 && @test offthread(() -> cb0.f([0.3])) && !offthread(() -> cbbig.f([0.3]))
+        # optimize!: the residual and Jacobian fill held serial, so only the cost function can thread
+        model = spymodel(400)
+        solve(min_work_cost) = optimize(model, TallOptions; formulation=:tall, numthreads=static(4), min_work=10^9, min_work_cost)
+        @test NLLSModel.cost(solve(0)[1]) ≈ NLLSModel.cost(solve(10^9)[1]) rtol=1e-10
+        if Threads.nthreads() > 1
+            @test offthread(() -> solve(0)) && !offthread(() -> solve(10^9))
+        end
+    end
+
+    # NTP1: the front door hands over the Jacobian optimvars_nls chooses, dense or sparse
+    @testset "keywords: storage on :tall, $name" for (name, make) in (
+            ("curve fit, one Vector", () -> curvefit()),
+            ("several variables of different sizes", () -> first(mixedproblem())),
+            ("chain of Vectors", () -> first(chainproblem(6, 3, 5))),
+            ("rotation, Vector, SVector, Vector", () -> posemodel()),
+            ("Huber on every cost", () -> curvefit(huber=true, outliers=4)))
+        model = make()
+        c0 = NLLSModel.cost(model)
+        normal, _ = optimize(model, TallOptions; numthreads=static(1))
+        dense, rd = optimize(model, TallOptions; formulation=:tall, numthreads=static(1), storage=:dense)
+        sparse, rs = optimize(model, TallOptions; formulation=:tall, numthreads=static(1), storage=:sparse)
+        cn, cd, cs = NLLSModel.cost(normal), NLLSModel.cost(dense), NLLSModel.cost(sparse)
+        @test cs ≈ cd rtol=1e-8 atol=1e-10 * c0
+        @test cs ≈ cn rtol=1e-8 atol=1e-10 * c0
+        @test cs ≈ rs.bestcost rtol=1e-12
+        @test samevars(sparse, dense; atol=1e-5)
+    end
+
+    @testset "keywords: storage = :auto on :tall keeps optimvars_nls's choice" begin
+        small = curvefit()
+        big, _ = chainproblem(200, 3, 4) # 1 197 x 600, under 1% filled
+        # The layout's choice, unchanged: dense for a small Jacobian, sparse for a large one with little fill
+        @test tlnls(small; numthreads=static(1))[5] isa Matrix{Float64}
+        @test tlnls(big; numthreads=static(1))[5] isa SparseMatrixCSC{Float64, Int}
+        # The front door hands that choice over: the large one is solved sparse, under a cap too small for it dense
+        cap = 8 * 1197 * 600 - 1
+        tall, rt = optimize(big, TallOptions; formulation=:tall, numthreads=static(1), max_dense_bytes=cap)
+        normal, _ = optimize(big, TallOptions; numthreads=static(1))
+        @test NLLSModel.cost(tall) ≈ NLLSModel.cost(normal) rtol=1e-8 atol=1e-10 * NLLSModel.cost(big)
+        # Forced dense above the cap: an ArgumentError before anything is allocated, prefixed by the front door
+        err = try optimize!(deepcopy(big), TallOptions; formulation=:tall, numthreads=static(1), storage=:dense, max_dense_bytes=cap); nothing catch e e end
+        @test err isa ArgumentError && startswith(err.msg, "formulation = :tall:") && occursin("$(8 * 1197 * 600) bytes", err.msg)
+        @test_logs optimize!(deepcopy(small), TallOptions; formulation=:tall, numthreads=static(1), storage=:sparse)
+    end
+
+    @testset "kernels (R1): the kernel decides, there is no robust keyword" begin
+        @test_throws MethodError optimize!(curvefit(), TallOptions; formulation=:tall, robust=:irls)
+        @test_throws MethodError optimize!(curvefit(), TallOptions; robust=:none)
+        # NoRobust, Huber and Huber2o costs in one model reach the same optimum as the normal equations
+        model = Model(Vector{Float64}, Union{TlExp, TlRob{TlExp, typeof(HuberKernel(0.05))}, TlRob{TlExp, typeof(Huber2oKernel(0.05))}})
+        base = curvefit(outliers=4)
+        addvariable!(model, base.variables[1])
+        for (k, c) in enumerate(costlist(base))
+            addcost!(model, k % 3 == 0 ? c : k % 3 == 1 ? TlRob(c, HuberKernel(0.05)) : TlRob(c, Huber2oKernel(0.05)))
+        end
+        ok, ct, cn = sameoptimum(model)
+        @test ok
+        @test ct ≈ cn rtol=1e-8
+        # it is not the least-squares optimum
+        @test norm(optimize(model, TallOptions; formulation=:tall)[1].variables[1] - optimize(base, TallOptions; formulation=:tall)[1].variables[1]) > 1e-3
+        # Each kernel on its own
+        for h in (true, :second)
+            ok, = sameoptimum(curvefit(huber=h, outliers=4))
+            @test ok
+        end
+        # A fixed adaptive kernel works with no mode to choose
+        prob = Model(Union{ContaminatedGaussian{Float64}, Float64}, TlAdapt)
+        addvariable!(prob, ContaminatedGaussian(1.0, 5.0, 0.8))
+        addvariable!(prob, 2.0)
+        addcost!(prob, TlAdapt(SVector(1, 2)))
+        out, res = optimize(prob, TallOptions; formulation=:tall, unfixed=2, numthreads=static(1))
+        @test out.variables[2] ≈ 1.0 atol=1e-6
+    end
+
+    @testset "unsupported models fail clearly, naming the tall formulation" begin
+        # A cost that is not a residual
+        model = Model(Vector{Float64}, TlCost)
+        addvariable!(model, [1.0, 2.0])
+        addcost!(model, TlCost(1))
+        err = try optimize!(model, TallOptions; formulation=:tall); nothing catch e e end
+        @test err isa ArgumentError
+        @test occursin("tall", err.msg) && occursin("AbstractResidual", err.msg)
+        # An unfixed adaptive kernel
+        prob = Model(Union{ContaminatedGaussian{Float64}, Float64}, TlAdapt)
+        addvariable!(prob, ContaminatedGaussian(1.0, 5.0, 0.8))
+        addvariable!(prob, 2.0)
+        addcost!(prob, TlAdapt(SVector(1, 2)))
+        err = try optimize!(prob, TallOptions; formulation=:tall); nothing catch e e end
+        @test err isa ArgumentError
+        @test occursin("tall", err.msg) && occursin("adaptive", err.msg)
+        # The same models are fine on the normal equations' own terms (the error is the tall formulation's)
+        @test optimize!(prob, TallOptions; unfixed=2, numthreads=static(1)) isa OptimizationResult
+    end
+
+    @testset "too large for a dense Jacobian: storage = :dense throws before allocating, :auto goes sparse" begin
+        # 20000 residuals by 3 variables: 480 kB if dense
+        model = curvefit(n=20000)
+        @test_throws ArgumentError optimize!(deepcopy(model), TallOptions; formulation=:tall, storage=:dense, max_dense_bytes=1000)
+        err = try optimize!(deepcopy(model), TallOptions; formulation=:tall, storage=:dense, max_dense_bytes=1000); nothing catch e e end
+        @test occursin("20000×3", err.msg) && occursin("dense", err.msg) && occursin("1000", err.msg) && occursin("tall", err.msg)
+        m = deepcopy(model)
+        alloc = @allocated try optimize!(m, TallOptions; formulation=:tall, storage=:dense, max_dense_bytes=1000) catch end
+        @test alloc < 50_000
+        # Under :auto the same cap gives a sparse Jacobian, and the solve goes ahead
+        @test tlnls(model; numthreads=static(1), max_dense_bytes=1000)[5] isa SparseMatrixCSC
+        @test optimize!(deepcopy(model), TallOptions; formulation=:tall, numthreads=static(1), max_dense_bytes=1000) isa OptimizationResult
+        # The limit counts only the unfixed variables, and allows exactly its size
+        big = posemodel()
+        n = 8 * NLLSModel.nresiduals(big) * 9 # 3 + 3 + 2 + 1 degrees of freedom
+        @test_throws ArgumentError optimize!(deepcopy(big), TallOptions; formulation=:tall, numthreads=static(1), storage=:dense, max_dense_bytes=n - 1)
+        @test optimize!(deepcopy(big), TallOptions; formulation=:tall, numthreads=static(1), storage=:dense, max_dense_bytes=n - 1, unfixed=[1, 2]) isa OptimizationResult
+        @test optimize!(deepcopy(big), TallOptions; formulation=:tall, numthreads=static(1), storage=:dense, max_dense_bytes=n) isa OptimizationResult
+    end
+
+    @testset "a linsolver the optimizer rejects; gradient descent it accepts" begin
+        model = curvefit()
+        # A linsolver not in the table: :cholesky with a plain Jacobian
+        options = OptimizationOptions(iterator=:levenbergmarquardt, linsolver=:cholesky)
+        err = try optimize!(deepcopy(model), options; formulation=:tall, numthreads=static(1)); nothing catch e e end
+        @test err isa ArgumentError
+        # It is fine for the normal equations
+        @test optimize!(deepcopy(model), options; numthreads=static(1)) isa OptimizationResult
+        # Gradient descent is accepted on the tall path (SecondOrderOptimization IT2), as on the normal one
+        c0 = NLLSModel.cost(model)
+        for formulation in (:tall, :normal)
+            m = deepcopy(model)
+            @test optimize!(m, OptimizationOptions(iterator=:gradientdescent); formulation, numthreads=static(1)) isa OptimizationResult
+            @test NLLSModel.cost(m) < c0
+        end
+    end
+
+    # Z3: iterators that linearize at the first trial evaluate resjac! at a point that may then be rejected; with the optimizer's
+    # current point being model.variables itself, that must not disturb it
+    @testset "rejected trials with $iterator reach the optimum of :normal" for (iterator, expect_rejection) in ((:levenbergmarquardt, true), (:levenbergmarquardt_dtd, true), (:dogleg, true), (:newton, false))
+        make() = (m = curvefit(outliers=2); m.variables[1] = [0.1, 6.0, -4.0]; m)
+        options = OptimizationOptions(iterator=iterator, maxiters=300)
+        normal, rn = optimize(make(), options; numthreads=static(1))
+        model = make()
+        start = deepcopy(model.variables)
+        tall, rt = optimize(model, options; formulation=:tall, numthreads=static(1))
+        # A trial that is evaluated by f rather than by the first-trial linearization has been rejected once
+        expect_rejection && @test rt.costcomputations > 0
+        @test model.variables == start
+        @test NLLSModel.cost(tall) ≈ rt.bestcost rtol=1e-12
+        @test NLLSModel.cost(tall) ≈ NLLSModel.cost(normal) rtol=1e-8
+        # With the variable alone in a list of variables (so x0 is model.variables) and the normal one
+        multi = Model(Vector{Float64}, Union{TlExp, Tgt{Vector{Float64}}})
+        base = make()
+        addvariable!(multi, base.variables[1]); addvariable!(multi, [0.7])
+        foreach(c -> addcost!(multi, TlExp(c.t, c.y, 1)), costlist(base))
+        addcost!(multi, Tgt([0.2], 2))
+        nn, _ = optimize(multi, options; numthreads=static(1))
+        rr = optimize!(multi, options; formulation=:tall, numthreads=static(1))
+        @test NLLSModel.cost(multi) ≈ rr.bestcost rtol=1e-12
+        @test NLLSModel.cost(multi) ≈ NLLSModel.cost(nn) rtol=1e-8
+        expect_rejection && @test rr.costcomputations > 0
+    end
+
+    @testset "optimize leaves the original model unchanged" begin
+        for make in (curvefit, rotproblem, posemodel)
+            model = make()
+            start = deepcopy(model.variables)
+            c0 = NLLSModel.cost(model)
+            solved, result = optimize(model, TallOptions; formulation=:tall, numthreads=static(1))
+            @test model.variables == start # Bit for bit
+            @test NLLSModel.cost(model) == c0
+            @test solved !== model
+            @test NLLSModel.cost(solved) ≈ result.bestcost atol=1e-12
+            @test NLLSModel.cost(solved) < c0
+        end
+        model, _ = singleproblem(SVector{3, Float64}, 3, 9)
+        start = model.variables[1]
+        solved, result = optimize(model, TallOptions; formulation=:tall)
+        @test model.variables[1] === start
+    end
+
+    @testset "threads: the same result however many" begin
+        model = posemodel()
+        a, ra = optimize(model, TallOptions; formulation=:tall, numthreads=static(1), min_work=1)
+        b, rb = optimize(model, TallOptions; formulation=:tall, numthreads=static(Threads.nthreads()), min_work=1)
+        @test NLLSModel.cost(a) ≈ NLLSModel.cost(b) rtol=1e-10
+        @test samevars(a, b; atol=1e-8)
+    end
+
+    @testset "the optimizer's own types satisfy the evaluator (T3)" begin
+        model = posemodel()
+        f, _, resjac!, x0, J = tlnls(model; numthreads=static(1), storage=:dense)
+        w = TallExt.TallResJac(resjac!)
+        m = size(J, 1)
+        @test J isa Matrix{Float64}
+        r = zeros(m) # The optimizer's own buffers: a Vector{Float64} and a Matrix{Float64}
+        Jb = zeros(m, size(J, 2))
+        c = w(r, Jb, x0)
+        # The wrapper does not fill J first (prezeroed = true: the structural zeros are in place): garbage outside the Jacobian's
+        # structure is left alone
+        Jg1, Jg2 = fill(1.0, size(Jb)), fill(2.0, size(Jb))
+        @test w(zeros(m), Jg1, x0) == c
+        w(zeros(m), Jg2, x0)
+        untouched = (Jg1 .== 1.0) .& (Jg2 .== 2.0)
+        @test any(untouched)
+        @test Jg1[.!untouched] ≈ Jb[.!untouched]
+        @test all(iszero, Jb[untouched])
+        # The evaluator itself zeroes unless told not to
+        Jz = fill(1.0, size(Jb))
+        @test resjac!(zeros(m), Jz, x0) == c
+        @test Jz == Jb
+        @test (@inferred TallExt.TallResJac{typeof(resjac!)}(resjac!)) isa TallExt.TallResJac
+        @test isconcretetype(typeof(w))
+    end
+end

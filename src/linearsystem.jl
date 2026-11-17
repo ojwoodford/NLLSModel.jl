@@ -1,5 +1,3 @@
-using SparseArrays, Static, StaticArrays, LinearAlgebra
-
 struct LinearSystem{F, V}
     x::F
     ls::V
@@ -83,10 +81,10 @@ struct UniVariateLSstatic_x{N}
     end
 end
 
-UniVariateLSsingle = Union{LinearSystem{UniVariateLSdynamic_x, UniVariateLSdynamic_ls}, LinearSystem{UniVariateLSstatic_x{N}, UniVariateLSstatic_ls{N, N2}} where {N, N2}}
-UniVariateLSdynamic = Union{LinearSystem{UniVariateLSdynamic_x, UniVariateLSdynamic_ls}, LinearSystemShared{UniVariateLSdynamic_x, UniVariateLSdynamic_ls, M} where M}
-UniVariateLSstatic = Union{LinearSystem{UniVariateLSstatic_x{N}, UniVariateLSstatic_ls{N, N2}} where {N, N2}, LinearSystemShared{UniVariateLSstatic_x{N}, UniVariateLSstatic_ls{N, N2}, M} where {N, N2, M}}
-UniVariateLS = Union{UniVariateLSdynamic, UniVariateLSstatic}
+const UniVariateLSsingle = Union{LinearSystem{UniVariateLSdynamic_x, UniVariateLSdynamic_ls}, LinearSystem{UniVariateLSstatic_x{N}, UniVariateLSstatic_ls{N, N2}} where {N, N2}}
+const UniVariateLSdynamic = Union{LinearSystem{UniVariateLSdynamic_x, UniVariateLSdynamic_ls}, LinearSystemShared{UniVariateLSdynamic_x, UniVariateLSdynamic_ls, M} where M}
+const UniVariateLSstatic = Union{LinearSystem{UniVariateLSstatic_x{N}, UniVariateLSstatic_ls{N, N2}} where {N, N2}, LinearSystemShared{UniVariateLSstatic_x{N}, UniVariateLSstatic_ls{N, N2}, M} where {N, N2, M}}
+const UniVariateLS = Union{UniVariateLSdynamic, UniVariateLSstatic}
 
 # Multi-variate linear system
 struct MultiVariateLSsparse_x
@@ -95,11 +93,10 @@ struct MultiVariateLSsparse_x
     boffsets::Vector{Int} # One per block in b
     hessian::SparseMatrixCSC{Float64, Int} # Storage for sparse hessian
     sparseindices::Vector{Int}
-    diag_inds::Vector{Int}
 end
 
 struct MultiVariateLSsparse_ls
-    A::BlockSparseMatrix{Float64}
+    A::SparseBlockLinearSystem{Float64}
     b::Vector{Float64}
 end
 
@@ -109,47 +106,55 @@ struct MultiVariateLSdense_x
     boffsets::Vector{Int} # One per block in b
 end
 
-struct MultiVariateLSdense_ls
-    A::BlockDenseMatrix{Float64}
+struct MultiVariateLSdense_ls{M<:AbstractMatrix{Float64}}
+    A::DenseBlockLinearSystem{Float64, M}
+    b::Vector{Float64}
+end
+
+# Schur linear system
+struct MultiVariateLSSchur_x
+    x::Vector{Float64}
+    blockindices::Vector{UInt}
+    boffsets::Vector{Int}
+    structure::SchurStructure
+    unfixed_inds::Vector{Int}
+end
+
+struct MultiVariateLSSchur_ls{BType}
+    A::SchurBlockHessian{Float64, BType}
     b::Vector{Float64}
 end
 
 const MultiVariateLSsparse = Union{LinearSystem{MultiVariateLSsparse_x, MultiVariateLSsparse_ls}, LinearSystemShared{MultiVariateLSsparse_x, MultiVariateLSsparse_ls, M} where M}
-const MultiVariateLSdense = Union{LinearSystem{MultiVariateLSdense_x, MultiVariateLSdense_ls}, LinearSystemShared{MultiVariateLSdense_x, MultiVariateLSdense_ls, M} where M}
-const MultiVariateLSsingle = Union{LinearSystem{MultiVariateLSsparse_x, MultiVariateLSsparse_ls}, LinearSystem{MultiVariateLSdense_x, MultiVariateLSdense_ls}}
-const MultiVariateLS = Union{MultiVariateLSsparse, MultiVariateLSdense}
+const MultiVariateLSdense = Union{LinearSystem{MultiVariateLSdense_x, <:MultiVariateLSdense_ls}, LinearSystemShared{MultiVariateLSdense_x, <:MultiVariateLSdense_ls, M} where M}
+const MultiVariateLSSchur{BType} = Union{LinearSystem{MultiVariateLSSchur_x, MultiVariateLSSchur_ls{BType}}, LinearSystemShared{MultiVariateLSSchur_x, MultiVariateLSSchur_ls{BType}, M} where M}
+const MultiVariateLSsingle = Union{LinearSystem{MultiVariateLSsparse_x, MultiVariateLSsparse_ls}, LinearSystem{MultiVariateLSdense_x, <:MultiVariateLSdense_ls}, LinearSystem{MultiVariateLSSchur_x, <:MultiVariateLSSchur_ls}}
+const MultiVariateLS = Union{MultiVariateLSsparse, MultiVariateLSdense, MultiVariateLSSchur}
 
-function MultiVariateLSsparse(A::BlockSparseMatrix, blockindices, storehessian=true)
+function MultiVariateLSsparse(A::SparseBlockLinearSystem, blockindices, storehessian=true)
     @assert A.rowblocksizes == A.columnblocksizes
     boffsets = computestartindices(A.rowblocksizes)
     blen = boffsets[end] + A.rowblocksizes[end] - 1
     if storehessian
         x = Vector{Float64}(undef, blen)
-        sparseindices = makesparseindices(A, true)
-        hessian = SparseMatrixCSC{Float64, Int}(sparseindices.m, sparseindices.n, sparseindices.colptr, sparseindices.rowval, Vector{Float64}(undef, length(sparseindices.nzval)))
-        sparseindices = sparseindices.nzval
-        diag_inds = find_diag_inds(hessian)
+        hessian, sparseindices = sparse_with_map(A; symmetric=true)
     else
         x = Vector{Float64}(undef, 1)
         sparseindices = Vector{Int}()
         hessian = spzeros(1, 1)
-        diag_inds = Vector{Int}()
     end
     return LinearSystem(
-        MultiVariateLSsparse_x(x, blockindices, boffsets, hessian, sparseindices, diag_inds),
+        MultiVariateLSsparse_x(x, blockindices, boffsets, hessian, sparseindices),
         MultiVariateLSsparse_ls(A, zeros(Float64, blen))
     )
 end
 
-function MultiVariateLSsparse(A::BlockSparseMatrix, b, x, blockindices, boffsets, hessian, sparseindices, diag_inds::Vector{Int}=find_diag_inds(hessian))
+function MultiVariateLSsparse(A::SparseBlockLinearSystem, b, x, blockindices, boffsets, hessian, sparseindices)
     return LinearSystem(
-        MultiVariateLSsparse_x(x, blockindices, boffsets, hessian, sparseindices, diag_inds),
+        MultiVariateLSsparse_x(x, blockindices, boffsets, hessian, sparseindices),
         MultiVariateLSsparse_ls(A, b)
     )
 end
-MultiVariateLSsparse(A::BlockSparseMatrix, b, x, blockindices, boffsets, hessian, sparseindices, ::Nothing, diag_inds::Vector{Int}=find_diag_inds(hessian)) =
-    MultiVariateLSsparse(A, b, x, blockindices, boffsets, hessian, sparseindices, diag_inds)
-Base.getproperty(x::MultiVariateLSsparse_x, s::Symbol) = s === :ldlfac ? nothing : getfield(x, s)
 
 function MultiVariateLSdense(blocksizes, blockindices)
     boffsets = computestartindices(blocksizes)
@@ -158,27 +163,33 @@ function MultiVariateLSdense(blocksizes, blockindices)
     blen -= 1
     return LinearSystem(
         MultiVariateLSdense_x(Vector{Float64}(undef, blen), blockindices, boffsets),
-        MultiVariateLSdense_ls(BlockDenseMatrix{Float64}(boffsets), zeros(Float64, blen))
+        MultiVariateLSdense_ls(DenseBlockLinearSystem{Float64}(blocksizes), zeros(Float64, blen))
     )
 end
 
-function MultiVariateLSdense(A::BlockDenseMatrix, b, x, blockindices, boffsets)
+function MultiVariateLSdense(A::DenseBlockLinearSystem, b, x, blockindices, boffsets)
     return LinearSystem(
         MultiVariateLSdense_x(x, blockindices, boffsets),
         MultiVariateLSdense_ls(A, b)
     )
 end
 
-BlockMatrices.copy_structure(ls::UniVariateLSdynamic_ls) = UniVariateLSdynamic_ls(size(ls.A, 1))
-BlockMatrices.copy_structure(::UniVariateLSstatic_ls{N, N2}) where {N, N2} = UniVariateLSstatic_ls{N, N2}()
-BlockMatrices.copy_structure(ls::MultiVariateLSdense_ls) = MultiVariateLSdense_ls(copy_structure(ls.A), zeros(Float64, length(ls.b)))
-BlockMatrices.copy_structure(ls::MultiVariateLSsparse_ls) = MultiVariateLSsparse_ls(copy_structure(ls.A), zeros(Float64, length(ls.b)))
-BlockMatrices.copy_structure(ls::LinearSystem{F, V}) where {F, V} = LinearSystem{F, V}(ls.x, copy_structure(ls.ls))
-BlockMatrices.copy_structure(ls::LinearSystemShared{F, V, N}) where {F, V, N} = LinearSystemShared{F, V, N}(ls.x, SVector{N, V}(ntuple(i -> copy_structure(ls.ls[i]), Val(N))), MVector{N, Float64}(undef))
-
-# The blocks of one linear system with the unknowns (and solver state) of another
-sharex(ls::LinearSystem{F, V}, from) where {F, V} = LinearSystem{F, V}(from.x, ls.ls)
-sharex(ls::LinearSystemShared{F, V, N}, from) where {F, V, N} = LinearSystemShared{F, V, N}(from.x, ls.ls, ls.costs)
+BlockLinearSystems.copy_structure(ls::UniVariateLSdynamic_ls) = UniVariateLSdynamic_ls(size(ls.A, 1))
+BlockLinearSystems.copy_structure(::UniVariateLSstatic_ls{N, N2}) where {N, N2} = UniVariateLSstatic_ls{N, N2}()
+BlockLinearSystems.copy_structure(ls::MultiVariateLSdense_ls) = MultiVariateLSdense_ls(copy_structure(ls.A), zeros(Float64, length(ls.b)))
+BlockLinearSystems.copy_structure(ls::MultiVariateLSsparse_ls) = MultiVariateLSsparse_ls(copy_structure(ls.A), zeros(Float64, length(ls.b)))
+function BlockLinearSystems.copy_structure(ls::MultiVariateLSSchur_ls)
+    A = ls.A
+    R_copy = if A.R isa Matrix
+        similar(A.R)
+    else
+        copy_structure(A.R)
+    end
+    A_new = SchurBlockHessian(A.structure, R_copy, similar(A.E_data), similar(A.C_data))
+    return MultiVariateLSSchur_ls(A_new, zeros(Float64, length(ls.b)))
+end
+BlockLinearSystems.copy_structure(ls::LinearSystem{F, V}) where {F, V} = LinearSystem{F, V}(ls.x, copy_structure(ls.ls))
+BlockLinearSystems.copy_structure(ls::LinearSystemShared{F, V, N}) where {F, V, N} = LinearSystemShared{F, V, N}(ls.x, SVector{N, V}(ntuple(i -> copy_structure(ls.ls[i]), Val(N))), MVector{N, Float64}(undef))
 
 sharedlinearsystem(ls::LinearSystem, ::StaticInt{1}) = ls
 sharedlinearsystem(ls::LinearSystemShared, ::StaticInt) = ls
@@ -188,14 +199,33 @@ function sharedlinearsystem(ls::LinearSystem{F, V}, ::StaticInt{N}) where {F, V,
     return LinearSystemShared{F, V, N}(ls.x, buffers, costs)
 end
 sharedlinearsystem(ls, n::Integer) = sharedlinearsystem(ls, static(n))
-sharedlinearsystem(ls, problem, ::StaticInt{1}) = ls
-sharedlinearsystem(ls, problem, numthreads::StaticInt) = sharedlinearsystem(ls, countcosts(costnum, problem.costs) >= 10000 ? numthreads : static(1))
-sharedlinearsystem(ls, problem, options) = sharedlinearsystem(ls, problem, options.numthreads)
+
+# Each extra thread needs a full copy of the linear system (a dense Hessian is O(n^2)). Cap the memory the extra copies
+# may use, reducing the number of threads that linearize rather than allocating without bound.
+const MAX_THREAD_COPY_BYTES = 2^30
+threadcopylimit(ls, nthreads::Integer, budget::Integer=MAX_THREAD_COPY_BYTES) = clamp(1 + budget ÷ max(1, Base.summarysize(ls.ls)), 1, nthreads)
+# `work` is the normal-fill estimate of `workestimates`: one copy per thread of `normalthreads`, capped by the memory budget
+function sharedlinearsystem(ls, work::Integer, numthreads::StaticInt, costsplit::Integer, min_work=MIN_WORK_PER_THREAD_NORMAL)
+    n = normalthreads(work, min_work, dynamic(numthreads), costsplit)
+    n == 1 && return ls
+    return sharedlinearsystem(ls, static(threadcopylimit(ls, n)))
+end
 
 add!(dest::UniVariateLSdynamic_ls, src::UniVariateLSdynamic_ls) = (dest.A .+= src.A; dest.b .+= src.b; nothing)
 add!(dest::UniVariateLSstatic_ls, src::UniVariateLSstatic_ls) = (dest.A .+= src.A; dest.b .+= src.b; nothing)
 add!(dest::MultiVariateLSdense_ls, src::MultiVariateLSdense_ls) = (dest.A.data .+= src.A.data; dest.b .+= src.b; nothing)
 add!(dest::MultiVariateLSsparse_ls, src::MultiVariateLSsparse_ls) = (dest.A.data .+= src.A.data; dest.b .+= src.b; nothing)
+function add!(dest::MultiVariateLSSchur_ls, src::MultiVariateLSSchur_ls)
+    dest.b .+= src.b
+    if dest.A.R isa Matrix
+        dest.A.R .+= src.A.R
+    else
+        dest.A.R.data .+= src.A.R.data
+    end
+    dest.A.E_data .+= src.A.E_data
+    dest.A.C_data .+= src.A.C_data
+    return nothing
+end
 add!(dest::LinearSystem, src::LinearSystem) = add!(dest.ls, src.ls)
 
 function updatesymlinearsystem!(linsystem::UniVariateLS, g, H, unusedargs...)
@@ -210,7 +240,7 @@ function updatesymA!(A, a, vars, varflags, blockindices)
     @unroll for i in 1:MAX_ARGS
         if i <= length(vars) && bitiset(varflags, i)
             nvi = nvars(vars[i])
-            rangei = SR(1, nvi) .+ loffseti
+            rangei = blockrange(loffseti + static(1), nvi)
             loffseti += nvi
             @inbounds block(A, blockindices[i], blockindices[i], nvi, nvi) .+= view(a, rangei, rangei)
 
@@ -218,7 +248,7 @@ function updatesymA!(A, a, vars, varflags, blockindices)
             @unroll for j in 1:i-1
                 if bitiset(varflags, j)
                     @inbounds nvj = nvars(vars[j])
-                    rangej = SR(1, nvj) .+ loffsetj
+                    rangej = blockrange(loffsetj + static(1), nvj)
                     loffsetj += nvj
                     if @inbounds blockindices[i] >= blockindices[j] # Make sure the block matrix is lower triangular
                         @inbounds block(A, blockindices[i], blockindices[j], nvi, nvj) .+= view(a, rangei, rangej)
@@ -231,14 +261,13 @@ function updatesymA!(A, a, vars, varflags, blockindices)
     end
 end
 
-function updateb!(B, b, vars, varflags, boffsets, blockindices) 
+function updateb!(B, b, vars, varflags, boffsets, blockindices)
     # Update the blocks in the problem
     loffset = static(1)
     @unroll for i in 1:MAX_ARGS
         if i <= length(vars) && bitiset(varflags, i)
             nv = nvars(vars[i])
-            range = SR(0, nv-1)
-            @inbounds view(B, range .+ boffsets[blockindices[i]]) .+= view(b, range .+ loffset)
+            @inbounds view(B, blockrange(boffsets[blockindices[i]], nv)) .+= view(b, blockrange(loffset, nv))
             loffset += nv
         end
     end
@@ -247,6 +276,99 @@ end
 function updatesymlinearsystem!(linsystem::MultiVariateLS, g::AbstractVector, H::AbstractArray, vars, varflags, blockindices)
     updateb!(getb(linsystem), g, vars, varflags, linsystem.x.boffsets, blockindices)
     updatesymA!(getA(linsystem), H, vars, varflags, blockindices)
+end
+
+function updatesymschur!(H_schur::SchurBlockHessian{Float64}, g_full::Vector{Float64}, g::AbstractVector, H::AbstractArray, vars, varflags, boffsets, blockindices)
+    updateb!(g_full, g, vars, varflags, boffsets, blockindices)
+
+    structure = H_schur.structure
+    nrblocks = structure.nrblocks
+    eliminated_ptr = structure.eliminated_ptr
+    entry_retained = structure.entry_retained
+    coffsets = structure.coffsets
+    eoffsets = structure.eoffsets
+    boffsets_r = structure.boffsets_r
+
+    loffseti = static(0)
+    @unroll for i in 1:MAX_ARGS
+        if i <= length(vars) && bitiset(varflags, i)
+            bi = Int(blockindices[i])
+            nvi = nvars(vars[i])
+            rangei = blockrange(loffseti + static(1), nvi)
+            loffseti += nvi
+            ni = dynamic(nvi)
+
+            if bi <= nrblocks
+                if H_schur.R isa Matrix{Float64}
+                    ro = boffsets_r[bi]
+                    @inbounds for col in 1:ni, row in 1:ni
+                        H_schur.R[ro + row - 1, ro + col - 1] += H[rangei[row], rangei[col]]
+                    end
+                else
+                    @inbounds block(H_schur.R, bi, bi, nvi, nvi) .+= view(H, rangei, rangei)
+                end
+            else
+                e = bi - nrblocks
+                eo = eoffsets[e]
+                idx = eo
+                @inbounds for col in 1:ni, row in 1:ni
+                    H_schur.E_data[idx] += H[rangei[row], rangei[col]]
+                    idx += 1
+                end
+            end
+
+            loffsetj = static(0)
+            @unroll for j in 1:i-1
+                if bitiset(varflags, j)
+                    bj = Int(blockindices[j])
+                    nvj = nvars(vars[j])
+                    rangej = blockrange(loffsetj + static(1), nvj)
+                    loffsetj += nvj
+                    nj = dynamic(nvj)
+
+                    if bi <= nrblocks && bj <= nrblocks
+                        if H_schur.R isa Matrix{Float64}
+                            ro_i = boffsets_r[bi]
+                            ro_j = boffsets_r[bj]
+                            if bi <= bj
+                                @inbounds for col in 1:nj, row in 1:ni
+                                    H_schur.R[ro_i + row - 1, ro_j + col - 1] += H[rangei[row], rangej[col]]
+                                end
+                            else
+                                @inbounds for col in 1:ni, row in 1:nj
+                                    H_schur.R[ro_j + row - 1, ro_i + col - 1] += H[rangej[row], rangei[col]]
+                                end
+                            end
+                        else
+                            if bi >= bj
+                                @inbounds block(H_schur.R, bi, bj, nvi, nvj) .+= view(H, rangei, rangej)
+                            else
+                                @inbounds block(H_schur.R, bj, bi, nvj, nvi) .+= view(H, rangej, rangei)
+                            end
+                        end
+                    elseif bi <= nrblocks && bj > nrblocks
+                        e = bj - nrblocks
+                        c_idx = searchsortedfirst(@inbounds(view(entry_retained, eliminated_ptr[e]:(eliminated_ptr[e+1]-1))), bi) + eliminated_ptr[e] - 1
+                        co = coffsets[c_idx]
+                        @inbounds for col in 1:nj, row in 1:ni
+                            H_schur.C_data[co + (row - 1)*nj + col - 1] += H[rangei[row], rangej[col]]
+                        end
+                    elseif bi > nrblocks && bj <= nrblocks
+                        e = bi - nrblocks
+                        c_idx = searchsortedfirst(@inbounds(view(entry_retained, eliminated_ptr[e]:(eliminated_ptr[e+1]-1))), bj) + eliminated_ptr[e] - 1
+                        co = coffsets[c_idx]
+                        @inbounds for col in 1:ni, row in 1:nj
+                            H_schur.C_data[co + (row - 1)*ni + col - 1] += H[rangej[row], rangei[col]]
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+function updatesymlinearsystem!(linsystem::MultiVariateLSSchur, g::AbstractVector, H::AbstractArray, vars, varflags, blockindices)
+    updatesymschur!(getA(linsystem), getb(linsystem), g, H, vars, varflags, linsystem.x.boffsets, blockindices)
 end
 
 getgrad(ls::LinearSystem) = ls.ls.b
@@ -259,16 +381,14 @@ gethessian(::UniVariateLSdynamic_x, ls::UniVariateLSdynamic_ls) = ls.A
 gethessian(::UniVariateLSstatic_x, ls::UniVariateLSstatic_ls) = ls.A
 gethessian(::MultiVariateLSdense_x, ls::MultiVariateLSdense_ls) = symmetrifyfull(ls.A)
 function gethessian(x::MultiVariateLSsparse_x, ls::MultiVariateLSsparse_ls)
-    # Fill sparse hessian
-    @inbounds for (i, si) in enumerate(x.sparseindices)
-        x.hessian.nzval[i] = ls.A.data[si]
-    end
+    copyto!(x.hessian, ls.A, x.sparseindices)
     return x.hessian
 end
+gethessian(::MultiVariateLSSchur_x, ls::MultiVariateLSSchur_ls) = ls.A
 gethessian(linsystem) = getA(linsystem)
 gethessgrad(linsystem) = gethessian(linsystem), getgrad(linsystem)
 
-function BlockMatrices.zero!(linsystem::Union{LinearSystem, LinearSystemShared})
+function BlockLinearSystems.zero!(linsystem::Union{LinearSystem, LinearSystemShared})
     fill!(getb(linsystem), 0)
     zero!(getA(linsystem))
 end

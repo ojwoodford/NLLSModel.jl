@@ -16,13 +16,13 @@ In `NLLSModel.jl`, [`Model`](@ref) stores only the model data, using a zero-over
 - `varcostmap::SparseMatrixCSC{Bool, Int}`
 - `varcostmapvalid::Bool`
 
-All optimization scratch buffers (`variables`, `varnext`, `varbest`) live inside `SecondOrderOptimization.OptimizationInternal` and `OptimizeCache` (`OptimizationWorkspace`). For backward compatibility with existing callbacks in `NLLSsolver.jl`, accessing `problem.varnext` or `problem.varbest` inside an `optimize!` callback continues to work transparently.
+All optimization scratch buffers (`variables`, `varnext`, `varbest`) live inside `SecondOrderOptimization.OptimizationInternal` and `OptimizeCache` (`OptimizationWorkspace`). `problem.varnext` and `problem.varbest` no longer exist on `Model`; callbacks receive the trial point from the optimizer instead.
 
 ### 2. Decoupled Architecture & `optimvars`
 `NLLSModel.jl` and `SecondOrderOptimization.jl` do not depend on each other:
-- `NLLSModel.jl` provides [`optimvars`](@ref) returning `(f, fdf!, x0, H)` for any [`Model`](@ref).
-- `SecondOrderOptimization.jl` provides `optimize(f, fdf!, x0, options; H=H)` along with `OptimizationOptions`, `OptimizationResult`, `OptimizationIterator`, `OptimizationInternal`, and `OptimizationWorkspace`.
-- `NLLSsolver.jl` ties both packages together and provides `optimize!(problem, options)`, `optimizesingles!(problem, options)`, and the backward-compatible aliases (`NLLSOptions`, `NLLSResult`, `NLLSIterator`, `NLLSInternal`, `OptimizeCache`).
+- `NLLSModel.jl` provides [`optimvars`](@ref) returning `(f, fdf!, x0, H)` for any [`Model`](@ref), and, when `SecondOrderOptimization` is loaded, `optimize!(model, options)` and `optimize(model, options)`.
+- `SecondOrderOptimization.jl` provides `optimize!(x0, HessianObjective(f, fdf!; H), options)` and `optimize(x0, obj, options)` along with `OptimizationOptions`, `OptimizationResult`, `OptimizationIterator`, `OptimizationInternal`, and `OptimizationWorkspace`.
+- `NLLSsolver.jl` ties both packages together for its own problem type and provides `optimize!(problem, options)`, `optimizesingles!(problem, options)`, and the backward-compatible aliases (`NLLSOptions`, `NLLSResult`, `NLLSIterator`, `NLLSInternal`, `OptimizeCache`).
 
 ### 3. Separation of Concerns
-If you want to optimize a smooth scalar objective `f(x)` with an in-place gradient/Hessian function `fdf!(g, H, x)` without constructing a `Model` factor graph, you can now use `SecondOrderOptimization.optimize(f, fdf!, x0, options)` directly.
+If you want to optimize a smooth scalar objective `f(x)` with an in-place gradient/Hessian function `fdf!(g, H, x)` without constructing a `Model` factor graph, you can now use `SecondOrderOptimization.optimize(x0, HessianObjective(f, fdf!), options)` directly.

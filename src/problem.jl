@@ -1,9 +1,6 @@
-using Static, SparseArrays
-import OptimizationVariableInterface: nvars
-
-mutable struct Model{VarTypes, CostTypes, CostVecs}
+mutable struct Model{VarTypes, CostTypes, CostVecs, TCT<:Tuple}
     # User provided
-    costs::CostStruct{CostTypes, CostVecs} # Set of cost and residual blocks that define the problem
+    costs::CostStruct{TCT, CostVecs} # Set of cost and residual blocks that define the problem
     variables::Vector{VarTypes}  # Current state of variables in use by optimizer
 
     # Used internally
@@ -19,15 +16,15 @@ mutable struct Model{VarTypes, CostTypes, CostVecs}
     ) where {VarTypes, CostTypes}
         TCT = tupelize(CostTypes)
         costs isa CostStruct{TCT} || throw(ArgumentError("Expected costs of type CostStruct{$TCT}, got $(typeof(costs))"))
-        return new{VarTypes, TCT, typeof(costs.data)}(costs, vars, varcostmap, varcostmapvalid)
+        return new{VarTypes, CostTypes, typeof(costs.data), TCT}(costs, vars, varcostmap, varcostmapvalid)
     end
-    function Model{VarTypes, CostTypes, CostVecs}(
+    function Model{VarTypes, CostTypes, CostVecs, TCT}(
         vars::Vector{VarTypes},
-        costs::CostStruct{CostTypes, CostVecs},
+        costs::CostStruct{TCT, CostVecs},
         varcostmap = spzeros(Bool, 0, 0),
         varcostmapvalid = false
-    ) where {VarTypes, CostTypes, CostVecs}
-        return new{VarTypes, CostTypes, CostVecs}(costs, vars, varcostmap, varcostmapvalid)
+    ) where {VarTypes, CostTypes, CostVecs, TCT}
+        return new{VarTypes, CostTypes, CostVecs, TCT}(costs, vars, varcostmap, varcostmapvalid)
     end
 end
 
@@ -35,51 +32,22 @@ Model(::Type{VT}, ::Type{CT}) where {VT, CT} = Model{VT, CT}()
 Model(v::Vector{VT}, ::Type{CT}) where {VT, CT} = Model{VT, CT}(v)
 Model(v::Vector{VT}, r::CostStruct{CT}) where {VT, CT} = Model{VT, CT}(v, r)
 
-function Base.getproperty(p::Model, s::Symbol)
-    if s === :varnext
-        if haskey(task_local_storage(), :nlls_varnext)
-            val = task_local_storage(:nlls_varnext)
-            if val isa Vector
-                return val
-            else
-                v = copy(getfield(p, :variables))
-                unfixed = get(task_local_storage(), :nlls_unfixed, 1)
-                v[unfixed] = val
-                return v
-            end
-        end
-        return getfield(p, :variables)
-    elseif s === :varbest
-        if haskey(task_local_storage(), :nlls_varbest)
-            val = task_local_storage(:nlls_varbest)
-            if val isa Vector
-                return val
-            else
-                v = copy(getfield(p, :variables))
-                unfixed = get(task_local_storage(), :nlls_unfixed, 1)
-                v[unfixed] = val
-                return v
-            end
-        end
-        return getfield(p, :variables)
-    end
-    return getfield(p, s)
-end
-
 function Base.show(io::IO, x::Model)
-    print(io, "Model with ", length(x.variables), " variable blocks of total dimension ", UInt(sum(nvars, x.variables)), 
+    print(io, "Model with ", length(x.variables), " variable blocks of total dimension ", UInt(sum(nvars, x.variables; init=0)), 
            ",\n             and ", countcosts(costnum, x.costs), " residual blocks of total dimension ", countcosts(resnum, x.costs), ".")
 end
 
+# The costs of `incosts` that touch an unfixed variable (`unfixed` as `convertunfixed` returns it: an index or a mask)
 function selectcosts!(outcosts::CostStruct, incosts::Vector, unfixed::Integer)
-    selectcosts!(outcosts, incosts, [i for (i, r) in enumerate(incosts) if in(unfixed, varindices(r))])
+    selectcostindices!(outcosts, incosts, [i for (i, r) in enumerate(incosts) if in(unfixed, varindices(r))])
 end
 
 function selectcosts!(outcosts::CostStruct, incosts::Vector, unfixed::BitVector)
-    selectcosts!(outcosts, incosts, [i for (i, r) in enumerate(incosts) if any(j -> unfixed[j], varindices(r))])
+    selectcostindices!(outcosts, incosts, [i for (i, r) in enumerate(incosts) if any(j -> unfixed[j], varindices(r))])
 end
 
-function selectcosts!(outcosts::CostStruct, incosts::Vector{T}, vec::Vector) where T
+# The costs of `incosts` at the cost indices `vec`
+function selectcostindices!(outcosts::CostStruct, incosts::Vector{T}, vec::Vector) where T
     outvec = empty!(get(outcosts, T))
     if !isempty(vec)
         append!(outvec, @inbounds(view(incosts, vec)))
@@ -88,6 +56,7 @@ end
 
 # Produce a subproblem containing only the relevant costs
 function subproblem(problem::Model{VT, CT}, unfixed) where {VT, CT}
+    unfixed = convertunfixed(unfixed, problem)
     coststruct = CostStruct{CT}()
     for costs in values(problem.costs)
         selectcosts!(coststruct, costs, unfixed)
@@ -95,7 +64,8 @@ function subproblem(problem::Model{VT, CT}, unfixed) where {VT, CT}
     return Model{VT, CT}(problem.variables, coststruct)
 end
 
-function selectcosts!(outcosts::CostStruct, incosts::Vector{T}, costindices, lastcost, index) where T
+# The costs at the sorted, in-range indices `costindices` into all costs of `incosts`, in order (starting from `index`)
+function selectcostindices!(outcosts::CostStruct, incosts::Vector{T}, costindices, lastcost, index) where T
     tocostvec = get!(outcosts, T)::Vector{T}
     empty!(tocostvec)
     firstind = lastcost
@@ -108,29 +78,38 @@ function selectcosts!(outcosts::CostStruct, incosts::Vector{T}, costindices, las
     return lastcost, index
 end
 
-function selectcosts!(outcosts::CostStruct, incosts::CostStruct, costindices)
+function selectcostindices!(outcosts::CostStruct, incosts::CostStruct, costindices)
     lastcost = 0
     index = 1
     for costs in values(incosts)
-        lastcost, index = selectcosts!(outcosts, costs, costindices, lastcost, index)
+        lastcost, index = selectcostindices!(outcosts, costs, costindices, lastcost, index)
     end
 end
 
 function subproblem!(to::Model{VT, CT}, from::Model{VT, CT}, costindices::AbstractVector) where {VT, CT}
-    selectcosts!(to.costs, from.costs, costindices)
+    issorted(costindices) || throw(ArgumentError("subproblem!: the cost indices must be sorted in ascending order"))
+    ncosts = countcosts(costnum, from.costs)
+    isempty(costindices) || (first(costindices) >= 1 && last(costindices) <= ncosts) ||
+        throw(ArgumentError("subproblem!: the cost indices must be between 1 and the number of costs, $ncosts"))
+    selectcostindices!(to.costs, from.costs, costindices)
     return to
 end
 
+# A user's cost or variable that breaks a rule of addcost! or addvariable!
+inputerror(msg, ::Type{T}, what) where T = throw(ArgumentError("$msg ($what of type $T)"))
+
 function addcost!(problem::Model, cost::Cost) where Cost <: AbstractCost
     N = ndeps(cost)
-    @assert isa(N, StaticInt) && N > 0 && N <= MAX_ARGS "Problem with ndeps()"
-    @assert length(varindices(cost)) == N "Problem with varindices()"
+    isa(N, StaticInt) && N > 0 && N <= MAX_ARGS || inputerror("Problem with ndeps()", Cost, "cost")
+    length(varindices(cost)) == N || inputerror("Problem with varindices()", Cost, "cost")
+    allunique(varindices(cost)) || inputerror("A cost cannot depend on the same variable more than once", Cost, "cost")
     vars = getvars(cost, problem.variables)
-    @assert isa(vars, Tuple) && isconcretetype(typeof(vars)) && length(vars) == N "getvars(::$(typeof(cost)), vars) should return a concretely typed tuple of length $(dynamic(N)), but returned $(typeof(vars))."
-    @assert (!(Cost <: AbstractAdaptiveResidual) || isa(vars[1], AbstractAdaptiveRobustifier)) "Adaptive residual without adaptive robustifier"
+    isa(vars, Tuple) && isconcretetype(typeof(vars)) && length(vars) == N ||
+        throw(ArgumentError("getvars(::$(typeof(cost)), vars) should return a concretely typed tuple of length $(dynamic(N)), but returned $(typeof(vars))."))
+    !(Cost <: AbstractAdaptiveResidual) || isa(vars[1], AbstractAdaptiveRobustifier) || inputerror("Adaptive residual without adaptive robustifier", Cost, "cost")
     if Cost <: AbstractResidual
         M = nres(cost)
-        @assert (isa(M, Integer) || isa(M, StaticInt)) && M > 0 "Problem with nres()"
+        (isa(M, Integer) || isa(M, StaticInt)) && M > 0 || inputerror("Problem with nres()", Cost, "cost")
     end
     push!(problem.costs, cost)
     problem.varcostmapvalid = false
@@ -139,7 +118,7 @@ end
 
 function addvariable!(problem::Model, variable)
     N = nvars(variable)
-    @assert (isa(N, Integer) || isa(N, StaticInt)) && N > 0 "Problem with nvars()"
+    (isa(N, Integer) || isa(N, StaticInt)) && N > 0 || inputerror("Problem with nvars()", typeof(variable), "variable")
     push!(problem.variables, variable)
     problem.varcostmapvalid = false
     return length(problem.variables)
@@ -195,28 +174,135 @@ function getvarcostmap(problem::Model)
     return problem.varcostmap
 end
 
-function reordercostsforschur!(problem::Model, schurvars)
-    schurruns = Dict{DataType, Vector{Int}}()
-    costvarmap = sparse(getvarcostmap(problem)')[:,schurvars]
-    schurvarpercost = sum(costvarmap; dims=2)
-    @assert all(x->(x<=1), schurvarpercost) "Each cost block can only depend on one schur variable at most"
-    schurvarpercost[schurvarpercost .> 0] = costvarmap.rowval
-    startind = 0
-    for costs in values(problem.costs)
-        if !isempty(costs)
-            schurvarpercostsubset = view(schurvarpercost, startind+1:startind+length(costs))
-            startind += length(costs)
-            sortedorder = sortperm(schurvarpercostsubset)
-            permute!(schurvarpercostsubset, sortedorder)
-            schurruns[typeof(costs[1])] = runlengthencodesortedints(schurvarpercostsubset)
-            permute!(costs, sortedorder)
-        end
-    end
-    problem.varcostmapvalid = false
-    return schurruns
-end
-
 costnum(vec::Vector)  = length(vec)
 costdeps(vec::Vector) = length(vec) != 0 ? length(vec) * ndeps(vec[1]) : 0
 resnum(vec::Vector)   = length(vec) != 0 ? (dynamic(is_static(nres(vec[1]))) ? length(vec) * nres(vec[1]) : sum(nres, vec; init=0)) : 0
 countcosts(fun, costs::CostStruct) = sum(fun, values(costs); init=0)
+nresiduals(problem::Model) = Int(countcosts(resnum, problem.costs))
+
+# The partition for elimination, or `nothing`: the one rule of the normal and the tall path. `:none` never eliminates;
+# `:auto` eliminates when the model has eliminable variables and the structure fits; `:eliminate` eliminates or throws.
+function schur_partition(problem::Model, unfixed::AbstractVector, reduction::Symbol)
+    reduction === :none && return nothing
+    has_elims = any(v -> dynamic(OptimizationVariableInterface.iseliminable(typeof(v))), problem.variables)
+    (reduction === :eliminate || has_elims) || return nothing
+    return partition_schur_problem(problem, unfixed, reduction === :eliminate)
+end
+
+"""
+    partition_schur_problem(problem::Model, unfixed::AbstractVector, explicit::Bool=false)
+
+Validate bipartite structure and perform two-pass variable ordering for Schur complement reduction.
+Returns named tuple `(unfixed_inds, extra_blocks, r_dims, e_dims, couplings, nrblocks, neblocks)`,
+where `extra_blocks` lists the pairs of retained blocks that share a cost (in the sorted retained ordering)
+or `nothing` if the problem does not have both retained and eliminable variables, or if its structure does not suit
+Schur reduction. With `explicit = true` (`reduction = :eliminate` in [`optimvars`](@ref)) a structure that does not fit
+throws an `ArgumentError` instead. Eliminated variables, like retained ones, may have any number of dimensions that
+BlockLinearSystems takes as a block; it checks the sizes, and its `ArgumentError` names the block.
+"""
+function partition_schur_problem(problem::Model, unfixed::AbstractVector, explicit::Bool=false)
+    unfixed_raw = findall(unfixed)
+    nblocks = length(unfixed_raw)
+    nblocks > 1 || return nothing
+    # Only throw if elimination was explicitly requested; otherwise the caller falls back to no elimination
+
+    # 1. Identify eliminable variables using iseliminable trait
+    is_elim = [dynamic(OptimizationVariableInterface.iseliminable(typeof(problem.variables[i]))) for i in unfixed_raw]
+    nelim = count(is_elim)
+    nret = nblocks - nelim
+
+    if nelim == 0 || nret == 0
+        if explicit
+            throw(ArgumentError("Schur complement solver requires at least one retained and one eliminable variable (got $nret retained, $nelim eliminable)."))
+        end
+        return nothing
+    end
+
+    # 2. Structural Bipartite Validation
+    elim_set = Set(unfixed_raw[findall(is_elim)])
+    retained_set = Set(unfixed_raw[findall(!, is_elim)])
+
+    # Blocks of any size BlockLinearSystems takes (it checks them), eliminated or retained
+    block_sizes = [block_dimension(problem.variables[i]) for i in unfixed_raw]
+
+    # Map from original variable index to retained block index (1:nret)
+    retained_raw_list = unfixed_raw[findall(!, is_elim)]
+    retained_map = Dict{Int, Int}(var_idx => i for (i, var_idx) in enumerate(retained_raw_list))
+
+    couplings_dict = Dict{Int, Vector{Int}}()
+    for var_idx in elim_set
+        couplings_dict[var_idx] = Int[]
+    end
+
+    # Pairs of retained variables that share a cost (they need a slot in the reduced system's pattern)
+    retained_pairs = Set{Tuple{Int, Int}}()
+
+    # Block-Diagonality Check: No residual connects > 1 unfixed eliminable variable
+    for costvec in values(problem.costs)
+        for cost in costvec
+            vinds = varindices(cost)
+            elims_in_cost = [v for v in vinds if v in elim_set]
+            if length(elims_in_cost) > 1
+                explicit || return nothing
+                throw(ArgumentError("Bipartite structure violation: cost block of type $(typeof(cost)) connects multiple eliminable variables $(elims_in_cost). Eliminable variables cannot couple to each other."))
+            elseif length(elims_in_cost) == 1
+                elim_var = elims_in_cost[1]
+                for v in vinds
+                    if v in retained_set
+                        push!(couplings_dict[elim_var], retained_map[v])
+                    end
+                end
+            end
+            retained_in_cost = [retained_map[v] for v in vinds if v in retained_set]
+            for a in 2:length(retained_in_cost), b in 1:a-1
+                ra, rb = retained_in_cost[a], retained_in_cost[b]
+                push!(retained_pairs, (min(ra, rb), max(ra, rb)))
+            end
+        end
+    end
+
+    # Deduplicate the couplings of each eliminated variable
+    couplings = Vector{Vector{Int}}(undef, nblocks)
+    for (i, var_idx) in enumerate(unfixed_raw)
+        if is_elim[i]
+            couplings[i] = unique(couplings_dict[var_idx])
+        else
+            couplings[i] = Int[]
+        end
+    end
+
+    # 3. Two-pass variable ordering using sort_schur_blocks from BlockLinearSystems
+    perm = sort_schur_blocks(is_elim, block_sizes, couplings)
+    unfixed_inds = unfixed_raw[perm]
+    sorted_sizes = block_sizes[perm]
+
+    r_dims = sorted_sizes[1:nret]
+    e_dims = sorted_sizes[nret+1:nblocks]
+
+    # Re-map the retained indices in the couplings to the new retained ordering
+    old_to_new_retained = Dict{Int, Int}()
+    for new_r in 1:nret
+        orig_var = unfixed_inds[new_r]
+        old_r = retained_map[orig_var]
+        old_to_new_retained[old_r] = new_r
+    end
+
+    couplings_remapped = Vector{Vector{Int}}(undef, nelim)
+    for e in 1:nelim
+        orig_idx = perm[nret + e]
+        orig_couplings = couplings[orig_idx]
+        couplings_remapped[e] = sort([old_to_new_retained[r] for r in orig_couplings if haskey(old_to_new_retained, r)])
+    end
+
+    extra_blocks = sort!([(old_to_new_retained[a], old_to_new_retained[b]) for (a, b) in retained_pairs])
+
+    return (
+        unfixed_inds = unfixed_inds,
+        extra_blocks = extra_blocks,
+        r_dims = r_dims,
+        e_dims = e_dims,
+        couplings = couplings_remapped,
+        nrblocks = nret,
+        neblocks = nelim
+    )
+end

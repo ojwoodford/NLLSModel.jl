@@ -13,9 +13,10 @@ Nonlinear Least Squares (NLLS) and factor-graph modeling in Julia.
 - **Heterogeneous Variables & Manifolds**: Mix Euclidean `Float64`, `SVector`, `Vector`, and custom, non-Euclidean manifold types (via `OptimizationVariableInterface.jl`) in a single problem.
 - **Automatic & Analytic Derivatives**: Uses `ForwardDiff.jl` automatically on `computeresidual`, or user-defined analytic Jacobians via `computeresjac`.
 - **Robust M-Estimators**: Built-in `HuberKernel`, `GemanMcclureKernel`, `Scaled`, and adaptive `ContaminatedGaussian`.
-- **Block-Dense & Block-Sparse Linear Algebra**: Uses `BlockDenseMatrix` and `BlockSparseMatrix` from `BlockMatrices.jl` for fast, zero-allocation Hessian assembly.
-- **Optimizer-Agnostic Problem Interface**: Extract `(f, fdf!, x0, H) = optimvars(problem, unfixed, numthreads)` for seamless integration with many second order optimizers, such as `SecondOrderOptimization.jl` or `Optim.jl`.
-- **NLPModels.jl Ecosystem**: Load `NLPModels` to wrap any `Model` as an `AbstractNLPModel` via `NLPLSModel(problem)` and solve with `JSOSolvers.jl` (`trunk`, `tron`), `Ipopt.jl`, or `Optim.jl`.
+- **Block-Dense & Block-Sparse Linear Systems**: Uses `DenseBlockLinearSystem` and `SparseBlockLinearSystem` from `BlockLinearSystems.jl` for fast, zero-allocation Hessian assembly.
+- **One-Call Solving**: `optimize!(model, options)` solves a `Model` with `SecondOrderOptimization.jl` and writes the solution back into it (load `SecondOrderOptimization`).
+- **Optimizer-Agnostic Problem Interface**: For advanced use, extract `(f, fdf!, x0, H) = optimvars(problem; unfixed=unfixed, numthreads=numthreads)` for integration with other second order optimizers, such as `Optim.jl`.
+- **NLPModels.jl Ecosystem**: Load `NLPModels` to wrap a `Model` as an `AbstractNLPModel` via `NLPLSModel(problem)` and solve with `JSOSolvers.jl` (`trunk`, `tron`), `Ipopt.jl`, or `Optim.jl`. These solvers see a flat vector, so every unfixed variable must pack into one and update by plain addition (numbers, `SVector`, `Vector`); manifold variables are solved with `optimize!`.
 
 ## Quick Start
 
@@ -37,9 +38,73 @@ problem = Model(SVector{2, Float64}, OffsetResidual)
 v = addvariable!(problem, SVector(0.0, 0.0))
 addcost!(problem, OffsetResidual(SVector(3.0, -2.0), v))
 
-f, fdf!, x0, H = optimvars(problem)
-x_opt, result = optimize(f, fdf!, x0, OptimizationOptions(iterator = :levenbergmarquardt); H = H)
+result = optimize!(problem, OptimizationOptions(iterator = :levenbergmarquardt))
+problem.variables[v] # The solution
 ```
+
+`optimize!(model, options)` is provided by a package extension, so it needs `using SecondOrderOptimization` (`BlockLinearSystems`
+is already a dependency of NLLSModel). `optimize(model, options)` leaves `model` alone and returns `(model_copy, result)`.
+Besides `formulation`, `callback` and `workspace`, it takes the keywords that `optimvars`, `optimvars_nls`,
+`flat_optimvars_nls`, `NLPLSModel` and `NLLSNLSModel` take too, with the same names, meanings and defaults: `unfixed` (an
+index, a type, a mask or a list of indices), `numthreads`, the layout choices `reduction` (`:auto`, `:none`, `:eliminate`:
+whether eliminable variables are eliminated by a Schur complement), `storage` (`:auto`, `:dense`, `:sparse`: storage of the
+matrix the solver receives) and `max_dense_bytes`, and the threading floors `min_work` and `min_work_cost`.
+
+### Tall formulation
+
+`optimize!(model, options; formulation = :tall)` solves the same model from the residual vector and the Jacobian instead of
+the normal equations. Each step is a QR factorization of the Jacobian (dense, or SuiteSparse's sparse QR), or with
+elimination a QR of each eliminated variable's rows and a solve of the reduced problem, so `JᵀJ` is not formed (only the
+reduced system's normal equations, when `linsolver` asks for them) and the conditioning is that of `J`, not its square. Use it when the model is ill conditioned (the normal equations stall above
+the minimum).
+
+```julia
+result = optimize!(problem, OptimizationOptions(iterator = :levenbergmarquardt); formulation = :tall)
+```
+
+What it supports, by the `reduction` and `storage` it ends up with and the `linsolver` given in `OptimizationOptions`:
+
+| `reduction` | `storage` | Jacobian prototype | `linsolver` |
+|:---|:---|:---|:---|
+| no elimination | dense | `Matrix{Float64}` | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
+| no elimination | sparse | `SparseMatrixCSC{Float64, Int}` | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
+| elimination | dense | `SchurBlockJacobian{Float64, Matrix{Float64}}` | `:auto`, `:qr`, `:cholesky`, `:ldl`; `:lsmr` (with Krylov.jl) |
+| elimination | sparse | `SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}` | `:auto`, `:qr`, `:cholesky`, `:ldl`; `:lsmr` (with Krylov.jl) |
+
+`reduction` and `storage` are as for the normal path, `:auto` included: elimination when the model has eliminable
+variables and the structure fits (on the tall path also: each eliminated variable is in a cost), the reduced system
+stored by the normal path's rule, and without elimination the Jacobian's storage from its fill, never dense above
+`max_dense_bytes`. The `linsolver` values are those SecondOrderOptimization accepts for each prototype: its rules,
+the linear system of each row and the iterators it takes are in the "Supported combinations" table of its
+`JacobianObjective` docstring. Any other combination is an `ArgumentError` before anything is evaluated.
+
+Also:
+
+- every cost must be a non-adaptive `AbstractResidual`, and no adaptive kernel variable may be unfixed. Otherwise the error
+  from `optimvars_nls` is rethrown with the prefix `formulation = :tall:`, as is a dense Jacobian forced above
+  `max_dense_bytes` (default 256 MB), raised before it is allocated;
+- `min_work` is the floor of the residual and Jacobian fill (the tables, with elimination), in its own work estimate,
+  with its own default;
+- there is no robust-mode keyword: each cost's kernel decides how its rows enter (see the robust-kernel tutorial), so
+  choosing `HuberKernel` or `Huber2oKernel` chooses first- or second-order treatment.
+
+`formulation` is a keyword of `optimize!` and `optimize` only. It is not an `OptimizationOptions` field and is not inferred from
+`linsolver`; a caller of `optimvars` or `optimvars_nls` chooses by which one they call.
+
+### Advanced use: `optimvars`
+
+`optimvars` is needed for a custom outer loop, for reusing an `OptimizationWorkspace` across solves with your own objective
+handling, or to feed the NLPModels wrapper or another optimizer. It returns the cost, the in-place gradient/Hessian
+evaluator, the starting variables and the Hessian prototype, which you wrap in a `HessianObjective`:
+
+```julia
+f, fdf!, x0, H = optimvars(problem)
+result = optimize!(x0, HessianObjective(f, fdf!; H), OptimizationOptions(iterator = :levenbergmarquardt))
+syncvars!(problem, fdf!, x0) # Write the solution back
+```
+
+`SecondOrderOptimization.optimize!` needs a mutable `x0`; a single variable of static size is immutable, so use
+`x, result = optimize(x0, HessianObjective(f, fdf!; H), options)` and `syncvars!(problem, fdf!, x)` there.
 
 ### Solving with NLPModels.jl and JSOSolvers
 
@@ -55,3 +120,41 @@ stats = trunk(nlp)
 # Synchronize the optimal variables back into the problem
 syncvars!(nlp, stats.solution)
 ```
+
+## Performance
+
+Everything computed for one cost is single-threaded, by design: all threading is in the outer loop over costs, so no
+BLAS call or threaded loop may run inside a cost. A cost with a very large single residual therefore does not get
+threaded, cache-blocked BLAS; if that matters, supply `computecostgradhess` by hand.
+
+For each squared cost, the gradient `g = dc * J'r` and Hessian `H = dc * J'J + c2 * (J'r)(J'r)'` are formed by one of
+the kernels below, chosen from the types involved (`nres` and `nvars` returning a `StaticInt` is what makes a size
+static). Rows 2 to 4 are tried in order; the first that applies runs:
+
+| # | Kernel | Used when |
+|---|---|---|
+| 1 | Full static multiply (`SMatrix`, unrolled) | every unfixed variable has a static size, totalling `n <= MAX_STATIC_VAR` (64); `nres` is a `StaticInt` `M`; and `M * n <= MAX_STATIC_JAC` (128) |
+| 2 | Static-column kernel | otherwise, when `nres` is a `StaticInt` `M <= MAX_STATIC_ROWS` (16) and the Jacobian is a `Matrix` of `Float32`/`Float64` |
+| 3 | Plain loops, single column | the Jacobian has one column (`n == 1`), whatever the types: a single long dot product, which plain loops do 2 to 4 times faster than `@turbo` for 100 to 1000 rows |
+| 4 | `@turbo` kernel | the Jacobian is a `Matrix` (or unit-range view) and the residual a `Vector` (or unit-range view) of the same `Float32`/`Float64` type, which is what dynamic autodiff produces, and a hand-written `(Vector, Matrix)` |
+| 5 | Plain loops (`@fastmath @inbounds @simd`) | anything `@turbo` cannot address: an `SVector` longer than `MAX_STATIC_ROWS`, or an `MVector` of any length, with a `Matrix` Jacobian (hand-written `computeresjac` only), an `Adjoint`, a strided view, mixed element types. Intended, not a gap: nothing is copied |
+
+On an Apple M1 Pro, `@turbo` was 1.2 to 2 times faster than the plain loops over most of the grid of 1 to 1000 rows and 1
+to 250 columns, and 22 to 34% faster on a linearization the kernels dominate. The plain loops
+carry a `NaN` or `Inf` in the Jacobian or residual through to the gradient and Hessian, as the optimizer's termination
+tests need.
+
+Costs not on the full static path use ForwardDiff with run-time sized buffers, cached per task. `MAX_STATIC_VAR`,
+`MAX_STATIC_JAC` and `MAX_STATIC_ROWS` are starting values that have not been tuned; they are constants in `src/NLLSModel.jl`.
+A scalar residual (`nres == 1`) with a run-time sized variable uses an outer-product kernel.
+
+Rules for your own `computeresidual`, `computeresjac` and `computecostgradhess`, because residuals are evaluated on
+several threads at once:
+
+- arrays they return must not be shared with other residuals;
+- the code must itself be single-threaded (no BLAS on large matrices, no `Threads.@threads`). If it needs BLAS, set
+  `BLAS.set_num_threads(1)` in the application.
+
+NLLSModel depends directly on `LoopVectorization.jl` (for the `@turbo` kernel), alongside `BlockLinearSystems.jl`,
+`FastNorm.jl`, `ForwardDiff.jl`, `Polyester.jl`, `OptimizationVariableInterface.jl` and `SIRBSDispatch.jl`.
+

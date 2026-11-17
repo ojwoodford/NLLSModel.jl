@@ -1,5 +1,5 @@
 using NLLSModel, Test, Static, StaticArrays, Random
-using OptimizationVariableInterface: update!
+using OptimizationVariableInterface: update!, update
 
 struct SimpleResidual <: NLLSModel.AbstractAdaptiveResidual
     data::Float64
@@ -17,7 +17,7 @@ function optimisekernel!(problem, vars=problem.variables)
     # Compute the squared errors
     squarederrors = [NLLSModel.computeresidual(res, vars[res.varind]) ^ 2 for res in get(problem.costs, SimpleResidual)]
     # Optimize the kernel parameters
-    vars[1] = NLLSModel.optimize(vars[1], squarederrors)
+    vars[1] = NLLSModel.optimizekernel(vars[1], squarederrors)
     return nothing
 end
 
@@ -40,7 +40,7 @@ end
 
     # Test optimvars with unfixed mask (optimizing only variables 2 and 3)
     unfixed = SVector(1, 2, 3) .> 1
-    f_sub, fdf_sub!, x0_sub, H_sub = optimvars(problem, unfixed)
+    f_sub, fdf_sub!, x0_sub, H_sub = optimvars(problem; unfixed=unfixed)
     @test length(x0_sub) == 2
     @test H_sub === nothing
     g = zeros(2)
@@ -55,4 +55,40 @@ end
     @test isapprox(NLLSModel.params(problem.variables[1]), SVector(1.0, 10.0, 0.8); rtol=0.1)
     @test isapprox(problem.variables[2], -1.0; rtol=0.1)
     @test isapprox(problem.variables[3], 1.0; rtol=0.1)
+end
+
+@testset "ContaminatedGaussian construction" begin
+    @test NLLSModel.params(ContaminatedGaussian(2.0, 5.0, 0.9)) ≈ SVector(2.0, 5.0, 0.9)
+    # Parameters are reordered so the first Gaussian is the narrowest
+    @test NLLSModel.params(ContaminatedGaussian(5.0, 2.0, 0.1)) ≈ SVector(2.0, 5.0, 0.9)
+end
+
+@testset "adaptive kernel derivatives (finite differences)" begin
+    res = SimpleResidual(0.7, 2)
+    kernel = ContaminatedGaussian(0.5, 5.0, 0.4)
+    mean = 0.1
+    f(x) = NLLSModel.computecost(res, update(kernel, x, 1), mean + x[4])
+    n = 4
+    h = 1e-5
+    e(i) = SVector{4, Float64}(ntuple(j -> j == i ? 1.0 : 0.0, 4))
+    gfd = [(f(h * e(i)) - f(-h * e(i))) / 2h for i in 1:n]
+    Hfd = [(f(h * e(i) + h * e(j)) - f(h * e(i) - h * e(j)) - f(-h * e(i) + h * e(j)) + f(-h * e(i) - h * e(j))) / 4h^2 for i in 1:n, j in 1:n]
+    # Kernel parameters and variable both optimized
+    c, g, H = NLLSModel.computecostgradhess(static(3), res, kernel, mean)
+    @test c ≈ f(zeros(SVector{4, Float64}))
+    @test g ≈ gfd rtol=1e-5
+    @test H[1:3, 1:3] ≈ Hfd[1:3, 1:3] rtol=1e-3 atol=1e-5   # kernel-kernel block
+    @test H[1:3, 4] ≈ Hfd[1:3, 4] rtol=1e-3 atol=1e-5       # cross block
+    # Kernel only
+    c, g, H = NLLSModel.computecostgradhess(static(1), res, kernel, mean)
+    @test g ≈ gfd[1:3] rtol=1e-5
+    @test H ≈ Hfd[1:3, 1:3] rtol=1e-3 atol=1e-5
+end
+
+@testset "ContaminatedGaussian EM degenerate input" begin
+    k = ContaminatedGaussian(0.5, 5.0, 0.4)
+    # Identical zero errors put all the weight in the narrow component; this must not produce NaN parameters
+    k2 = NLLSModel.optimizekernel(k, zeros(10))
+    @test all(isfinite, NLLSModel.params(k2))
+    @test all(isfinite, NLLSModel.params(NLLSModel.optimizekernel(k, Float64[])))
 end

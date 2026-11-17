@@ -23,6 +23,13 @@ function testrobustifier(kernel, costs, expected, firstorder=false)
 end
 
 @testset "robust.jl" begin
+    # islinearkernel (internal): NoRobust, and Scaled of a linear kernel with a finite non-negative height
+    @test NLLSModel.islinearkernel(NoRobust())
+    @test NLLSModel.islinearkernel(Scaled(NoRobust(), 2.0)) && NLLSModel.islinearkernel(Scaled(NoRobust(), 0.0))
+    @test NLLSModel.islinearkernel(Scaled(Scaled(NoRobust(), 2.0), 3.0))
+    @test !NLLSModel.islinearkernel(Scaled(NoRobust(), -1.0)) && !NLLSModel.islinearkernel(Scaled(NoRobust(), Inf))
+    @test !NLLSModel.islinearkernel(HuberKernel(1.0)) && !NLLSModel.islinearkernel(Scaled(HuberKernel(1.0), 2.0))
+    @test !(:islinearkernel in names(NLLSModel)) && (:islinear in names(NLLSModel))
     costs = SVector(0.0, 0.1, 0.3, 0.7, 1.3, 2.0, 5.0) .^ 2
 
     # No robustifier
@@ -50,6 +57,6 @@ end
     s1 = 0.6
     s2 = 9.0
     w = 0.7
-    out = -log.((w / s1) * exp.(costs / (-2 * s1^2)) .+ ((1 - w) / s2) * exp.(costs / (-2 * s2^2)))
+    out = -2 .* log.((w / s1) * exp.(costs / (-2 * s1^2)) .+ ((1 - w) / s2) * exp.(costs / (-2 * s2^2)))
     testrobustifier(ContaminatedGaussian(s1, s2, w), costs, out)
 end
