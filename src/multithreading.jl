@@ -1,12 +1,12 @@
 # Threading decisions. Each kind of work has its own estimate, the count of numbers it writes, summed over all costs, with
 # per cost `m` the residual length (1 for a general `AbstractCost`) and `n` the total dimension of its unfixed variables:
 #   cost evaluation                 m              (residual entries)                         per-thread floor `min_work_cost`
-#   tall fill, r and J              m * (n + 1)    (Jacobian entries and the residual)        per-thread floor `min_work`
-#   normal fill, JᵀJ and Jᵀr        m * n * (n + 1) (Jacobian entries times columns, Gram)    per-thread floor `min_work`
-# A general `AbstractCost` has a Hessian, so it counts as `m = 1` in the normal-fill form. The work of the residual
+#   Jacobian fill, r and J              m * (n + 1)    (Jacobian entries and the residual)        per-thread floor `min_work`
+#   Hessian fill, JᵀJ and Jᵀr        m * n * (n + 1) (Jacobian entries times columns, Gram)    per-thread floor `min_work`
+# A general `AbstractCost` has a Hessian, so it counts as `m = 1` in the Hessian-fill form. The work of the residual
 # function itself is not estimated. The estimates are computed once, at setup (`workestimates`), and each kind of work
 # is split over `threadcount(work, floor, numthreads, costsplit)` threads, decided then too: never more than the largest
-# number of costs of one type (`costsplit`), and for the normal fill at most `MAX_THREADS_HESSIAN` (`hessianthreads`).
+# number of costs of one type (`costsplit`), and for the Hessian fill at most `MAX_THREADS_HESSIAN` (`hessianthreads`).
 #
 # The defaults were measured on an Apple M1 Pro (8 performance and 2 efficiency cores), Julia 1.13.3, -t 8, 2026-11-14/15,
 # three runs. For each family and size every kind of work was timed on exactly 1 to 8 threads (minimum over repeated
@@ -16,12 +16,12 @@
 #
 #   kind          floor             bundle adjustment (2x12)          pose chain (6x12)
 #   cost          120               1.04x serial, 1.58-1.90x best     1.00-1.23x serial, 1.29-2.06x best
-#   tall fill     280               1.00x serial, 1.36-1.95x best     1.00-1.11x serial, 1.47-1.77x best
-#   normal fill   4000, at most 4   1.00x serial, 1.19-1.21x best     1.00x serial, 1.12-1.15x best
+#   Jacobian fill     280               1.00x serial, 1.36-1.95x best     1.00-1.11x serial, 1.47-1.77x best
+#   Hessian fill   4000, at most 4   1.00x serial, 1.19-1.21x best     1.00x serial, 1.12-1.15x best
 #
-# The cost and tall floors are compromises: no per-thread floor keeps every size within 25% of the best count, because the
-# best count jumps between sizes near each switch point and the best floor moved between runs (tall: 130 to 278). The
-# normal fill is capped because each thread fills and then sums its own copy of the system, work in proportion to the size
+# The cost and Jacobian floors are compromises: no per-thread floor keeps every size within 25% of the best count, because the
+# best count jumps between sizes near each switch point and the best floor moved between runs (Jacobian: 130 to 278). The
+# Hessian fill is capped because each thread fills and then sums its own copy of the system, work in proportion to the size
 # of the system: without the cap, on 8 threads, 4 to 7 threads beat 8 by up to 2.3x from an estimate of about 60 000. The
 # cap of 4 is a starting value for this machine; more cores, or a costly residual, may want more.
 #
@@ -29,7 +29,7 @@
 # floors, because the per-cost work of evaluating the residual and its derivatives is not in the estimates; at these
 # floors they thread later than they could, up to 4 to 6x slower than their best count at small sizes (decided
 # 2026-11-14: no per-cost term). Before the count was bounded by the number of costs of one type, a model of a single
-# costly cost was given up to 4 threads for the normal fill (Procrustes, one cost: up to 1.39x slower than serial).
+# costly cost was given up to 4 threads for the Hessian fill (Procrustes, one cost: up to 1.39x slower than serial).
 const MIN_WORK_PER_THREAD_COST = 120
 const MIN_WORK_PER_THREAD_JACOBIAN = 280
 const MIN_WORK_PER_THREAD_HESSIAN = 4_000
@@ -95,7 +95,7 @@ end
 end
 
 # The most threads an evaluation can keep busy: every evaluation splits the costs of each type into one chunk per thread,
-# so a thread beyond the largest number of costs of one type is given nothing (and on the normal path would only zero and
+# so a thread beyond the largest number of costs of one type is given nothing (and on the Hessian path would only zero and
 # sum its copy of the system)
 costsplit(costs::CostStruct) = maximum(length, values(costs); init=0)
 
@@ -111,7 +111,7 @@ function threadcount(work::Integer, floor::Integer, numthreads::Integer, costspl
     return Int(clamp(work ÷ floor, 1, maxthreads))
 end
 
-# The normal fill: the same rule, at most `MAX_THREADS_HESSIAN` threads (each thread fills its own copy of the system)
+# The Hessian fill: the same rule, at most `MAX_THREADS_HESSIAN` threads (each thread fills its own copy of the system)
 hessianthreads(work::Integer, floor::Integer, numthreads::Integer, costsplit::Integer) =
     min(threadcount(work, floor, numthreads, costsplit), MAX_THREADS_HESSIAN)
 

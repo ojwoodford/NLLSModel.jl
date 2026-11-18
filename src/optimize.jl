@@ -179,7 +179,7 @@ function cholmod_symbolic_nnz(fac::SparseArrays.CHOLMOD.Factor, n::Integer)
     end
 end
 
-# Dense or sparse storage of the reduced system, the one rule of the normal and the tall path. `storage` forces it (a dense
+# Dense or sparse storage of the reduced system, the one rule of the Hessian and the Jacobian path. `storage` forces it (a dense
 # one above `max_dense_bytes` is an `ArgumentError` naming `what`); `:auto` chooses dense for a reduced system of at most
 # 2 000 that fits under the cap and whose Cholesky factor CHOLMOD predicts to be at least 40% full. Returns
 # `(is_dense, pattern, analysed)`: the reduced system's pattern, when it was built (for the decision, or because the caller

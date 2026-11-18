@@ -30,9 +30,9 @@ fixture("keywords", "jacobianformulation")
         end
     end
 
-    # NTP2: the normal path's rule; with no eliminable variable :eliminate is the partition's ArgumentError (elimination on
-    # the tall path itself is tested in jacobianelimination.jl)
-    @testset "reduction on the tall path: no eliminable variable" begin
+    # NTP2: the Hessian path's rule; with no eliminable variable :eliminate is the partition's ArgumentError (elimination on
+    # the Jacobian path itself is tested in jacobianelimination.jl)
+    @testset "reduction on the Jacobian path: no eliminable variable" begin
         err = try optimvars_nls(model; reduction=:eliminate); nothing catch e e end
         @test err isa ArgumentError && occursin("eliminable", err.msg)
         @test_throws ArgumentError flat_optimvars_nls(model; reduction=:eliminate)
@@ -48,8 +48,8 @@ fixture("keywords", "jacobianformulation")
         @test err isa ArgumentError && startswith(err.msg, "formulation = :jacobian:") && occursin("eliminable", err.msg)
     end
 
-    # max_dense_bytes on the tall path: :auto switches to a sparse Jacobian just above the cap, :dense throws there
-    @testset "max_dense_bytes on the tall path" begin
+    # max_dense_bytes on the Jacobian path: :auto switches to a sparse Jacobian just above the cap, :dense throws there
+    @testset "max_dense_bytes on the Jacobian path" begin
         Jof(; kw...) = optimvars_nls(model; numthreads=static(1), kw...)[5] # 400×2, 6400 bytes dense
         @test Jof(max_dense_bytes=6400) isa Matrix{Float64}
         @test Jof(max_dense_bytes=6399) isa SparseMatrixCSC

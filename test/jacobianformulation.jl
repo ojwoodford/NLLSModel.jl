@@ -25,7 +25,7 @@ fixture("frontdoor", "jacobianformulation", "jacobianproblems")
             @test occursin("expected :hessian or :jacobian", err.msg)
         end
         @test_throws ArgumentError optimize!(model, JacobianOptions; formulation=:jacobian, reduction=:bogus)
-        # Not inferred from the linear solver: asking for the QR solver on the normal equations is the optimizer's business
+        # Not inferred from the linear solver: asking for the QR solver on the Hessian formulation is the optimizer's business
         r = optimize!(deepcopy(model), OptimizationOptions(iterator=:levenbergmarquardt, linsolver=:qr, maxiters=200); formulation=:hessian, numthreads=static(1))
         @test r isa OptimizationResult
         # :hessian is the default
@@ -61,7 +61,7 @@ fixture("frontdoor", "jacobianformulation", "jacobianproblems")
         @test NLLSModel.cost(m2) ≈ r.bestcost atol=1e-12
     end
 
-    # NTP3: a small single static variable gets the optimizer's static tall system, which hands resjac! an MMatrix copy of
+    # NTP3: a small single static variable gets the optimizer's static Jacobian system, which hands resjac! an MMatrix copy of
     # the prototype (and an MVector for r); the evaluators take it as they take the Matrix
     @testset "a single static variable: the optimizer's static system ($name)" for (name, kernel) in (("no kernel", nothing),
             ("Huber2o", Huber2oKernel(0.3)))
@@ -79,7 +79,7 @@ fixture("frontdoor", "jacobianformulation", "jacobianproblems")
         spy = (r, J, x) -> (push!(seen, (typeof(r), typeof(J))); JacobianExt.JacobianResJac(rj)(r, J, x))
         x, res = SecondOrderOptimization.optimize(x0, JacobianObjective(f, spy, J), JacobianOptions)
         @test seen == Set([(MVector{3, Float64}, MMatrix{3, 3, Float64, 9})])
-        # The front door reaches the normal path's cost and the spy's point
+        # The front door reaches the Hessian path's cost and the spy's point
         solved, rt = optimize(model, JacobianOptions; formulation=:jacobian)
         solved_hes, _ = optimize(model, JacobianOptions)
         @test NLLSModel.cost(solved) ≈ NLLSModel.cost(solved_hes) rtol=1e-8 atol=1e-14
@@ -155,7 +155,7 @@ fixture("frontdoor", "jacobianformulation", "jacobianproblems")
         for k in setdiff(1:4, free)
             @test model.variables[k] == start[k] # Fixed variables are untouched, bit for bit
         end
-        # The free variables are at the optimum: the same as the normal equations find
+        # The free variables are at the optimum: the same as the Hessian formulation finds
         ref = deepcopy(posemodel())
         optimize!(ref, JacobianOptions; unfixed, numthreads=static(1))
         @test NLLSModel.cost(model) ≈ NLLSModel.cost(ref) rtol=1e-8
@@ -176,7 +176,7 @@ fixture("frontdoor", "jacobianformulation", "jacobianproblems")
         err = try optimize!(posemodel(), JacobianOptions; formulation=:jacobian, reduction=:eliminate); nothing catch e e end
         @test err isa ArgumentError
         @test startswith(err.msg, "formulation = :jacobian:") && occursin("eliminable", err.msg)
-        # and the normal formulation still takes all three
+        # and the Hessian formulation still takes all three
         @test optimize!(posemodel(), JacobianOptions; reduction=:none, numthreads=static(1)) isa OptimizationResult
     end
 
@@ -219,7 +219,7 @@ fixture("frontdoor", "jacobianformulation", "jacobianproblems")
     @testset "kernels (R1): the kernel decides, there is no robust keyword" begin
         @test_throws MethodError optimize!(curvefit(), JacobianOptions; formulation=:jacobian, robust=:irls)
         @test_throws MethodError optimize!(curvefit(), JacobianOptions; robust=:none)
-        # NoRobust, Huber and Huber2o costs in one model reach the same optimum as the normal equations
+        # NoRobust, Huber and Huber2o costs in one model reach the same optimum as the Hessian formulation
         model = Model(Vector{Float64}, Union{TlExp, TlRob{TlExp, typeof(HuberKernel(0.05))}, TlRob{TlExp, typeof(Huber2oKernel(0.05))}})
         base = curvefit(outliers=4)
         addvariable!(model, base.variables[1])
@@ -245,7 +245,7 @@ fixture("frontdoor", "jacobianformulation", "jacobianproblems")
         @test out.variables[2] ≈ 1.0 atol=1e-6
     end
 
-    @testset "unsupported models fail clearly, naming the tall formulation" begin
+    @testset "unsupported models fail clearly, naming the Jacobian formulation" begin
         # A cost that is not a residual
         model = Model(Vector{Float64}, TlCost)
         addvariable!(model, [1.0, 2.0])
@@ -261,7 +261,7 @@ fixture("frontdoor", "jacobianformulation", "jacobianproblems")
         err = try optimize!(prob, JacobianOptions; formulation=:jacobian); nothing catch e e end
         @test err isa ArgumentError
         @test occursin("formulation = :jacobian", err.msg) && occursin("adaptive", err.msg)
-        # The same models are fine on the normal equations' own terms (the error is the tall formulation's)
+        # The same models are fine on the Hessian formulation's own terms (the error is the Jacobian formulation's)
         @test optimize!(prob, JacobianOptions; unfixed=2, numthreads=static(1)) isa OptimizationResult
     end
 
@@ -291,9 +291,9 @@ fixture("frontdoor", "jacobianformulation", "jacobianproblems")
         options = OptimizationOptions(iterator=:levenbergmarquardt, linsolver=:cholesky)
         err = try optimize!(deepcopy(model), options; formulation=:jacobian, numthreads=static(1)); nothing catch e e end
         @test err isa ArgumentError
-        # It is fine for the normal equations
+        # It is fine for the Hessian formulation
         @test optimize!(deepcopy(model), options; numthreads=static(1)) isa OptimizationResult
-        # Gradient descent is accepted on the tall path (SecondOrderOptimization IT2), as on the normal one
+        # Gradient descent is accepted on the Jacobian path (SecondOrderOptimization IT2), as on the Hessian one
         c0 = NLLSModel.cost(model)
         for formulation in (:jacobian, :hessian)
             m = deepcopy(model)
@@ -316,7 +316,7 @@ fixture("frontdoor", "jacobianformulation", "jacobianproblems")
         @test model.variables == start
         @test NLLSModel.cost(solved_jac) ≈ rt.bestcost rtol=1e-12
         @test NLLSModel.cost(solved_jac) ≈ NLLSModel.cost(solved_hes) rtol=1e-8
-        # With the variable alone in a list of variables (so x0 is model.variables) and the normal one
+        # With the variable alone in a list of variables (so x0 is model.variables) and the Hessian one
         multi = Model(Vector{Float64}, Union{TlExp, Tgt{Vector{Float64}}})
         base = make()
         addvariable!(multi, base.variables[1]); addvariable!(multi, [0.7])

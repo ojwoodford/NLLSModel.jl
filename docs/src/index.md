@@ -59,7 +59,7 @@ depends on `BlockLinearSystems`). `optimize(model, options)` returns `(model_cop
 The keywords `reduction` and `storage` choose the linear-system layout; see [Linear Solvers & Sparsity](@ref). Every way of
 building or optimizing a model takes the same keywords (see [`optimvars`](@ref)).
 
-## Tall formulation
+## Jacobian formulation
 
 `optimize!(model, options; formulation = :jacobian)` solves the same model from the residual vector and the Jacobian instead of
 the normal equations. Each step is a QR factorization of the Jacobian (dense, or SuiteSparse's sparse QR), or with
@@ -80,9 +80,9 @@ What it supports, by the `reduction` and `storage` it ends up with and the `lins
 | elimination | dense | `SchurBlockJacobian{Float64, Matrix{Float64}}` | `:auto`, `:qr`, `:cholesky`, `:ldl`; `:lsmr` (with Krylov.jl) |
 | elimination | sparse | `SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}` | `:auto`, `:qr`, `:cholesky`, `:ldl`; `:lsmr` (with Krylov.jl) |
 
-`reduction` and `storage` are as for the normal path, `:auto` included: elimination when the model has eliminable
-variables and the structure fits (on the tall path also: each eliminated variable is in a cost), the reduced system
-stored by the normal path's rule, and without elimination the Jacobian's storage from its fill, never dense above
+`reduction` and `storage` are as for the Hessian path, `:auto` included: elimination when the model has eliminable
+variables and the structure fits (on the Jacobian path also: each eliminated variable is in a cost), the reduced system
+stored by the Hessian path's rule, and without elimination the Jacobian's storage from its fill, never dense above
 `max_dense_bytes`. The `linsolver` values are those SecondOrderOptimization accepts for each prototype: its rules,
 the linear system of each row and the iterators it takes are in the "Supported combinations" table of its
 `JacobianObjective` docstring. Any other combination is an `ArgumentError` before anything is evaluated.

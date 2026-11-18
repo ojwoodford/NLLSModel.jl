@@ -243,16 +243,16 @@ function formulation_reason(rec::OptimizationRecommendation)
     f = rec.features
     rule = rec.rules.formulation
     rule === :F_nonresidual && return "Some costs are not residuals (AbstractResidual), so the model has no Jacobian: " *
-        "the Hessian path (normal equations) is the only one."
+        "the Hessian path is the only one."
     rule === :F_singular && return "The undamped Hessian could not be factorized ($(f.status), smallest diagonal entry " *
         "$(fmtnum(f.diag_min))): it is rank-deficient or indefinite, which a Jacobian is no better conditioned for, and " *
-        "damping handles. The normal equations."
+        "damping handles. The Hessian path."
     rule === :F_wellconditioned && return "Every cost is a residual, and $(condition_text(f)), is below " *
         "$(fmtnum(REC_JACOBIAN_CONDITION)): the normal equations are accurate enough."
     rule === :F_illconditioned && return "Every cost is a residual, and $(condition_text(f)), is at least " *
         "$(fmtnum(REC_JACOBIAN_CONDITION)): forming JᵀJ squares the conditioning of J, so the Jacobian is factorized instead."
     return "$(uppercasefirst(condition_text(f))), is at least $(fmtnum(REC_JACOBIAN_CONDITION)), which favours the Jacobian " *
-        "path, but it cannot be built for this model ($(rec.fallback)), so the normal equations."
+        "path, but it cannot be built for this model ($(rec.fallback)), so the Hessian path."
 end
 
 function reduction_reason(rec::OptimizationRecommendation)

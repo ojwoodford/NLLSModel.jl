@@ -41,7 +41,7 @@ function offthread(fun)
     return SPY_OFFTHREAD[] > 0
 end
 
-# Compare the tall solve with the normal equations: same final cost (the gradient at an accurate minimum is rounding noise, so it
+# Compare the Jacobian solve with the Hessian formulation: same final cost (the gradient at an accurate minimum is rounding noise, so it
 # is not compared), and the variables to `atol`. `cost0` is the cost at the start, to give the tolerance for zero-residual problems.
 function sameoptimum(model, options=JacobianOptions; atol=1e-5, kwargs...)
     c0 = NLLSModel.cost(model)

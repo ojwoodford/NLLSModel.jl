@@ -128,7 +128,7 @@ const ELIM_MODELS = (
     # Pose 1 and landmark 1 fixed: the prior's rows involve no unfixed variable (a free table with no columns)
     ("pose chain, two variables fixed", () -> posechain(8, 12), [2:8; 10:20]))
 
-# The tables of a SchurBlockJacobian as one plain Jacobian and residual, in the row order of the plain tall path, and the
+# The tables of a SchurBlockJacobian as one plain Jacobian and residual, in the row order of the plain Jacobian path, and the
 # columns in the variable order of `plain` (a `resjac!` without elimination of the same model): each cost is a row block,
 # read through blockentry, block and residual_block
 function tables_as_plain(rj, J, plain)

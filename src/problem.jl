@@ -180,7 +180,7 @@ resnum(vec::Vector)   = length(vec) != 0 ? (dynamic(is_static(nres(vec[1]))) ? l
 countcosts(fun, costs::CostStruct) = sum(fun, values(costs); init=0)
 nresiduals(problem::Model) = Int(countcosts(resnum, problem.costs))
 
-# The partition for elimination, or `nothing`: the one rule of the normal and the tall path. `:none` never eliminates;
+# The partition for elimination, or `nothing`: the one rule of the Hessian and the Jacobian path. `:none` never eliminates;
 # `:auto` eliminates when the model has eliminable variables and the structure fits; `:eliminate` eliminates or throws.
 function schur_partition(problem::Model, unfixed::AbstractVector, reduction::Symbol)
     reduction === :none && return nothing

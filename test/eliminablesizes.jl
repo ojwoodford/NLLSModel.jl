@@ -6,7 +6,7 @@ import OptimizationVariableInterface
 include("fixtures/loader.jl")
 fixture("allocations", "eliminablesizes")
 
-# E1: eliminable variables of any size BlockLinearSystems takes as a block, on the normal and the tall path (256
+# E1: eliminable variables of any size BlockLinearSystems takes as a block, on the Hessian and the Jacobian path (256
 # dimensions: bigvariable.jl).
 
 @testset "eliminablesizes.jl" begin

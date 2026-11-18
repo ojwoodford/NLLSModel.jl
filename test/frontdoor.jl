@@ -115,7 +115,7 @@ fixture("frontdoor", "optimization", "recommender")
         @test issolved(model, targets)
     end
 
-    # AN5: a workspace with elimination on the normal path. Each call builds a new Schur structure, so whether a second
+    # AN5: a workspace with elimination on the Hessian path. Each call builds a new Schur structure, so whether a second
     # call reuses the workspace is not tested (see the fixes file, "To decide").
     @testset "a workspace with elimination, storage = :$storage" for storage in (:dense, :sparse)
         Random.seed!(11)
@@ -201,7 +201,7 @@ fixture("frontdoor", "optimization", "recommender")
         end
 
         # max_dense_bytes: :auto stores a dense matrix above the cap sparse instead, :dense throws there
-        @testset "max_dense_bytes on the normal path" begin
+        @testset "max_dense_bytes on the Hessian path" begin
             small, _ = chainproblem(5, 2, 9) # A dense 10×10 Hessian is 800 bytes
             Hof(model; kw...) = optimvars(model; numthreads=static(1), kw...)[4]
             @test Hof(small; max_dense_bytes=800) === nothing

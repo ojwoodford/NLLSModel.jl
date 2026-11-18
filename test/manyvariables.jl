@@ -14,7 +14,7 @@ fixture("manyvariables")
             unfixed in (collect(2:N), collect(3:2:N), [N])
         model = manymodel(N, V)
         for numthreads in unique((1, nt))
-            # The tall linearization equals the normal one, for the same unfixed variables
+            # The Jacobian linearization equals the Hessian one, for the same unfixed variables
             _, _, resjac!, xt, J = optimvars_nls(model; unfixed, numthreads=static(numthreads), reduction=:none, storage=:dense, min_work=0, min_work_cost=0)
             r = zeros(size(J, 1))
             _, fdf!, xn, _ = optimvars(model; unfixed, numthreads=static(numthreads), reduction=:none, storage=:dense, min_work=0, min_work_cost=0)
@@ -23,7 +23,7 @@ fixture("manyvariables")
             @test resjac!(r, J, xt) ≈ c rtol=1e-12
             @test J' * r ≈ g rtol=1e-9 atol=1e-12
             @test J' * J ≈ Symmetric(H) rtol=1e-9 atol=1e-12
-            # The tall solve reaches the normal one's cost
+            # The Jacobian solve reaches the Hessian one's cost
             solved_hes = deepcopy(model)
             optimize!(solved_hes, opts; unfixed, numthreads=static(numthreads))
             solved_jac = deepcopy(model)

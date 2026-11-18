@@ -274,7 +274,7 @@ end
         @test NLLSModel.costestimate(ba.costs) == NLLSModel.workestimates(ba, nothing).cost
     end
 
-    @testset "fixing a variable lowers tall and linearization by exactly its columns" begin
+    @testset "fixing a variable lowers the Jacobian and Hessian estimates by exactly its columns" begin
         ba = wbaproblem(3, 10)
         all_ = NLLSModel.workestimates(ba, nothing)
         mask = trues(length(ba.variables)); mask[1] = false # camera 1, on 10 costs: n goes from 12 to 3
@@ -325,10 +325,10 @@ end
     end
 
     # Each kind of work decides on its own estimate, by the same rule: floors set for exactly 2 of 8 threads give 2
-    # per-thread copies of the linear system, 2 chunks of the tall fill and a 2-way cost sum. The normal fill uses at most
+    # per-thread copies of the linear system, 2 chunks of the Jacobian fill and a 2-way cost sum. The Hessian fill uses at most
     # MAX_THREADS_HESSIAN threads.
     @testset "each kind of work uses the rule on its own estimate" begin
-        ba = wbaproblem(3, 10) # cost 60, tall 780, linearization 9360
+        ba = wbaproblem(3, 10) # cost 60, Jacobian 780, linearization 9360
         w = NLLSModel.workestimates(ba, nothing)
         @test w.cost < w.jacobianfill < w.hessianfill
         counts(Fcost, Flin, Fjac) = begin
@@ -341,7 +341,7 @@ end
         @test counts(w.cost ÷ 2, w.hessianfill ÷ 2, w.jacobianfill ÷ 2) == (2, 2, 2)
         @test NLLSModel.MAX_THREADS_HESSIAN == 4
         @test counts(w.cost ÷ 3, w.hessianfill ÷ 3, w.jacobianfill ÷ 4) == (3, 3, 4)
-        @test counts(w.cost ÷ 5, w.hessianfill ÷ 5, w.jacobianfill ÷ 5) == (5, 4, 5) # The normal fill is capped
+        @test counts(w.cost ÷ 5, w.hessianfill ÷ 5, w.jacobianfill ÷ 5) == (5, 4, 5) # The Hessian fill is capped
         @test counts(w.cost, w.hessianfill, w.jacobianfill) == (1, 1, 1) # Below twice the floor
         @test counts(1, 1, 1) == (8, 4, 8) && counts(0, 0, 0) == (8, 4, 8)
         @test counts(10^9, 10^9, 10^9) == (1, 1, 1)

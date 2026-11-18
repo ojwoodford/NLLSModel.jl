@@ -55,12 +55,12 @@ optimize!(problem, options; reduction = :eliminate, storage = :sparse)
 The same keywords, with the same rule, apply to `formulation = :jacobian` (the residual and the Jacobian). There the
 eliminated variables are eliminated by QR of their rows of the Jacobian, so `JᵀJ` is not formed for them: the prototype
 handed to the optimizer is a `SchurBlockJacobian`, and `storage` chooses the storage of the reduced system the same way.
-The tall path also needs each eliminated variable to be in at least one cost.
+The Jacobian path also needs each eliminated variable to be in at least one cost.
 
 ## Choosing a Configuration Automatically
 
 [`recommendoptimizer`](@ref) chooses the formulation, `reduction`, `storage`, linear solver and iterator for a model by
-hand-written rules, from the model's structure and from one linearization and factorization of its normal equations at
+hand-written rules, from the model's structure and from one linearization and factorization of its Hessian at
 the model's current values. That probe measures the spread of the Hessian's diagonal, a lower bound on the condition
 number of the Jacobi-scaled Hessian, and how long a cost evaluation, a linearization and a solve take. `reduction` and
 `storage` are what `:auto` builds; the other three choices follow the rules in its docstring. Every threshold in them is a

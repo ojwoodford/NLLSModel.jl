@@ -5,7 +5,7 @@ import OptimizationVariableInterface: update, update!, copyvars
 include("fixtures/loader.jl")
 fixture("allocations", "frontdoor", "jacobianalloc", "jacobianproblems")
 
-# Z4: the tall evaluators allocate nothing per call on one thread (warm).
+# Z4: the Jacobian evaluators allocate nothing per call on one thread (warm).
 # Variables of static size use autodiff; Vector variables use hand-written Jacobians (TlHand), since autodiff of a Vector variable
 # allocates in `update`, in either formulation.
 
@@ -22,7 +22,7 @@ fixture("allocations", "frontdoor", "jacobianalloc", "jacobianproblems")
         model = handmodel(k1, k2)
         for unfixed in (nothing, [2], 1, Bool[1, 0])
             a = warmallocs(model; unfixed)
-            # (`f`, the cost function shared with the normal equations, allocates 16 B for a Scaled kernel; not an evaluator)
+            # (`f`, the cost function shared with the Hessian path, allocates 16 B for a Scaled kernel; not an evaluator)
             @test a[1:2] == (0, 0)
             name == "a scaled linear kernel" || @test a[3] == 0
         end

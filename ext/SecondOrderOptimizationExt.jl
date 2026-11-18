@@ -16,7 +16,7 @@ struct JacobianResJac{RJ}
 end
 (w::JacobianResJac)(r, J, x) = w.resjac!(r, J, x; prezeroed=true)
 
-# The tall formulation: the residual vector and the Jacobian, solved by the optimizer from the Jacobian prototype that
+# The Jacobian formulation: the residual vector and the Jacobian, solved by the optimizer from the Jacobian prototype that
 # `optimvars_nls` returns (its type decides the linear system; the optimizer validates it against `linsolver`). A dense
 # Jacobian forced above `max_dense_bytes` is refused by `optimvars_nls` before it is allocated.
 function optimize_jacobian!(model::Model, options; unfixed, numthreads, callback, workspace, reduction, storage, max_dense_bytes, min_work, min_work_cost)
@@ -36,7 +36,7 @@ function optimize_jacobian!(model::Model, options; unfixed, numthreads, callback
     return result
 end
 
-# Solves the model with the normal equations (`HessianObjective`). A single variable of static size is immutable, so it goes
+# Solves the model on the Hessian path (`HessianObjective`). A single variable of static size is immutable, so it goes
 # through `optimize` (which returns the solution); everything else is updated in place by `optimize!`. Either way the
 # solution is written back with `syncvars!`, which knows the block order and the Schur partition.
 """
@@ -50,7 +50,7 @@ The second method, `optimize!(model, rec)`, takes every choice from an `Optimiza
 
 `formulation` chooses how the model is linearized:
 
-- `:hessian` (default): the normal equations. Calls [`optimvars`](@ref), wraps the result in a `HessianObjective`, runs
+- `:hessian` (default): the Hessian (for residuals, the normal equations). Calls [`optimvars`](@ref), wraps the result in a `HessianObjective`, runs
   `SecondOrderOptimization.optimize!` (or `optimize` when the variable to optimize is immutable, a single variable of static
   size) and writes the solution back with [`syncvars!`](@ref).
 - `:jacobian`: the residual vector and the Jacobian (a `JacobianObjective`); the whole `JᵀJ` is never formed.

@@ -1,4 +1,4 @@
-# Tall residual and Jacobian system assembly for NLLSModel
+# Residual and Jacobian system assembly for NLLSModel
 
 mutable struct NLSRobustStatus
     clamped_count::Int
@@ -31,11 +31,11 @@ struct NLSTallLayout{S}
     is_dense::Bool
     linear_weights::Vector{Float64} # Precomputed sqrt(w) for linear kernels
     all_linear::Bool
-    work::Int                       # Tall-fill estimate, sum of m * (n + 1) (see `workestimates`), compared with min_work
+    work::Int                       # Jacobian-fill estimate, sum of m * (n + 1) (see `workestimates`), compared with min_work
     schur::S                        # With elimination, where each cost's rows go in the tables (`JacobianSchurMap`), otherwise nothing
 end
 
-# Elimination on the tall path: each cost is a row block of the `SchurBlockJacobian`'s layout, which BlockLinearSystems
+# Elimination on the Jacobian path: each cost is a row block of the `SchurBlockJacobian`'s layout, which BlockLinearSystems
 # decides; a cost writes its block for each unfixed variable through that variable's handle in its row block.
 struct JacobianSchurMap
     structure::SchurJacobianStructure # Built once, at setup: the optimizer reuses a workspace only for the same object
@@ -99,9 +99,9 @@ function check_jacobian_costs(problem::Model)
     return nothing
 end
 
-# Elimination on the tall path: the partition of the normal path (`schur_partition`), provided every eliminated variable is
+# Elimination on the Jacobian path: the partition of the Hessian path (`schur_partition`), provided every eliminated variable is
 # in a cost (QR cannot eliminate a block of the Jacobian with no rows). A single unfixed variable is never partitioned,
-# as on the normal path.
+# as on the Hessian path.
 function jacobian_schur_partition(problem::Model, unfixed, reduction::Symbol)
     unfixed isa Integer && return nothing
     partition = schur_partition(problem, unfixed, reduction)
@@ -115,7 +115,7 @@ function jacobian_schur_partition(problem::Model, unfixed, reduction::Symbol)
     end
     for v in view(partition.unfixed_raw, partition.eliminated)
         if !incost[v]
-            reduction === :eliminate && throw(ArgumentError("reduction = :eliminate on the tall path needs every eliminated variable in a cost; variable $v is in none."))
+            reduction === :eliminate && throw(ArgumentError("reduction = :eliminate on the Jacobian path needs every eliminated variable in a cost; variable $v is in none."))
             return nothing
         end
     end
@@ -142,7 +142,7 @@ function jacobian_schur_map(problem::Model, partition, resblocksizes::Vector{Int
     return JacobianSchurMap(structure, dep_target)
 end
 
-# The layout of the tall system, and the Jacobian prototype: a `Matrix` or a `SparseMatrixCSC`, or with a `partition`
+# The layout of the Jacobian system, and the Jacobian prototype: a `Matrix` or a `SparseMatrixCSC`, or with a `partition`
 # (elimination) a `SchurBlockJacobian`, whose reduced storage `storage` chooses
 function build_jacobian_layout(problem::Model, unfixed, storage::Symbol, max_dense_bytes::Int, partition=nothing, nchunks::Int=1)
     # 2. Sizing and layout arrays
@@ -263,7 +263,7 @@ function build_jacobian_layout(problem::Model, unfixed, storage::Symbol, max_den
     active_entries = sum(b -> varblocksizes[b] * col_heights[b], 1:nblocks; init=0)
     work = active_entries + M # sum over costs of m * n (the Jacobian entries) plus m (the residual)
 
-    # With elimination: the tables, and where each cost goes in them. The storage of the reduced system follows the normal
+    # With elimination: the tables, and where each cost goes in them. The storage of the reduced system follows the Hessian
     # path's rule (`reduced_storage`); the optimizer builds its own pattern for a sparse one.
     if !isnothing(partition)
         schur = jacobian_schur_map(problem, partition, resblocksizes, dep_start_idx, nchunks)
@@ -389,7 +389,7 @@ end
     elseif dynamic(nvars_deps) <= 5
         return sirbsdispatch(static(0), maxflags - static(1), varflags, f)
     else
-        # Fall back on dynamic dispatch, as the normal path does (gradhesshelper!)
+        # Fall back on dynamic dispatch, as the Hessian path does (gradhesshelper!)
         return f(static(varflags))
     end
 end
@@ -425,7 +425,7 @@ const WEIGHT_CORRECTOR = 2  # second-order corrector: residual scale `scale / sq
 const WEIGHT_NAN = 3        # non-finite values: fill with NaN
 
 # Returns (mode, cost, scale, eps, clamped count, error code, error value). The kernel's own derivatives decide: a zero second
-# derivative (or s == 0) scales the rows (IRLS), a non-zero one adds the Triggs correction, as on the normal-equations path.
+# derivative (or s == 0) scales the rows (IRLS), a non-zero one adds the Triggs correction, as on the Hessian path.
 function robust_weights(kernel, s)
     c_cost, dc, d2c = robustifydcost(kernel, s)
     c_val = Float64(c_cost)
@@ -702,7 +702,7 @@ end
 
 # Every variable unfixed: `vars` is a complete set of variables and is evaluated as it is. It is not copied into the model:
 # `vars` may be the optimizer's current point, which is `problem.variables` itself, and a trial must not overwrite it.
-# (The same rule as `sync_unfixed_vars!` on the normal-equations path.)
+# (The same rule as `sync_unfixed_vars!` on the Hessian path.)
 @inline sync_jacobian_vars!(::Model, ::Nothing, vars) = vars
 
 # The residual vector: one entry per residual row, except with elimination, where the residuals are written into the
@@ -802,13 +802,13 @@ end
 
 function check_jacobian_status!(status, clamped_tot, err_code, err_val, fname)
     if err_code != 0
-        throw(DomainError(err_val, "Tall least-squares reweighting requires non-negative kernel derivative dc >= 0"))
+        throw(DomainError(err_val, "Least-squares reweighting requires non-negative kernel derivative dc >= 0"))
     end
     if clamped_tot > 0
         status.clamped_count += clamped_tot
         if !status.warned_clamp
             status.warned_clamp = true
-            @warn "Slightly negative kernel derivative(s) were clamped to zero in tall least-squares evaluation (total clamped: $(status.clamped_count)). Query clamped_count($fname) to inspect."
+            @warn "Slightly negative kernel derivative(s) were clamped to zero in least-squares evaluation on the Jacobian path (total clamped: $(status.clamped_count)). Query clamped_count($fname) to inspect."
         end
     end
     return nothing
@@ -834,7 +834,7 @@ function jacobian_eval!(evalone::F, costvecs, layout, status, task_results, N_ch
     end
     for t in 1:N_chunks
         if task_results[t].err_code != 0
-            throw(DomainError(task_results[t].err_val, "Tall least-squares reweighting requires non-negative kernel derivative dc >= 0"))
+            throw(DomainError(task_results[t].err_val, "Least-squares reweighting requires non-negative kernel derivative dc >= 0"))
         end
     end
     check_jacobian_status!(status, sum(t -> task_results[t].clamped, 1:N_chunks), 0, 0.0, fname)
@@ -877,9 +877,9 @@ end
 """
     optimvars_nls(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work=$MIN_WORK_PER_THREAD_JACOBIAN, min_work_cost=$MIN_WORK_PER_THREAD_COST)
 
-Constructs tall residual and Jacobian callable structs `(f, res!, resjac!, x0, J_proto)` for `problem`.
+Constructs the residual and Jacobian callable structs `(f, res!, resjac!, x0, J_proto)` for `problem`.
 
-There is no robust mode: each cost's kernel decides how its rows enter, as on the normal-equations path.
+There is no robust mode: each cost's kernel decides how its rows enter, as on the Hessian path.
 
 | What the kernel returns from `robustifydcost` | Rows of that cost |
 |:---|:---|
@@ -897,7 +897,7 @@ is a BlockLinearSystems `SchurBlockJacobian{Float64, RType}`: one table per elim
 costs that involve it, and tables for the other costs. `resjac!(r, J, x)` then writes each cost's residual and Jacobian
 rows into its table, and leaves `r` alone (pass any vector, for example an empty one); `res!(r, x)` still writes the
 whole residual into `r`. `RType`, `Matrix{Float64}` or `SparseMatrixCSC{Float64, Int}`, is the storage of the reduced
-system, chosen by `storage` and `max_dense_bytes` by the normal path's rule. `x0` then holds the unfixed variables
+system, chosen by `storage` and `max_dense_bytes` by the Hessian path's rule. `x0` then holds the unfixed variables
 in the partition's order, retained first; [`syncvars!`](@ref) writes a solution back.
 
 What `optimize!(model, options; formulation = :jacobian)` does with each prototype:

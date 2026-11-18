@@ -453,8 +453,8 @@ Every cost must be a non-adaptive [`AbstractResidual`](@ref) with a linear kerne
 cost is exactly `½‖r‖²`, which these solvers derive from `r`; otherwise it throws an `ArgumentError`. Every unfixed
 variable must update by plain addition and pack into a flat `Float64` vector (as for [`flat_optimvars_nls`](@ref)).
 
-It is built on the tall path ([`optimvars_nls`](@ref)): `reduction = :auto` means `:none`. The cost alone (`obj`) is
-evaluated by the cost function, threaded by `min_work_cost`; the residual and Jacobian by the tall fill, threaded by
+It is built on the Jacobian path ([`optimvars_nls`](@ref)): `reduction = :auto` means `:none`. The cost alone (`obj`) is
+evaluated by the cost function, threaded by `min_work_cost`; the residual and Jacobian by the Jacobian fill, threaded by
 `min_work`. `name` is the name given to the model's metadata (default `"NLLSNLSModel"`).
 
 The solution is transferred back to `problem.variables` with [`syncvars!`](@ref).
@@ -474,12 +474,11 @@ syncvars!
 """
     recommendoptimizer(model::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), max_dense_bytes=$MAX_DENSE_BYTES) -> OptimizationRecommendation
 
-Recommends how to solve `model`, from its structure and its current values: a formulation (`:hessian`, the normal
-equations, or `:jacobian`, the residual and the Jacobian), the `reduction` and `storage`, a linear solver and an iterator,
+Recommends how to solve `model`, from its structure and its current values: a formulation (`:hessian`, the Hessian, or `:jacobian`, the residual and the Jacobian), the `reduction` and `storage`, a linear solver and an iterator,
 each chosen by a hand-written rule. Displaying the result explains each choice and prints the equivalent call to
 `optimize!(model, options; ...)`; with SecondOrderOptimization loaded, `optimize!(model, rec)` runs it.
 
-It builds the normal path as `optimize!(model, options)` does with `reduction = storage = :auto`, then builds, linearizes
+It builds the Hessian path as `optimize!(model, options)` does with `reduction = storage = :auto`, then builds, linearizes
 and factorizes its linear system once, at the model's current values, to measure the spread of the Hessian's diagonal
 (largest over smallest), a lower bound on the condition number of the Jacobi-scaled Hessian `D^-½ H D^-½` (by
 $REC_INVERSE_ITERATIONS steps of inverse iteration), and the time of a cost evaluation, a linearization and an undamped
@@ -490,9 +489,9 @@ solve. Then:
   no estimate and stays `:hessian`. If [`optimvars_nls`](@ref) cannot build the model (an unfixed adaptive kernel, for
   example), `:hessian`.
 - **Reduction and storage:** what `:auto` builds, on the formulation's path.
-- **Linear solver:** on the normal path, `:cholesky` for a static, dense or eliminated system and `:ldl` for a sparse
+- **Linear solver:** on the Hessian path, `:cholesky` for a static, dense or eliminated system and `:ldl` for a sparse
   one (what `linsolver = :auto` uses), but `:ldl` whenever a cost is not a residual, since the Hessian can then be
-  indefinite; on the tall path `:qr`.
+  indefinite; on the Jacobian path `:qr`.
 - **Iterator:** `:dogleg` when the undamped solve succeeded, the condition estimate is below $(REC_DOGLEG_CONDITION), the
   diagonal's spread is below $(REC_DIAGSPREAD) and a solve takes at least as long as a linearization; otherwise
   `:levenbergmarquardt_dtd` when the spread is at least $(REC_DIAGSPREAD); otherwise `:levenbergmarquardt`.

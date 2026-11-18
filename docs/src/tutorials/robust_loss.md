@@ -47,10 +47,10 @@ addcost!(problem, RobustPointResidual(SVector(50.0, -40.0), idx, Huber2oKernel(1
 res = optimize!(problem) # Needs `using SecondOrderOptimization`
 ```
 
-## Robust Kernels in the Tall Formulation
+## Robust Kernels in the Jacobian Formulation
 
-The tall residual-and-Jacobian evaluators ([`optimvars_nls`](@ref), [`flat_optimvars_nls`](@ref)) have no robust mode. As on
-the normal-equations path, the kernel of each cost decides how its rows enter, from what `robustifydcost` returns:
+The residual-and-Jacobian evaluators ([`optimvars_nls`](@ref), [`flat_optimvars_nls`](@ref)) have no robust mode. As on
+the Hessian path, the kernel of each cost decides how its rows enter, from what `robustifydcost` returns:
 
 | Kernel | Rows of that cost |
 |:---|:---|

@@ -50,7 +50,7 @@ index, a type, a mask or a list of indices), `numthreads`, the layout choices `r
 whether eliminable variables are eliminated by a Schur complement), `storage` (`:auto`, `:dense`, `:sparse`: storage of the
 matrix the solver receives) and `max_dense_bytes`, and the threading floors `min_work` and `min_work_cost`.
 
-### Tall formulation
+### Jacobian formulation
 
 `optimize!(model, options; formulation = :jacobian)` solves the same model from the residual vector and the Jacobian instead of
 the normal equations. Each step is a QR factorization of the Jacobian (dense, or SuiteSparse's sparse QR), or with
@@ -71,9 +71,9 @@ What it supports, by the `reduction` and `storage` it ends up with and the `lins
 | elimination | dense | `SchurBlockJacobian{Float64, Matrix{Float64}}` | `:auto`, `:qr`, `:cholesky`, `:ldl`; `:lsmr` (with Krylov.jl) |
 | elimination | sparse | `SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}` | `:auto`, `:qr`, `:cholesky`, `:ldl`; `:lsmr` (with Krylov.jl) |
 
-`reduction` and `storage` are as for the normal path, `:auto` included: elimination when the model has eliminable
-variables and the structure fits (on the tall path also: each eliminated variable is in a cost), the reduced system
-stored by the normal path's rule, and without elimination the Jacobian's storage from its fill, never dense above
+`reduction` and `storage` are as for the Hessian path, `:auto` included: elimination when the model has eliminable
+variables and the structure fits (on the Jacobian path also: each eliminated variable is in a cost), the reduced system
+stored by the Hessian path's rule, and without elimination the Jacobian's storage from its fill, never dense above
 `max_dense_bytes`. The `linsolver` values are those SecondOrderOptimization accepts for each prototype: its rules,
 the linear system of each row and the iterators it takes are in the "Supported combinations" table of its
 `JacobianObjective` docstring. Any other combination is an `ArgumentError` before anything is evaluated.
@@ -94,7 +94,7 @@ Also:
 ### Choosing a configuration: `recommendoptimizer`
 
 `recommendoptimizer(model)` chooses the formulation, `reduction`, `storage`, linear solver and iterator by hand-written
-rules, from the model's structure and from one linearization and factorization of its normal equations at its current
+rules, from the model's structure and from one linearization and factorization of its Hessian at its current
 values (the conditioning and scaling of the Hessian, and how long a linearization and a solve take). Displayed, the
 recommendation explains each choice and prints the equivalent `optimize!(model, options; ...)` call, to copy and edit;
 `optimize!(model, rec)` runs it directly (other keywords go to `OptimizationOptions`). The rules' thresholds are starting

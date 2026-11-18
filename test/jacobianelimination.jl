@@ -7,7 +7,7 @@ import OptimizationVariableInterface
 include("fixtures/loader.jl")
 fixture("allocations", "frontdoor", "jacobianelimination")
 
-# NTP2: elimination on the tall path, by QR (a SchurBlockJacobian prototype).
+# NTP2: elimination on the Jacobian path, by QR (a SchurBlockJacobian prototype).
 
 @testset "jacobianelimination.jl" begin
     @testset "the prototype: $name" for (name, make, unfixed) in ELIM_MODELS
@@ -17,12 +17,12 @@ fixture("allocations", "frontdoor", "jacobianelimination")
         @test J(reduction=:eliminate, storage=:sparse) isa SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}
         @test J() isa SchurBlockJacobian # :auto eliminates: the model has eliminable variables and the structure fits
         @test J(reduction=:none) isa Union{Matrix{Float64}, SparseMatrixCSC{Float64, Int}}
-        # The reduced storage follows the normal path's rule: the same choice for the same model
+        # The reduced storage follows the Hessian path's rule: the same choice for the same model
         Hauto = optimvars(model; unfixed, numthreads=static(1))[4]
         @test (J() isa SchurBlockJacobian{Float64, Matrix{Float64}}) == (Hauto.R isa Matrix)
     end
 
-    @testset "the same cost as the normal path: $name, $storage" for (name, make, unfixed) in ELIM_MODELS, storage in (:dense, :sparse)
+    @testset "the same cost as the Hessian path: $name, $storage" for (name, make, unfixed) in ELIM_MODELS, storage in (:dense, :sparse)
         model = make()
         c0 = NLLSModel.cost(model)
         solved_hes, _ = optimize(model, ElimOptions; unfixed, numthreads=static(1))
@@ -72,7 +72,7 @@ fixture("allocations", "frontdoor", "jacobianelimination")
         @test rj(Float64[], copy_structure(J), x0) ≈ NLLSModel.cost(model) rtol=1e-12
     end
 
-    @testset "reduction = :auto and :eliminate on the tall path" begin
+    @testset "reduction = :auto and :eliminate on the Jacobian path" begin
         ba = optlandmark_problem(4, 20)
         plain, _ = chainproblem(5, 2, 9) # No eliminable variables
         @test optimvars_nls(ba; numthreads=static(1))[5] isa SchurBlockJacobian
@@ -86,7 +86,7 @@ fixture("allocations", "frontdoor", "jacobianelimination")
         @test err isa ArgumentError && occursin("in none", err.msg)
         # Front door: :eliminate is not rejected
         @test optimize!(deepcopy(ba), ElimOptions; formulation=:jacobian, reduction=:eliminate, numthreads=static(1)) isa OptimizationResult
-        # A single unfixed variable is never partitioned, as on the normal path
+        # A single unfixed variable is never partitioned, as on the Hessian path
         @test optimvars_nls(ba; unfixed=1, numthreads=static(1), reduction=:eliminate)[5] isa Matrix{Float64}
         # A dense reduced system above the cap: an ArgumentError naming it (4 cameras of 6: 24×24, 4608 bytes)
         err = try optimvars_nls(ba; numthreads=static(1), reduction=:eliminate, storage=:dense, max_dense_bytes=4607); nothing catch e e end
@@ -96,7 +96,7 @@ fixture("allocations", "frontdoor", "jacobianelimination")
 
     @testset "the wrappers that hand a plain Jacobian on never eliminate" begin
         ba = flatelimmodel()
-        @test optimvars_nls(ba; numthreads=static(1))[5] isa SchurBlockJacobian # Elimination is available on the tall path
+        @test optimvars_nls(ba; numthreads=static(1))[5] isa SchurBlockJacobian # Elimination is available on the Jacobian path
         for (name, entry) in (("flat_optimvars_nls", flat_optimvars_nls), ("nls_callbacks", NLLSModel.nls_callbacks), ("NLLSNLSModel", NLLSNLSModel))
             err = try entry(ba; numthreads=static(1), reduction=:eliminate); nothing catch e e end
             @test err isa ArgumentError && occursin(name, err.msg) && occursin("plain Jacobian", err.msg)

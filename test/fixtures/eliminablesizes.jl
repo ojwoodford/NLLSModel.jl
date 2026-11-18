@@ -74,7 +74,7 @@ function sizedmodel(N; nposes=6, nlms=10, seed=31)
     return model
 end
 
-# Allocations of one warm call of the normal path's evaluators
+# Allocations of one warm call of the Hessian path's evaluators
 function hessianallocs(model; numthreads, kwargs...)
     f, fdf!, x0, H = optimvars(model; numthreads, kwargs...)
     g = zeros(nvars(x0))

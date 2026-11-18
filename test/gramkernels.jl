@@ -231,7 +231,7 @@ end
     end
 end
 
-@testset "tall path with dynamic variables agrees with the linear system" begin
+@testset "Jacobian path with dynamic variables agrees with the linear system" begin
     rng = MersenneTwister(21)
     for kernel in (NoRobust(), Huber2oKernel(0.5), GemanMcclure2oKernel(0.6)), M in (3, 20, 0)
         problem = Model(Vector{Float64}, GramRes{M, typeof(kernel)})

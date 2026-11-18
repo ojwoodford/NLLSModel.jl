@@ -6,7 +6,7 @@ include("fixtures/loader.jl")
 fixture("jacobiancombinations")
 
 # NTP4: the table of what `formulation = :jacobian` supports (the front door's docstring, `JACOBIAN_FORMULATION_DOC` in
-# src/keywords.jl, the README and docs/src/index.md), as data. Every listed combination reaches the normal path's cost on a
+# src/keywords.jl, the README and docs/src/index.md), as data. Every listed combination reaches the Hessian path's cost on a
 # model with eliminable variables; every other one throws before any residual is evaluated. Which (prototype, solver,
 # iterator) combinations work is the optimizer's table, tested there: this package never inspects `linsolver` or
 # `iterator`, so each row runs every listed solver with :levenbergmarquardt and every iterator with :auto, and each
@@ -36,7 +36,7 @@ fixture("jacobiancombinations")
                 c, result = outcome
                 if iterator === :gradientdescent
                     # Gradient descent does not reach the minimum in 200 iterations (on either formulation it stalls about
-                    # 3.5e-5 above it after some 17 000), so its cost is not compared with the normal path's: it must
+                    # 3.5e-5 above it after some 17 000), so its cost is not compared with the Hessian path's: it must
                     # reduce the cost as the other iterators do
                     @test c < 0.1 * c0
                 else
@@ -50,7 +50,7 @@ fixture("jacobiancombinations")
         end
     end
 
-    # :auto picks a row of the table: elimination (the model has eliminable variables), and the normal path's reduced storage
+    # :auto picks a row of the table: elimination (the model has eliminable variables), and the Hessian path's reduced storage
     @testset ":auto is a row of the table" begin
         J = optimvars_nls(model; numthreads=static(1))[5]
         H = optimvars(model; numthreads=static(1))[4]

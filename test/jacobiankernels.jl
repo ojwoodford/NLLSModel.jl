@@ -4,10 +4,10 @@ import OptimizationVariableInterface
 include("fixtures/loader.jl")
 fixture("jacobianproblems")
 
-# R1: the kernel decides how each cost's rows enter the tall system.
+# R1: the kernel decides how each cost's rows enter the Jacobian system.
 
 @testset "jacobiankernels.jl" begin
-    # R1: per kernel, the tall rows reproduce the normal-equations linearization
+    # R1: per kernel, the Jacobian rows reproduce the Hessian linearization
     @testset "R1: J'J and J'r equal the Hessian and gradient, $name" for (name, kernel, wide, exact_hessian) in (
             ("NoRobust", NoRobust(), NoRobust(), true),
             ("Scaled", Scaled(NoRobust(), 2.5), Scaled(NoRobust(), 2.5), true),
@@ -43,7 +43,7 @@ fixture("jacobianproblems")
         end
     end
 
-    @testset "R1: a model mixing kernels reproduces the normal-equations linearization" begin
+    @testset "R1: a model mixing kernels reproduces the Hessian linearization" begin
         kernels = (NoRobust(), HuberKernel(0.5), Huber2oKernel(1.0), GemanMcclureKernel(0.5), GemanMcclure2oKernel(1.0), Scaled(NoRobust(), 2.0))
         base = curvefit()
         model = Model(Vector{Float64}, Union{[TlRob{TlExp, typeof(k)} for k in kernels]...})

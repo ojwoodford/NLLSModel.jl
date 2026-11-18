@@ -115,7 +115,7 @@ function hessianstep(model, linsolver)
     return status, copy(DampedLinearSolve.getx(ls))
 end
 
-# The undamped step of the tall system built with `linsolver`, from the prototype of `optimvars_nls`
+# The undamped step of the Jacobian system built with `linsolver`, from the prototype of `optimvars_nls`
 function jacobianstep(model, linsolver; kwargs...)
     _, _, resjac!, x0, J = optimvars_nls(model; numthreads=static(1), kwargs...)
     n = NLLSModel.unfixeddims(model, NLLSModel.convertunfixed(nothing, model))
