@@ -128,3 +128,30 @@ function tallstep(model, linsolver; kwargs...)
     status = DampedLinearSolve.solve!(ls, linsolver)
     return status, copy(DampedLinearSolve.getx(ls))
 end
+
+# A recommendation built by hand, for `show`: the rules' symbols default to those its choices and features imply
+function recby(; features=recfeatures(), formulation=:normal, reduction=:none, storage=:dense, linsolver=:cholesky,
+        iterator=:levenbergmarquardt, unfixed=nothing, numthreads=static(Threads.nthreads()),
+        max_dense_bytes=NLLSModel.MAX_DENSE_BYTES, fallback="",
+        rule_f=NLLSModel.rule_formulation(features)[2], rule_rs=(formulation === :tall ? :RS_jacobian : :RS_hessian),
+        rule_l=(formulation === :tall ? :L_tall : NLLSModel.rule_linsolver(features.allresiduals, features.hessiansystem)[2]),
+        rule_i=NLLSModel.rule_iterator(features)[2])
+    rules = (formulation = rule_f, reduction = rule_rs, storage = rule_rs, linsolver = rule_l, iterator = rule_i)
+    return NLLSModel.OptimizationRecommendation(formulation, reduction, storage, linsolver, iterator, unfixed, numthreads,
+        Int(max_dense_bytes), features, rules, fallback)
+end
+
+longform(rec) = sprint(show, MIME"text/plain"(), rec)
+flat(text) = join(split(text), " ") # Whitespace collapsed, so wrapped text can be searched
+
+# The call `show` prints, parsed: its positional arguments, its keywords and the keywords of its `OptimizationOptions`
+function printedcall(rec)
+    text = longform(rec)
+    ex = Meta.parse(text[first(findfirst("optimize!(model,", text)):end])
+    (ex isa Expr && ex.head === :call && ex.args[1] === :optimize! && ex.args[2].head === :parameters) || return nothing
+    keywords = Dict(a.args[1] => a.args[2] for a in ex.args[2].args)
+    positional = ex.args[3:end]
+    options = positional[2]
+    (options isa Expr && options.head === :call && options.args[1] === :OptimizationOptions) || return nothing
+    return positional, keywords, Dict(a.args[1] => a.args[2] for a in options.args[2:end])
+end

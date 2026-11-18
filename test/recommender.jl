@@ -6,7 +6,7 @@ import DampedLinearSolve
 include("fixtures/loader.jl")
 fixture("recommender")
 
-# RC3: the recommender's features, rules and choices (src/recommender.jl)
+# RC3: the recommender's features, rules and choices; RC4: how it is displayed (src/recommender.jl)
 
 @testset "recommender.jl" begin
     @testset "rule L, the Hessian formulation's linear solver" begin
@@ -187,6 +187,99 @@ fixture("recommender")
         addcost!(model, LinearResidualDynamic(zeros(2), [1.0 0.0; 0.0 floatmax()], 1))
         err = try NLLSModel.recommendoptimizer(model); nothing catch e e end
         @test err isa ArgumentError && occursin("not finite", err.msg)
+    end
+
+    @testset "show: the one-line form" begin
+        rec = recby(formulation=:normal, reduction=:eliminate, storage=:sparse, linsolver=:cholesky, iterator=:dogleg,
+            features=recfeatures(hessiansystem=:schur_sparse, retained=6, eliminated=9, dimension=15))
+        @test sprint(show, rec) == "OptimizationRecommendation(formulation = :normal, reduction = :eliminate, storage = :sparse, linsolver = :cholesky, iterator = :dogleg)"
+        @test repr(rec) == sprint(show, rec)
+    end
+
+    @testset "show: the long form, $(spec.name)" for spec in REC_MODELS
+        rec = NLLSModel.recommendoptimizer(spec.make(); numthreads=static(1))
+        text = longform(rec)
+        for name in (:formulation, :reduction, :storage, :linsolver, :iterator)
+            @test occursin("$(rpad(name, 11)) = $(repr(getfield(rec, name)))", text)
+        end
+        for reason in (NLLSModel.formulation_reason, NLLSModel.reduction_reason, NLLSModel.storage_reason,
+                NLLSModel.linsolver_reason, NLLSModel.iterator_reason)
+            @test occursin(flat(reason(rec)), flat(text))
+        end
+        @test occursin("a cost evaluation", text) && occursin("an undamped solve", text)
+        @test occursin("The thresholds are starting values", flat(text))
+        @test all(line -> textwidth(line) <= 80, split(text, '\n'))
+        @test !occursin(":auto)", text) && !occursin("= :auto,", text) # Every choice is explicit
+        # The call: exactly the expected arguments
+        positional, keywords, optkw = printedcall(rec)
+        @test positional[1] === :model
+        @test optkw == Dict(:iterator => QuoteNode(rec.iterator), :linsolver => QuoteNode(rec.linsolver))
+        expected = Dict{Symbol, Any}(:formulation => QuoteNode(rec.formulation), :reduction => QuoteNode(rec.reduction),
+            :storage => QuoteNode(rec.storage))
+        Threads.nthreads() == 1 || (expected[:numthreads] = 1)
+        @test keywords == expected
+    end
+
+    @testset "show: the call, with unfixed = $(repr(unfixed))" for (unfixed, printed) in (
+            ([2:8; 10:20], :unfixed), (3, 3), (ChainLandmark{Float64}, :(ChainLandmark{Float64})))
+        model = posechain(8, 12)
+        rec = NLLSModel.recommendoptimizer(model; unfixed, numthreads=Threads.nthreads(), max_dense_bytes=10^6)
+        _, keywords, _ = printedcall(rec)
+        @test keywords == Dict(:formulation => QuoteNode(rec.formulation), :reduction => QuoteNode(rec.reduction),
+            :storage => QuoteNode(rec.storage), :unfixed => printed, :max_dense_bytes => 10^6)
+        @test occursin("`unfixed` stands for", longform(rec)) == (printed === :unfixed)
+        # numthreads only when it is not the default
+        rec = NLLSModel.recommendoptimizer(model; unfixed, numthreads=Threads.nthreads() + 1)
+        _, keywords, _ = printedcall(rec)
+        @test keywords[:numthreads] == Threads.nthreads() + 1
+        @test !haskey(keywords, :max_dense_bytes)
+    end
+
+    @testset "show: every reason" begin
+        # Each rule's sentence, with the feature values that decided it
+        reason(f; kw...) = flat(f(recby(; kw...)))
+        @test occursin("not residuals", reason(NLLSModel.formulation_reason; features=recfeatures(allresiduals=false)))
+        @test occursin("could not be factorized (NotPositiveDefinite, smallest diagonal entry -2.0)",
+            reason(NLLSModel.formulation_reason; features=recfeatures(status=DampedLinearSolve.NotPositiveDefinite, condition=Inf, diag_min=-2.0)))
+        @test occursin("12.3, is below 1.0e12", reason(NLLSModel.formulation_reason; features=recfeatures(condition=12.345)))
+        @test occursin("3.0e13, is at least 1.0e12", reason(NLLSModel.formulation_reason; formulation=:tall, features=recfeatures(condition=3e13)))
+        @test occursin("cannot be built for this model (why not)", reason(NLLSModel.formulation_reason;
+            features=recfeatures(condition=3e13), rule_f=:F_tall_unavailable, fallback="why not"))
+        schur = recfeatures(hessiansystem=:schur_dense, retained=6, eliminated=9, dimension=15)
+        @test occursin("9 of the 15 dimensions are eliminated", reason(NLLSModel.reduction_reason; reduction=:eliminate, features=schur))
+        @test occursin("eliminated by QR", reason(NLLSModel.reduction_reason; formulation=:tall, reduction=:eliminate, features=schur))
+        @test occursin("single unfixed variable", reason(NLLSModel.reduction_reason; features=recfeatures(nvariables=1)))
+        @test occursin("Jacobian path: no variables", reason(NLLSModel.reduction_reason; formulation=:tall))
+        @test occursin("no eliminable variables", reason(NLLSModel.reduction_reason))
+        @test occursin("the 6×6 reduced system is stored sparse, from the predicted fill",
+            reason(NLLSModel.storage_reason; reduction=:eliminate, storage=:sparse, features=schur))
+        @test occursin("static (stack-allocated) 2×2", reason(NLLSModel.storage_reason; features=recfeatures(hessiansystem=:static, dimension=2)))
+        @test occursin("the 4×4 Hessian is stored dense, from its sparsity", reason(NLLSModel.storage_reason))
+        @test occursin("a single variable's always is", reason(NLLSModel.storage_reason; features=recfeatures(nvariables=1)))
+        @test occursin("the 6×4 Jacobian is stored sparse", reason(NLLSModel.storage_reason; formulation=:tall, storage=:sparse))
+        @test occursin("Jacobian path: the reduced system is stored dense", reason(NLLSModel.storage_reason; formulation=:tall, reduction=:eliminate))
+        @test occursin("QR", reason(NLLSModel.linsolver_reason; formulation=:tall))
+        @test occursin("can be indefinite", reason(NLLSModel.linsolver_reason; features=recfeatures(allresiduals=false)))
+        @test occursin("sparse Hessian", reason(NLLSModel.linsolver_reason; features=recfeatures(hessiansystem=:sparse)))
+        @test occursin("Schur complement", reason(NLLSModel.linsolver_reason; features=schur))
+        @test occursin("static Hessian", reason(NLLSModel.linsolver_reason; features=recfeatures(hessiansystem=:static)))
+        @test occursin("dense Hessian", reason(NLLSModel.linsolver_reason))
+        @test occursin("dogleg, which does not solve again", reason(NLLSModel.iterator_reason))
+        @test occursin("spread (largest / smallest), 1.0e7, is at least 1.0e6", reason(NLLSModel.iterator_reason; features=recfeatures(diagspread=1e7)))
+        lm = reason(NLLSModel.iterator_reason; features=recfeatures(status=DampedLinearSolve.Indefinite, condition=Inf, t_solve=1e-6))
+        @test occursin("dogleg is not chosen because the undamped solve returned Indefinite", lm)
+        @test occursin("Inf, is not below 1.0e8", lm)
+        @test occursin("a solve (1.0 μs) costs less than a linearization (10.0 μs)", lm)
+        # Times in the unit that reads best
+        @test NLLSModel.fmttime(2.5e-8) == "25.0 ns"
+        @test NLLSModel.fmttime(2.5e-5) == "25.0 μs"
+        @test NLLSModel.fmttime(2.5e-2) == "25.0 ms"
+        @test NLLSModel.fmttime(25.0) == "25.0 s"
+        @test NLLSModel.fmtnum(Inf) == "Inf" && NLLSModel.fmtnum(123456) == "123000.0"
+        # Wrapping: at most the width, indented, every word kept
+        text = sprint(NLLSModel.printwrapped, repeat("word ", 40), 4)
+        @test all(line -> textwidth(line) <= 80 && startswith(line, "    "), split(chomp(text), '\n'))
+        @test split(text) == fill("word", 40)
     end
 
     @testset "keywords are passed on" begin

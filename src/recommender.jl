@@ -197,3 +197,151 @@ function recommendoptimizer(model::Model; unfixed=nothing, numthreads=StaticInt(
     return OptimizationRecommendation(formulation, reduction, storage, linsolver, iterator, unfixed, numthreads,
         Int(max_dense_bytes), features, rules, fallback)
 end
+
+# Display
+
+function Base.show(io::IO, rec::OptimizationRecommendation)
+    print(io, "OptimizationRecommendation(formulation = ", repr(rec.formulation), ", reduction = ", repr(rec.reduction),
+        ", storage = ", repr(rec.storage), ", linsolver = ", repr(rec.linsolver), ", iterator = ", repr(rec.iterator), ")")
+end
+
+# Numbers for reading: three significant digits
+fmtnum(x::Real) = isfinite(x) ? string(round(Float64(x); sigdigits=3)) : string(x)
+function fmttime(t::Real)
+    t < 1e-6 && return string(round(t * 1e9; sigdigits=3), " ns")
+    t < 1e-3 && return string(round(t * 1e6; sigdigits=3), " μs")
+    t < 1 && return string(round(t * 1e3; sigdigits=3), " ms")
+    return string(round(t; sigdigits=3), " s")
+end
+
+# Prints `text` word-wrapped to `width` columns, each line indented by `indent` spaces
+function printwrapped(io::IO, text::AbstractString, indent::Int, width::Int=80)
+    col = 0
+    for word in split(text)
+        if col > 0 && col + 1 + textwidth(word) > width
+            println(io)
+            col = 0
+        end
+        if col == 0
+            print(io, " "^indent, word)
+            col = indent + textwidth(word)
+        else
+            print(io, " ", word)
+            col += 1 + textwidth(word)
+        end
+    end
+    println(io)
+end
+
+condition_text(f::RecommenderFeatures) = "the condition estimate of the Jacobi-scaled Hessian, $(fmtnum(f.condition))"
+
+function formulation_reason(rec::OptimizationRecommendation)
+    f = rec.features
+    rule = rec.rules.formulation
+    rule === :F_nonresidual && return "Some costs are not residuals (AbstractResidual), so the model has no Jacobian: " *
+        "the Hessian path (normal equations) is the only one."
+    rule === :F_singular && return "The undamped Hessian could not be factorized ($(f.status), smallest diagonal entry " *
+        "$(fmtnum(f.diag_min))): it is rank-deficient or indefinite, which a Jacobian is no better conditioned for, and " *
+        "damping handles. The normal equations."
+    rule === :F_wellconditioned && return "Every cost is a residual, and $(condition_text(f)), is below " *
+        "$(fmtnum(REC_TALL_CONDITION)): the normal equations are accurate enough."
+    rule === :F_illconditioned && return "Every cost is a residual, and $(condition_text(f)), is at least " *
+        "$(fmtnum(REC_TALL_CONDITION)): forming JᵀJ squares the conditioning of J, so the Jacobian is factorized instead."
+    return "$(uppercasefirst(condition_text(f))), is at least $(fmtnum(REC_TALL_CONDITION)), which favours the Jacobian " *
+        "path, but it cannot be built for this model ($(rec.fallback)), so the normal equations."
+end
+
+function reduction_reason(rec::OptimizationRecommendation)
+    f = rec.features
+    path = rec.rules.reduction === :RS_jacobian ? "Jacobian" : "Hessian"
+    rec.reduction === :eliminate || return "What reduction = :auto builds on the $path path: no variables are eliminated " *
+        (f.nvariables == 1 ? "(a single unfixed variable never is)." : "(no eliminable variables, or a structure that does not allow it).")
+    rec.rules.reduction === :RS_jacobian && return "What reduction = :auto builds on the Jacobian path: the eliminable " *
+        "variables are eliminated by QR."
+    return "What reduction = :auto builds on the Hessian path: $(f.eliminated) of the $(f.dimension) dimensions are " *
+        "eliminated (the Schur complement), leaving a reduced system of $(f.retained)."
+end
+
+function storage_reason(rec::OptimizationRecommendation)
+    f = rec.features
+    if rec.rules.storage === :RS_jacobian
+        what = rec.reduction === :eliminate ? "the reduced system" : "the $(f.nresiduals)×$(f.dimension) Jacobian"
+        return "What storage = :auto builds on the Jacobian path: $what is stored $(rec.storage)."
+    end
+    f.hessiansystem === :static && return "What storage = :auto builds: one variable of static size, so a static " *
+        "(stack-allocated) $(f.dimension)×$(f.dimension) system."
+    what = rec.reduction === :eliminate ? "the $(f.retained)×$(f.retained) reduced system" :
+        "the $(f.dimension)×$(f.dimension) Hessian"
+    how = rec.reduction === :eliminate ? ", from the predicted fill of its Cholesky factor." :
+        f.nvariables == 1 ? ", as a single variable's always is." : ", from its sparsity and size."
+    return "What storage = :auto builds: $what is stored $(rec.storage)$how"
+end
+
+function linsolver_reason(rec::OptimizationRecommendation)
+    rule = rec.rules.linsolver
+    rule === :L_tall && return "QR of the Jacobian, on the Jacobian path."
+    rule === :L_nonresidual && return "LDLᵀ: some costs are not residuals, so the Hessian can be indefinite."
+    rule === :L_sparse && return "LDLᵀ, which linsolver = :auto uses for a sparse Hessian."
+    rule === :L_schur && return "Cholesky of the reduced system (falling back to Bunch-Kaufman), which linsolver = :auto " *
+        "uses for the Schur complement."
+    return "Cholesky, which linsolver = :auto uses for a $(rule === :L_static ? "static" : "dense") Hessian."
+end
+
+function iterator_reason(rec::OptimizationRecommendation)
+    f = rec.features
+    rule = rec.rules.iterator
+    rule === :I_dogleg && return "The undamped solve succeeded, $(condition_text(f)), is below " *
+        "$(fmtnum(REC_DOGLEG_CONDITION)), the diagonal's spread (largest / smallest), $(fmtnum(f.diagspread)), is below " *
+        "$(fmtnum(REC_DIAGSPREAD)), and a solve costs at least a linearization: dogleg, which does not solve again after " *
+        "a rejected step."
+    rule === :I_dtd && return "The diagonal's spread (largest / smallest), $(fmtnum(f.diagspread)), is at least " *
+        "$(fmtnum(REC_DIAGSPREAD)): Levenberg-Marquardt with its damping scaled by the diagonal."
+    t = dogleg_tests(f)
+    failed = String[]
+    t.success || push!(failed, "the undamped solve returned $(f.status)")
+    t.condition || push!(failed, "$(condition_text(f)), is not below $(fmtnum(REC_DOGLEG_CONDITION))")
+    t.solvecost || push!(failed, "a solve ($(fmttime(f.t_solve))) costs less than a linearization ($(fmttime(f.t_linearize)))")
+    return "Levenberg-Marquardt: dogleg is not chosen because " * join(failed, ", and ") * "."
+end
+
+# The equivalent call to `optimize!(model, options; ...)`, as lines of code
+function recommendation_call(rec::OptimizationRecommendation)
+    lines = ["optimize!(model,", "    OptimizationOptions(iterator = $(repr(rec.iterator)),",
+        "        linsolver = $(repr(rec.linsolver)));",
+        "    formulation = $(repr(rec.formulation)), reduction = $(repr(rec.reduction)), storage = $(repr(rec.storage))"]
+    extra = String[]
+    if !isnothing(rec.unfixed)
+        push!(extra, "unfixed = " * ((rec.unfixed isa Integer || rec.unfixed isa Type) ? string(rec.unfixed) : "unfixed"))
+    end
+    dynamic(rec.numthreads) == Threads.nthreads() || push!(extra, "numthreads = $(Int(dynamic(rec.numthreads)))")
+    rec.max_dense_bytes == MAX_DENSE_BYTES || push!(extra, "max_dense_bytes = $(rec.max_dense_bytes)")
+    if !isempty(extra)
+        lines[end] *= ","
+        push!(lines, "    " * join(extra, ", "))
+    end
+    lines[end] *= ")"
+    return lines
+end
+
+function Base.show(io::IO, ::MIME"text/plain", rec::OptimizationRecommendation)
+    f = rec.features
+    printwrapped(io, "OptimizationRecommendation for $(f.nvariables) unfixed variable$(f.nvariables == 1 ? "" : "s") of " *
+        "total dimension $(f.dimension), $(f.ncosts) cost$(f.ncosts == 1 ? "" : "s") and $(f.nresiduals) residual row" *
+        "$(f.nresiduals == 1 ? "" : "s"), at the model's current values:", 0)
+    for (name, reason) in ((:formulation, formulation_reason), (:reduction, reduction_reason), (:storage, storage_reason),
+            (:linsolver, linsolver_reason), (:iterator, iterator_reason))
+        println(io, "  ", rpad(name, 11), " = ", repr(getfield(rec, name)))
+        printwrapped(io, reason(rec), 6)
+    end
+    printwrapped(io, "Measured once each, after a warm-up call: a cost evaluation $(fmttime(f.t_cost)), a linearization " *
+        "$(fmttime(f.t_linearize)), an undamped solve $(fmttime(f.t_solve)). The thresholds are starting values, not " *
+        "measured.", 0)
+    println(io)
+    println(io, "The same choices, by hand (with SecondOrderOptimization loaded):")
+    (isnothing(rec.unfixed) || rec.unfixed isa Integer || rec.unfixed isa Type) ||
+        println(io, "(`unfixed` stands for the value the recommendation was made with.)")
+    lines = recommendation_call(rec)
+    for (k, line) in enumerate(lines)
+        k == length(lines) ? print(io, "  ", line) : println(io, "  ", line)
+    end
+end
