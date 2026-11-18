@@ -92,8 +92,8 @@ struct MultiVarDenseFDF{LS, P, U}
 end
 @inline function (f::MultiVarDenseFDF)(g, H_mat::Matrix{Float64}, vars)
     full_vars = sync_unfixed_vars!(f.problem, f.unfixed_inds, vars)
-    orig_A = getA(f.linsystem)
-    bdm = DenseBlockLinearSystem{Float64, Matrix{Float64}}(H_mat, orig_A.rowblockoffsets, orig_A.columnblockoffsets, orig_A.rowblocksizes, orig_A.columnblocksizes)
+    # The optimizer's matrix, with the system's layout, which it shares: this allocates nothing
+    bdm = DenseBlockLinearSystem(H_mat, getA(f.linsystem))
     if f.linsystem isa LinearSystemShared
         target = replace_first_ls(f.linsystem, MultiVariateLSdense_ls(bdm, g))
         c = costgradhess!(target, full_vars, f.problem.costs)

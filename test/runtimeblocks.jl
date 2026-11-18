@@ -60,3 +60,11 @@ end
     @test Matrix(jac) ≈ Matrix(jac_s)
 end
 
+
+@testset "the dense fdf! fills whichever Hessian matrix it is handed (AL1)" begin
+    for V in (SVector{2, Float64}, Vector{Float64})
+        _, fdf!, x, H = optimvars(chainproblem(V, 6); numthreads=static(1))
+        @test H === nothing && fdf!.linsystem isa NLLSModel.LinearSystem # dense, on one thread
+        @test alternating_dense_ok(fdf!, x)
+    end
+end

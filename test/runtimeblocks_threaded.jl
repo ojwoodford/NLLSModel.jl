@@ -60,3 +60,13 @@ end
     @test res1(r1, x1) ≈ res4(r4, x4)
     @test r1 ≈ r4
 end
+
+@testset "the threaded dense fdf! fills whichever Hessian matrix it is handed (AL1)" begin
+    p = chainproblem(SVector{2, Float64}, 6)
+    for _ in 2:300, i in 1:5
+        addcost!(p, ChainRes{SVector{2, Float64}}(SVector(0.1i, -0.2), i, i + 1))
+    end
+    _, fdf!, x, H = optimvars(p; numthreads=static(4))
+    @test H === nothing && fdf!.linsystem isa NLLSModel.LinearSystemShared # dense, one copy per thread
+    @test alternating_dense_ok(fdf!, x)
+end
