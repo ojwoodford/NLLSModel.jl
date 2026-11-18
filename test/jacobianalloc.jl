@@ -57,7 +57,7 @@ fixture("allocations", "frontdoor", "jacobianalloc", "jacobianproblems")
         m = make()
         if formulation === :jacobian
             f, _, rj, x0, J = optimvars_nls(m; numthreads=static(1), storage=:dense)
-            obj = JacobianObjective(f, AllocExt.TallResJac(rj), J)
+            obj = JacobianObjective(f, AllocExt.JacobianResJac(rj), J)
         else
             f, fdf!, x0, H = optimvars(m; numthreads=static(1))
             obj = HessianObjective(f, fdf!; H)

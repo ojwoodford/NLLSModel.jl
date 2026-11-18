@@ -124,4 +124,4 @@ function wdynproblem()
     return p
 end
 
-wtuple(w) = (w.cost, w.tall, w.normal)
+wtuple(w) = (w.cost, w.jacobianfill, w.hessianfill)

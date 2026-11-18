@@ -24,8 +24,8 @@ fixture("recommender")
 
     @testset "rule F, the formulation" begin
         F(; kw...) = NLLSModel.rule_formulation(recfeatures(; kw...))
-        @test F(condition=NLLSModel.REC_TALL_CONDITION) == (:jacobian, :F_illconditioned)
-        @test F(condition=prevfloat(NLLSModel.REC_TALL_CONDITION)) == (:hessian, :F_wellconditioned)
+        @test F(condition=NLLSModel.REC_JACOBIAN_CONDITION) == (:jacobian, :F_illconditioned)
+        @test F(condition=prevfloat(NLLSModel.REC_JACOBIAN_CONDITION)) == (:hessian, :F_wellconditioned)
         @test F(condition=Inf, status=DampedLinearSolve.NotPositiveDefinite) == (:hessian, :F_singular)
         @test F(condition=1e20, allresiduals=false) == (:hessian, :F_nonresidual)
         @test F(condition=Inf, allresiduals=false) == (:hessian, :F_nonresidual)
@@ -79,7 +79,7 @@ fixture("recommender")
             @test (rec.reduction, rec.storage) == NLLSModel.reductionstorage(NLLSModel.hessiansystemkind(optimvars(model; numthreads=static(1))[4]))
         else
             @test rec.rules.reduction === rec.rules.storage === :RS_jacobian
-            @test rec.rules.linsolver === :L_tall
+            @test rec.rules.linsolver === :L_jacobian
             @test (rec.reduction, rec.storage) == NLLSModel.jacobianreductionstorage(optimvars_nls(model; numthreads=static(1))[5])
         end
         @test (rec.reduction === :eliminate) == (spec.kind in (:schur_dense, :schur_sparse))
@@ -95,8 +95,8 @@ fixture("recommender")
 
     @testset "the fallback from the Jacobian path" begin
         rec = NLLSModel.recommendoptimizer(adaptivemodel(); numthreads=static(1))
-        @test rec.features.condition >= NLLSModel.REC_TALL_CONDITION
-        @test rec.formulation === :hessian && rec.rules.formulation === :F_tall_unavailable
+        @test rec.features.condition >= NLLSModel.REC_JACOBIAN_CONDITION
+        @test rec.formulation === :hessian && rec.rules.formulation === :F_jacobian_unavailable
         @test occursin("adaptive", rec.fallback)
         @test rec.rules.reduction === :RS_hessian && rec.rules.linsolver === :L_dense
     end
@@ -119,8 +119,8 @@ fixture("recommender")
                 ("eliminated, dense", () -> posechain(8, 12), (storage=:dense,)),
                 ("eliminated, sparse", () -> posechain(8, 12), (storage=:sparse,)))
             model = make()
-            s1, x1 = tallstep(model, :qr; kw...)
-            s2, x2 = tallstep(model, :auto; kw...)
+            s1, x1 = jacobianstep(model, :qr; kw...)
+            s2, x2 = jacobianstep(model, :auto; kw...)
             @test s1 == s2 == DampedLinearSolve.Success
             @test x1 == x2
         end
@@ -167,7 +167,7 @@ fixture("recommender")
         @test rec.formulation === :hessian
         # Finitely and badly conditioned: the Jacobian path, with QR
         rec = NLLSModel.recommendoptimizer(linearmodel(scaledjacobian(3, 1 - 1e-13)); numthreads=static(1))
-        @test isfinite(rec.features.condition) && rec.features.condition >= NLLSModel.REC_TALL_CONDITION
+        @test isfinite(rec.features.condition) && rec.features.condition >= NLLSModel.REC_JACOBIAN_CONDITION
         @test rec.formulation === :jacobian && rec.linsolver === :qr
         # The estimate of a system that does not factorize
         ls = DampedLinearSolve.makehessiansystem(zeros(2, 2), :cholesky)
@@ -244,7 +244,7 @@ fixture("recommender")
         @test occursin("12.3, is below 1.0e12", reason(NLLSModel.formulation_reason; features=recfeatures(condition=12.345)))
         @test occursin("3.0e13, is at least 1.0e12", reason(NLLSModel.formulation_reason; formulation=:jacobian, features=recfeatures(condition=3e13)))
         @test occursin("cannot be built for this model (why not)", reason(NLLSModel.formulation_reason;
-            features=recfeatures(condition=3e13), rule_f=:F_tall_unavailable, fallback="why not"))
+            features=recfeatures(condition=3e13), rule_f=:F_jacobian_unavailable, fallback="why not"))
         schur = recfeatures(hessiansystem=:schur_dense, retained=6, eliminated=9, dimension=15)
         @test occursin("9 of the 15 dimensions are eliminated", reason(NLLSModel.reduction_reason; reduction=:eliminate, features=schur))
         @test occursin("eliminated by QR", reason(NLLSModel.reduction_reason; formulation=:jacobian, reduction=:eliminate, features=schur))

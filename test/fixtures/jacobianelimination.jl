@@ -162,7 +162,7 @@ function elim_warmbytes(make; numthreads, storage=:dense, linsolver=:auto, n=30)
     opts = OptimizationOptions(iterator=:levenbergmarquardt, linsolver=linsolver, maxiters=n, reldcost=0.0, absdcost=0.0, dstep=0.0, gtol=0.0, maxstall=10^6,
         maxtime=10^6) # No time limit: on a loaded machine a run must not stop early
     f, _, rj, x0, J = optimvars_nls(make(); numthreads, reduction=:eliminate, storage, min_work=0)
-    obj = JacobianObjective(f, AllocExt.TallResJac(rj), J)
+    obj = JacobianObjective(f, AllocExt.JacobianResJac(rj), J)
     ws = OptimizationWorkspace(x0, obj, opts)
     start = copy(x0)
     runs = map(1:3) do _

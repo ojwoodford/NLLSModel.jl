@@ -75,7 +75,7 @@ function sizedmodel(N; nposes=6, nlms=10, seed=31)
 end
 
 # Allocations of one warm call of the normal path's evaluators
-function normalallocs(model; numthreads, kwargs...)
+function hessianallocs(model; numthreads, kwargs...)
     f, fdf!, x0, H = optimvars(model; numthreads, kwargs...)
     g = zeros(nvars(x0))
     return warmallocs_fdf(fdf!, g, H, x0), warmallocs_f(f, x0), fdf!.linsystem isa NLLSModel.LinearSystemShared, f.nthreads > 1

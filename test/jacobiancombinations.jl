@@ -5,7 +5,7 @@ import BlockLinearSystems: SchurBlockJacobian
 include("fixtures/loader.jl")
 fixture("jacobiancombinations")
 
-# NTP4: the table of what `formulation = :jacobian` supports (the front door's docstring, `TALL_FORMULATION_DOC` in
+# NTP4: the table of what `formulation = :jacobian` supports (the front door's docstring, `JACOBIAN_FORMULATION_DOC` in
 # src/keywords.jl, the README and docs/src/index.md), as data. Every listed combination reaches the normal path's cost on a
 # model with eliminable variables; every other one throws before any residual is evaluated. Which (prototype, solver,
 # iterator) combinations work is the optimizer's table, tested there: this package never inspects `linsolver` or
@@ -17,12 +17,12 @@ fixture("jacobiancombinations")
     c0 = NLLSModel.cost(model)
     cn = NLLSModel.cost(first(optimize(model, OptimizationOptions(iterator=:levenbergmarquardt, maxiters=200); numthreads=static(1))))
 
-    @testset "reduction = $reduction, storage = $storage" for ((reduction, storage), (proto, linsolvers)) in TALL_TABLE
+    @testset "reduction = $reduction, storage = $storage" for ((reduction, storage), (proto, linsolvers)) in JACOBIAN_TABLE
         @test optimvars_nls(model; reduction, storage, numthreads=static(1))[5] isa proto
-        for linsolver in ALL_LINSOLVERS, iterator in TALL_ITERATORS
+        for linsolver in ALL_LINSOLVERS, iterator in JACOBIAN_ITERATORS
             listed = linsolver in linsolvers
             (iterator === :levenbergmarquardt || (listed && linsolver === :auto)) || continue
-            TALL_EVALS[] = 0
+            JACOBIAN_EVALS[] = 0
             outcome = try
                 options = OptimizationOptions(; iterator, linsolver, maxiters=200)
                 solved, result = optimize(model, options; formulation=:jacobian, reduction, storage, numthreads=static(1))
@@ -45,7 +45,7 @@ fixture("jacobiancombinations")
                 @test c ≈ result.bestcost rtol=1e-12
             else
                 @test outcome isa ArgumentError
-                @test TALL_EVALS[] == 0 # Thrown before any evaluation
+                @test JACOBIAN_EVALS[] == 0 # Thrown before any evaluation
             end
         end
     end

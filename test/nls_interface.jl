@@ -25,10 +25,10 @@ fixture("nls_interface")
         addcost!(prob, TestRosenbrock2())
 
         flat = flat_optimvars_nls(prob)
-        r = zeros(flat.layout_tall.M)
+        r = zeros(flat.layout_jacobian.M)
         J = copy(flat.J_proto)
         c = flat.resjac!(r, J, flat.x0)
-        J_fd = finite_diff_jac(flat.res!, flat.x0, flat.layout_tall.M)
+        J_fd = finite_diff_jac(flat.res!, flat.x0, flat.layout_jacobian.M)
         @test isapprox(J, J_fd, atol=1e-5)
         @test isapprox(c, 0.5 * dot(r, r); atol=1e-12)
         @test isapprox(c, flat.f(flat.x0); atol=1e-12)
@@ -92,14 +92,14 @@ fixture("nls_interface")
         H_norm = zeros(2, 2)
         c_norm = fdf!_norm(g_norm, H_norm, x0_norm)
 
-        f_tall, res!_tall, resjac!_tall, x0_tall, J_proto = optimvars_nls(prob1, numthreads=static(1))
-        r_tall = zeros(2)
-        J_tall = copy(J_proto)
-        c_tall = resjac!_tall(r_tall, J_tall, x0_tall)
+        f_jac, res!_jac, resjac!_jac, x0_jac, J_proto = optimvars_nls(prob1, numthreads=static(1))
+        r_jac = zeros(2)
+        J_jac = copy(J_proto)
+        c_jac = resjac!_jac(r_jac, J_jac, x0_jac)
 
-        @test isapprox(J_tall' * r_tall, g_norm; atol=1e-12)
-        @test isapprox(J_tall' * J_tall, H_norm; atol=1e-12)
-        @test isapprox(c_tall, c_norm; atol=1e-12)
+        @test isapprox(J_jac' * r_jac, g_norm; atol=1e-12)
+        @test isapprox(J_jac' * J_jac, H_norm; atol=1e-12)
+        @test isapprox(c_jac, c_norm; atol=1e-12)
 
         # A first-order kernel (zero second derivative): IRLS
         prob2 = Model(Float64, RobustWrapper{ScalarVarIndRes, HuberKernel{Float64, Static.False}})
@@ -113,9 +113,9 @@ fixture("nls_interface")
         _, _, resjac2, _, J_proto2 = optimvars_nls(prob2, numthreads=static(1))
         r2 = zeros(1)
         J2 = copy(J_proto2)
-        c_tall2 = resjac2(r2, J2, x02)
+        c_jac2 = resjac2(r2, J2, x02)
         @test isapprox(J2' * r2, g2; atol=1e-12)
-        @test isapprox(c_tall2, c2; atol=1e-12)
+        @test isapprox(c_jac2, c2; atol=1e-12)
 
         # A second-order kernel: IRLS with the Triggs correction, across scales
         for scale in [1e-3, 1.0, 1e3]
@@ -130,11 +130,11 @@ fixture("nls_interface")
             _, _, resjac3, _, J_proto3 = optimvars_nls(prob3, numthreads=static(1))
             r3 = zeros(1)
             J3 = copy(J_proto3)
-            c_tall3 = resjac3(r3, J3, x03)
+            c_jac3 = resjac3(r3, J3, x03)
 
             @test isapprox(J3' * r3, g3; atol=1e-9 * scale)
             @test isapprox(J3' * J3, H3; atol=1e-9 * scale)
-            @test isapprox(c_tall3, c3; atol=1e-9 * scale^2)
+            @test isapprox(c_jac3, c3; atol=1e-9 * scale^2)
         end
     end
 

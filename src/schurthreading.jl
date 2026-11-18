@@ -81,9 +81,9 @@ function schur_thread_buffer(ls::MultiVariateLSSchur_ls)
 end
 
 # Like `sharedlinearsystem`, but the extra buffers have no E and C storage of their own
-# One buffer per thread of `normalthreads`
-function sharedschurlinearsystem(ls::LinearSystem, work::Integer, numthreads::StaticInt, costsplit::Integer, min_work=MIN_WORK_PER_THREAD_NORMAL)
-    n = normalthreads(work, min_work, dynamic(numthreads), costsplit)
+# One buffer per thread of `hessianthreads`
+function sharedschurlinearsystem(ls::LinearSystem, work::Integer, numthreads::StaticInt, costsplit::Integer, min_work=MIN_WORK_PER_THREAD_HESSIAN)
+    n = hessianthreads(work, min_work, dynamic(numthreads), costsplit)
     n == 1 && return ls
     return sharedschurlinearsystem(ls, static(n))
 end

@@ -29,7 +29,7 @@ fixture("allocations", "eliminablesizes")
         end
         # Zero allocation per evaluation, serial (threaded: eliminablesizes_threaded.jl)
         for storage in (:dense, :sparse)
-            @test normalallocs(model; numthreads=static(1), reduction=:eliminate, storage)[1:2] == (0, 0)
+            @test hessianallocs(model; numthreads=static(1), reduction=:eliminate, storage)[1:2] == (0, 0)
             @test warmallocs(model; reduction=:eliminate, storage, numthreads=static(1)) == (0, 0, 0)
         end
     end

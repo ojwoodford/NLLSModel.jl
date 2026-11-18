@@ -24,12 +24,12 @@ fixture("manyvariables")
             @test J' * r ≈ g rtol=1e-9 atol=1e-12
             @test J' * J ≈ Symmetric(H) rtol=1e-9 atol=1e-12
             # The tall solve reaches the normal one's cost
-            normal = deepcopy(model)
-            optimize!(normal, opts; unfixed, numthreads=static(numthreads))
-            tall = deepcopy(model)
-            optimize!(tall, opts; formulation=:jacobian, unfixed, numthreads=static(numthreads))
-            @test NLLSModel.cost(normal) < NLLSModel.cost(model)
-            @test NLLSModel.cost(tall) ≈ NLLSModel.cost(normal) rtol=1e-8
+            solved_hes = deepcopy(model)
+            optimize!(solved_hes, opts; unfixed, numthreads=static(numthreads))
+            solved_jac = deepcopy(model)
+            optimize!(solved_jac, opts; formulation=:jacobian, unfixed, numthreads=static(numthreads))
+            @test NLLSModel.cost(solved_hes) < NLLSModel.cost(model)
+            @test NLLSModel.cost(solved_jac) ≈ NLLSModel.cost(solved_hes) rtol=1e-8
         end
     end
 end

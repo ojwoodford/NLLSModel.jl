@@ -14,7 +14,7 @@ fixture("allocations", "eliminablesizes")
         # Zero allocation per evaluation, threaded (rules.md 21's 1.10 bound for a threaded call)
         nt = Threads.nthreads()
         for storage in (:dense, :sparse)
-            a = normalallocs(model; numthreads=static(nt), reduction=:eliminate, storage, min_work=0, min_work_cost=0)
+            a = hessianallocs(model; numthreads=static(nt), reduction=:eliminate, storage, min_work=0, min_work_cost=0)
             @test threaded_allocs_ok(a[1], a[3]) && threaded_allocs_ok(a[2], a[4])
             @test warmallocs(model; reduction=:eliminate, storage, numthreads=static(nt), min_work=0) == (0, 0, 0)
         end

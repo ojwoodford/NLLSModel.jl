@@ -16,7 +16,7 @@ fixture("allocations", "runtimeblocks")
             p
         end
         p1, p4 = build(), build()
-        @test NLLSModel.workestimates(p1, nothing).normal >= NLLSModel.MIN_WORK_PER_THREAD_NORMAL
+        @test NLLSModel.workestimates(p1, nothing).hessianfill >= NLLSModel.MIN_WORK_PER_THREAD_HESSIAN
         f1, fdf1!, x1, H1 = optimvars(p1; numthreads=static(1))
         f4, fdf4!, x4, H4 = optimvars(p4; numthreads=static(4))
         @test fdf4!.linsystem isa NLLSModel.LinearSystemShared # One copy of the system per thread
@@ -55,7 +55,7 @@ end
     # Tall path: work (not cost count) decides whether the evaluators thread, and the layout records it
     _, res1, _, x1, _ = optimvars_nls(p; numthreads=static(1))
     _, res4, _, x4, _ = optimvars_nls(p; numthreads=static(4), min_work=10)
-    @test res4.layout.work == NLLSModel.workestimates(p, nothing).tall
+    @test res4.layout.work == NLLSModel.workestimates(p, nothing).jacobianfill
     r1 = zeros(res1.layout.M); r4 = zeros(res4.layout.M)
     @test res1(r1, x1) ≈ res4(r4, x4)
     @test r1 ≈ r4

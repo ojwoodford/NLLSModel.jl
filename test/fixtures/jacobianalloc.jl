@@ -31,7 +31,7 @@ end
 staticsolve(x0, obj, opts, ws) = SecondOrderOptimization.optimize(x0, obj, opts; workspace=ws)
 function staticsolve_allocs(f, rj, x0, J)
     opts = OptimizationOptions(iterator=:levenbergmarquardt, maxiters=10, reldcost=0.0, absdcost=0.0, dstep=0.0, gtol=0.0, maxstall=10^6)
-    obj = JacobianObjective(f, AllocExt.TallResJac(rj), J)
+    obj = JacobianObjective(f, AllocExt.JacobianResJac(rj), J)
     ws = OptimizationWorkspace(x0, obj, opts)
     return allocs_warm(staticsolve, x0, obj, opts, ws)
 end

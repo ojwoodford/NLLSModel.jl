@@ -6,7 +6,7 @@
 # A general `AbstractCost` has a Hessian, so it counts as `m = 1` in the normal-fill form. The work of the residual
 # function itself is not estimated. The estimates are computed once, at setup (`workestimates`), and each kind of work
 # is split over `threadcount(work, floor, numthreads, costsplit)` threads, decided then too: never more than the largest
-# number of costs of one type (`costsplit`), and for the normal fill at most `MAX_THREADS_NORMAL` (`normalthreads`).
+# number of costs of one type (`costsplit`), and for the normal fill at most `MAX_THREADS_HESSIAN` (`hessianthreads`).
 #
 # The defaults were measured on an Apple M1 Pro (8 performance and 2 efficiency cores), Julia 1.13.3, -t 8, 2026-11-14/15,
 # three runs. For each family and size every kind of work was timed on exactly 1 to 8 threads (minimum over repeated
@@ -31,15 +31,15 @@
 # 2026-11-14: no per-cost term). Before the count was bounded by the number of costs of one type, a model of a single
 # costly cost was given up to 4 threads for the normal fill (Procrustes, one cost: up to 1.39x slower than serial).
 const MIN_WORK_PER_THREAD_COST = 120
-const MIN_WORK_PER_THREAD_TALL = 280
-const MIN_WORK_PER_THREAD_NORMAL = 4_000
-const MAX_THREADS_NORMAL = 4
+const MIN_WORK_PER_THREAD_JACOBIAN = 280
+const MIN_WORK_PER_THREAD_HESSIAN = 4_000
+const MAX_THREADS_HESSIAN = 4
 
 # The three estimates for the variables selected by `unfixed` (an index, or a mask over `problem.variables`)
 struct WorkEstimates
     cost::Int
-    tall::Int
-    normal::Int
+    jacobianfill::Int
+    hessianfill::Int
 end
 
 unfixedsizes(problem, unfixed::Integer) = [i == unfixed ? Int(dynamic(nvars(v))) : 0 for (i, v) in enumerate(problem.variables)]
@@ -57,7 +57,7 @@ costrows(c::AbstractResidual) = Int(dynamic(nres(c)))
 costrows(::AbstractCost) = 1
 
 function vecwork(vec::Vector, sizes::Vector{Int})
-    w_cost = w_tall = w_lin = 0
+    w_cost = w_jac = w_lin = 0
     for c in vec
         m = costrows(c)
         vinds = varindices(c)
@@ -66,10 +66,10 @@ function vecwork(vec::Vector, sizes::Vector{Int})
             n += sizes[v]
         end
         w_cost += m
-        w_tall += m * (n + 1)
+        w_jac += m * (n + 1)
         w_lin += m * n * (n + 1)
     end
-    return (w_cost, w_tall, w_lin)
+    return (w_cost, w_jac, w_lin)
 end
 
 function workestimates(problem::Model, unfixed)
@@ -111,9 +111,9 @@ function threadcount(work::Integer, floor::Integer, numthreads::Integer, costspl
     return Int(clamp(work ÷ floor, 1, maxthreads))
 end
 
-# The normal fill: the same rule, at most `MAX_THREADS_NORMAL` threads (each thread fills its own copy of the system)
-normalthreads(work::Integer, floor::Integer, numthreads::Integer, costsplit::Integer) =
-    min(threadcount(work, floor, numthreads, costsplit), MAX_THREADS_NORMAL)
+# The normal fill: the same rule, at most `MAX_THREADS_HESSIAN` threads (each thread fills its own copy of the system)
+hessianthreads(work::Integer, floor::Integer, numthreads::Integer, costsplit::Integer) =
+    min(threadcount(work, floor, numthreads, costsplit), MAX_THREADS_HESSIAN)
 
 # The cost, summed over `nthreads` chunks of the costs, one per thread
 function cost_multithreaded(vars, costs::CostStruct, nthreads::Int)::Float64

@@ -25,20 +25,20 @@ fixture("allocations", "frontdoor", "jacobianelimination")
     @testset "the same cost as the normal path: $name, $storage" for (name, make, unfixed) in ELIM_MODELS, storage in (:dense, :sparse)
         model = make()
         c0 = NLLSModel.cost(model)
-        normal, _ = optimize(model, ElimOptions; unfixed, numthreads=static(1))
-        tall, rt = optimize(model, ElimOptions; formulation=:jacobian, reduction=:eliminate, storage, unfixed, numthreads=static(1))
+        solved_hes, _ = optimize(model, ElimOptions; unfixed, numthreads=static(1))
+        solved_jac, rt = optimize(model, ElimOptions; formulation=:jacobian, reduction=:eliminate, storage, unfixed, numthreads=static(1))
         plain, _ = optimize(model, ElimOptions; formulation=:jacobian, reduction=:none, unfixed, numthreads=static(1))
-        @test NLLSModel.cost(tall) ≈ NLLSModel.cost(normal) rtol=1e-8 atol=1e-10 * c0
-        @test NLLSModel.cost(tall) ≈ NLLSModel.cost(plain) rtol=1e-8 atol=1e-10 * c0
+        @test NLLSModel.cost(solved_jac) ≈ NLLSModel.cost(solved_hes) rtol=1e-8 atol=1e-10 * c0
+        @test NLLSModel.cost(solved_jac) ≈ NLLSModel.cost(plain) rtol=1e-8 atol=1e-10 * c0
         # linsolver = :qr, a QR of the reduced Jacobian, dense or sparse (a sparse one since SecondOrderOptimization TP6)
-        tallqr, _ = optimize(model, OptimizationOptions(iterator=:levenbergmarquardt, linsolver=:qr, maxiters=200); formulation=:jacobian,
+        jacobianqr, _ = optimize(model, OptimizationOptions(iterator=:levenbergmarquardt, linsolver=:qr, maxiters=200); formulation=:jacobian,
             reduction=:eliminate, storage, unfixed, numthreads=static(1))
-        @test NLLSModel.cost(tallqr) ≈ NLLSModel.cost(normal) rtol=1e-8 atol=1e-10 * c0
+        @test NLLSModel.cost(jacobianqr) ≈ NLLSModel.cost(solved_hes) rtol=1e-8 atol=1e-10 * c0
         # The solution is written back through the partition (syncvars!)
-        @test NLLSModel.cost(tall) ≈ rt.bestcost rtol=1e-12 atol=1e-10 * c0
-        @test NLLSModel.cost(tall) < 0.1 * c0
+        @test NLLSModel.cost(solved_jac) ≈ rt.bestcost rtol=1e-12 atol=1e-10 * c0
+        @test NLLSModel.cost(solved_jac) < 0.1 * c0
         # Only the unfixed variables moved
-        unfixed === nothing || @test all(k -> tall.variables[k] == model.variables[k], setdiff(eachindex(model.variables), unfixed))
+        unfixed === nothing || @test all(k -> solved_jac.variables[k] == model.variables[k], setdiff(eachindex(model.variables), unfixed))
     end
 
     @testset "the tables reproduce the plain Jacobian row for row: $name" for (name, make, unfixed) in ELIM_MODELS

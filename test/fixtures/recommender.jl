@@ -116,7 +116,7 @@ function hessianstep(model, linsolver)
 end
 
 # The undamped step of the tall system built with `linsolver`, from the prototype of `optimvars_nls`
-function tallstep(model, linsolver; kwargs...)
+function jacobianstep(model, linsolver; kwargs...)
     _, _, resjac!, x0, J = optimvars_nls(model; numthreads=static(1), kwargs...)
     n = NLLSModel.unfixeddims(model, NLLSModel.convertunfixed(nothing, model))
     ls = DampedLinearSolve.makejacobiansystem(J, n, linsolver)
@@ -134,7 +134,7 @@ function recby(; features=recfeatures(), formulation=:hessian, reduction=:none, 
         iterator=:levenbergmarquardt, unfixed=nothing, numthreads=static(Threads.nthreads()),
         max_dense_bytes=NLLSModel.MAX_DENSE_BYTES, fallback="",
         rule_f=NLLSModel.rule_formulation(features)[2], rule_rs=(formulation === :jacobian ? :RS_jacobian : :RS_hessian),
-        rule_l=(formulation === :jacobian ? :L_tall : NLLSModel.rule_linsolver(features.allresiduals, features.hessiansystem)[2]),
+        rule_l=(formulation === :jacobian ? :L_jacobian : NLLSModel.rule_linsolver(features.allresiduals, features.hessiansystem)[2]),
         rule_i=NLLSModel.rule_iterator(features)[2])
     rules = (formulation = rule_f, reduction = rule_rs, storage = rule_rs, linsolver = rule_l, iterator = rule_i)
     return NLLSModel.OptimizationRecommendation(formulation, reduction, storage, linsolver, iterator, unfixed, numthreads,

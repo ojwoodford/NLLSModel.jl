@@ -5,7 +5,7 @@
 
 # The thresholds of the rules. Every one is a starting value, not measured (rules.md 26); they are listed for measurement
 # in improvements.md item 25.
-const REC_TALL_CONDITION = 1e12       # F: the Jacobian path at or above this condition estimate. Starting value, not measured.
+const REC_JACOBIAN_CONDITION = 1e12       # F: the Jacobian path at or above this condition estimate. Starting value, not measured.
 const REC_DOGLEG_CONDITION = 1e8      # I: dogleg only below this condition estimate. Starting value, not measured.
 const REC_DIAGSPREAD = 1e6            # I: dogleg only below, and D'D-scaled damping at or above, this spread of the
                                       # Hessian's diagonal. Starting value, not measured.
@@ -94,7 +94,7 @@ end
 function rule_formulation(f::RecommenderFeatures)
     f.allresiduals || return (:hessian, :F_nonresidual)
     isfinite(f.condition) || return (:hessian, :F_singular)
-    f.condition >= REC_TALL_CONDITION && return (:jacobian, :F_illconditioned)
+    f.condition >= REC_JACOBIAN_CONDITION && return (:jacobian, :F_illconditioned)
     return (:hessian, :F_wellconditioned)
 end
 
@@ -189,11 +189,11 @@ function recommendoptimizer(model::Model; unfixed=nothing, numthreads=StaticInt(
         try
             J = optimvars_nls(model; unfixed, numthreads, max_dense_bytes)[5]
             reduction, storage = jacobianreductionstorage(J)
-            linsolver, rule_l = :qr, :L_tall
+            linsolver, rule_l = :qr, :L_jacobian
             rule_rs = :RS_jacobian
         catch err
             err isa ArgumentError || rethrow()
-            formulation, rule_f, fallback = :hessian, :F_tall_unavailable, err.msg
+            formulation, rule_f, fallback = :hessian, :F_jacobian_unavailable, err.msg
         end
     end
     iterator, rule_i = rule_iterator(features)
@@ -248,10 +248,10 @@ function formulation_reason(rec::OptimizationRecommendation)
         "$(fmtnum(f.diag_min))): it is rank-deficient or indefinite, which a Jacobian is no better conditioned for, and " *
         "damping handles. The normal equations."
     rule === :F_wellconditioned && return "Every cost is a residual, and $(condition_text(f)), is below " *
-        "$(fmtnum(REC_TALL_CONDITION)): the normal equations are accurate enough."
+        "$(fmtnum(REC_JACOBIAN_CONDITION)): the normal equations are accurate enough."
     rule === :F_illconditioned && return "Every cost is a residual, and $(condition_text(f)), is at least " *
-        "$(fmtnum(REC_TALL_CONDITION)): forming JᵀJ squares the conditioning of J, so the Jacobian is factorized instead."
-    return "$(uppercasefirst(condition_text(f))), is at least $(fmtnum(REC_TALL_CONDITION)), which favours the Jacobian " *
+        "$(fmtnum(REC_JACOBIAN_CONDITION)): forming JᵀJ squares the conditioning of J, so the Jacobian is factorized instead."
+    return "$(uppercasefirst(condition_text(f))), is at least $(fmtnum(REC_JACOBIAN_CONDITION)), which favours the Jacobian " *
         "path, but it cannot be built for this model ($(rec.fallback)), so the normal equations."
 end
 
@@ -283,7 +283,7 @@ end
 
 function linsolver_reason(rec::OptimizationRecommendation)
     rule = rec.rules.linsolver
-    rule === :L_tall && return "QR of the Jacobian, on the Jacobian path."
+    rule === :L_jacobian && return "QR of the Jacobian, on the Jacobian path."
     rule === :L_nonresidual && return "LDLᵀ: some costs are not residuals, so the Hessian can be indefinite."
     rule === :L_sparse && return "LDLᵀ, which linsolver = :auto uses for a sparse Hessian."
     rule === :L_schur && return "Cholesky of the reduced system (falling back to Bunch-Kaufman), which linsolver = :auto " *

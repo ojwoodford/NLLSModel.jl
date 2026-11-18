@@ -5,8 +5,8 @@ import OptimizationVariableInterface: nvars, update, update!, copyvars
 
 fixture("jacobianproblems")
 
-const TallExt = Base.get_extension(NLLSModel, :SecondOrderOptimizationExt)
-const TallOptions = OptimizationOptions(iterator=:levenbergmarquardt, maxiters=200)
+const JacobianExt = Base.get_extension(NLLSModel, :SecondOrderOptimizationExt)
+const JacobianOptions = OptimizationOptions(iterator=:levenbergmarquardt, maxiters=200)
 
 # Records whether any residual was evaluated off the calling thread, to see whether an evaluation was threaded
 const SPY_CALLER = Ref(0)
@@ -43,11 +43,11 @@ end
 
 # Compare the tall solve with the normal equations: same final cost (the gradient at an accurate minimum is rounding noise, so it
 # is not compared), and the variables to `atol`. `cost0` is the cost at the start, to give the tolerance for zero-residual problems.
-function sameoptimum(model, options=TallOptions; atol=1e-5, kwargs...)
+function sameoptimum(model, options=JacobianOptions; atol=1e-5, kwargs...)
     c0 = NLLSModel.cost(model)
-    normal, rn = optimize(model, options; numthreads=static(1), kwargs...)
-    tall, rt = optimize(model, options; formulation=:jacobian, numthreads=static(1), kwargs...)
-    cn, ct = NLLSModel.cost(normal), NLLSModel.cost(tall)
-    ok = isapprox(ct, cn; rtol=1e-8, atol=1e-10 * c0) && isapprox(ct, rt.bestcost; rtol=1e-12) && samevars(tall, normal; atol) && rt.bestcost < c0
+    solved_hes, rn = optimize(model, options; numthreads=static(1), kwargs...)
+    solved_jac, rt = optimize(model, options; formulation=:jacobian, numthreads=static(1), kwargs...)
+    cn, ct = NLLSModel.cost(solved_hes), NLLSModel.cost(solved_jac)
+    ok = isapprox(ct, cn; rtol=1e-8, atol=1e-10 * c0) && isapprox(ct, rt.bestcost; rtol=1e-12) && samevars(solved_jac, solved_hes; atol) && rt.bestcost < c0
     return ok, ct, cn
 end

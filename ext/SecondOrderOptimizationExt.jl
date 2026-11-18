@@ -4,28 +4,28 @@ using NLLSModel
 using SecondOrderOptimization
 using OptimizationVariableInterface
 using Static
-import NLLSModel: MIN_WORK_PER_THREAD_NORMAL, MIN_WORK_PER_THREAD_COST, MIN_WORK_PER_THREAD_TALL, MAX_DENSE_BYTES, KEYWORDS_DOC, TALL_FORMULATION_DOC,
+import NLLSModel: MIN_WORK_PER_THREAD_HESSIAN, MIN_WORK_PER_THREAD_COST, MIN_WORK_PER_THREAD_JACOBIAN, MAX_DENSE_BYTES, KEYWORDS_DOC, JACOBIAN_FORMULATION_DOC,
     OptimizationRecommendation
 
 # Hands `resjac!` to the optimizer with `prezeroed = true`: the structural zeros of `J` are already in place (the optimizer
 # allocates `J` as zeros and, from SecondOrderOptimization's Z1, neither re-zeroes it nor writes anything but this evaluator's
 # entries), and the evaluator writes every entry that can be non-zero on every call, so it need not fill `J` first.
 # A struct rather than a closure, so the objective's type is concrete.
-struct TallResJac{RJ}
+struct JacobianResJac{RJ}
     resjac!::RJ
 end
-(w::TallResJac)(r, J, x) = w.resjac!(r, J, x; prezeroed=true)
+(w::JacobianResJac)(r, J, x) = w.resjac!(r, J, x; prezeroed=true)
 
 # The tall formulation: the residual vector and the Jacobian, solved by the optimizer from the Jacobian prototype that
 # `optimvars_nls` returns (its type decides the linear system; the optimizer validates it against `linsolver`). A dense
 # Jacobian forced above `max_dense_bytes` is refused by `optimvars_nls` before it is allocated.
-function optimize_tall!(model::Model, options; unfixed, numthreads, callback, workspace, reduction, storage, max_dense_bytes, min_work, min_work_cost)
+function optimize_jacobian!(model::Model, options; unfixed, numthreads, callback, workspace, reduction, storage, max_dense_bytes, min_work, min_work_cost)
     f, _, resjac!, x0, J = try
         optimvars_nls(model; unfixed, numthreads, reduction, storage, max_dense_bytes, min_work, min_work_cost)
     catch err
         err isa ArgumentError ? throw(ArgumentError("formulation = :jacobian: " * err.msg)) : rethrow()
     end
-    obj = JacobianObjective(f, TallResJac(resjac!), J)
+    obj = JacobianObjective(f, JacobianResJac(resjac!), J)
     if ismutablevar(x0)
         result = SecondOrderOptimization.optimize!(x0, obj, options; callback, workspace)
         syncvars!(model, resjac!, x0)
@@ -60,23 +60,23 @@ The second method, `optimize!(model, rec)`, takes every choice from an `Optimiza
   rethrown prefixed `formulation = :jacobian:`, and a dense Jacobian forced above `max_dense_bytes` is one of them, raised
   before it is allocated.
 
-$TALL_FORMULATION_DOC
+$JACOBIAN_FORMULATION_DOC
 
 `formulation` is a keyword here only: it is not a field of `OptimizationOptions` and is not inferred from `options.linsolver`. Any
 other value is an `ArgumentError`. `callback` and `workspace` are passed to the optimizer. The default of `min_work` is the
-formulation's ($MIN_WORK_PER_THREAD_NORMAL for `:hessian`, $MIN_WORK_PER_THREAD_TALL for `:jacobian`).
+formulation's ($MIN_WORK_PER_THREAD_HESSIAN for `:hessian`, $MIN_WORK_PER_THREAD_JACOBIAN for `:jacobian`).
 
 $KEYWORDS_DOC"""
 function SecondOrderOptimization.optimize!(model::Model, options::OptimizationOptions=OptimizationOptions();
         formulation::Symbol=:hessian, callback=nullcallback, workspace=nothing,
         unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction::Symbol=:auto, storage::Symbol=:auto,
         max_dense_bytes::Integer=MAX_DENSE_BYTES,
-        min_work::Integer=(formulation === :jacobian ? MIN_WORK_PER_THREAD_TALL : MIN_WORK_PER_THREAD_NORMAL),
+        min_work::Integer=(formulation === :jacobian ? MIN_WORK_PER_THREAD_JACOBIAN : MIN_WORK_PER_THREAD_HESSIAN),
         min_work_cost::Integer=MIN_WORK_PER_THREAD_COST)
     formulation in (:hessian, :jacobian) || throw(ArgumentError("Unknown formulation $(repr(formulation)); expected :hessian or :jacobian."))
     NLLSModel.check_reduction(reduction)
     NLLSModel.check_storage(storage)
-    formulation === :jacobian && return optimize_tall!(model, options; unfixed, numthreads, callback, workspace, reduction, storage, max_dense_bytes, min_work, min_work_cost)
+    formulation === :jacobian && return optimize_jacobian!(model, options; unfixed, numthreads, callback, workspace, reduction, storage, max_dense_bytes, min_work, min_work_cost)
     f, fdf!, x0, H = optimvars(model; unfixed, numthreads, reduction, storage, max_dense_bytes, min_work, min_work_cost)
     obj = HessianObjective(f, fdf!; H)
     if ismutablevar(x0)
@@ -123,7 +123,7 @@ the options by hand, from the call that `show` prints, avoids it.
 """
 function SecondOrderOptimization.optimize!(model::Model, rec::OptimizationRecommendation;
         callback=nullcallback, workspace=nothing,
-        min_work::Integer=(rec.formulation === :jacobian ? MIN_WORK_PER_THREAD_TALL : MIN_WORK_PER_THREAD_NORMAL),
+        min_work::Integer=(rec.formulation === :jacobian ? MIN_WORK_PER_THREAD_JACOBIAN : MIN_WORK_PER_THREAD_HESSIAN),
         min_work_cost::Integer=MIN_WORK_PER_THREAD_COST, options...)
     # The one slurped keyword list in an entry point (rules.md 19): every keyword in it goes to the `OptimizationOptions`
     # constructor, whose keywords are spelled out, so a misspelt or stale keyword is still an error

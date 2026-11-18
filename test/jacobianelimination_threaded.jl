@@ -14,11 +14,11 @@ fixture("allocations", "frontdoor", "jacobianelimination")
         model = posechain(40, 60)
         w = NLLSModel.workestimates(model, nothing)
         _, _, rj1, x1, J1 = optimvars_nls(model; reduction=:eliminate, numthreads=static(1))
-        _, _, rjn, xn, Jn = optimvars_nls(model; reduction=:eliminate, numthreads=static(8), min_work=w.tall ÷ 2)
-        @test rjn.layout.work == w.tall
-        @test rjn.nthreads == NLLSModel.threadcount(w.tall, w.tall ÷ 2, 8, NLLSModel.costsplit(model.costs)) == 2
+        _, _, rjn, xn, Jn = optimvars_nls(model; reduction=:eliminate, numthreads=static(8), min_work=w.jacobianfill ÷ 2)
+        @test rjn.layout.work == w.jacobianfill
+        @test rjn.nthreads == NLLSModel.threadcount(w.jacobianfill, w.jacobianfill ÷ 2, 8, NLLSModel.costsplit(model.costs)) == 2
         @test optimvars_nls(model; reduction=:eliminate, numthreads=static(8))[3].nthreads ==
-            NLLSModel.threadcount(w.tall, NLLSModel.MIN_WORK_PER_THREAD_TALL, 8, NLLSModel.costsplit(model.costs))
+            NLLSModel.threadcount(w.jacobianfill, NLLSModel.MIN_WORK_PER_THREAD_JACOBIAN, 8, NLLSModel.costsplit(model.costs))
         @test rjn(Float64[], Jn, xn) ≈ rj1(Float64[], J1, x1) rtol=1e-13
         @test Jn.data == J1.data # Each cost's rows are written by one thread, the same values
     end

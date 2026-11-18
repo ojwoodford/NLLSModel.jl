@@ -32,12 +32,12 @@ struct NLSTallLayout{S}
     linear_weights::Vector{Float64} # Precomputed sqrt(w) for linear kernels
     all_linear::Bool
     work::Int                       # Tall-fill estimate, sum of m * (n + 1) (see `workestimates`), compared with min_work
-    schur::S                        # With elimination, where each cost's rows go in the tables (`TallSchurMap`), otherwise nothing
+    schur::S                        # With elimination, where each cost's rows go in the tables (`JacobianSchurMap`), otherwise nothing
 end
 
 # Elimination on the tall path: each cost is a row block of the `SchurBlockJacobian`'s layout, which BlockLinearSystems
 # decides; a cost writes its block for each unfixed variable through that variable's handle in its row block.
-struct TallSchurMap
+struct JacobianSchurMap
     structure::SchurJacobianStructure # Built once, at setup: the optimizer reuses a workspace only for the same object
     dep_target::Vector{Int}           # Per (cost, dependency), indexed as `sparse_p`: `blockentry(structure, cost, layout
                                       # block)`, or 0 for a fixed variable
@@ -85,7 +85,7 @@ unfixeddims(problem::Model, unfixed) = sum(i -> Int(dynamic(nvars(problem.variab
 
 # 1. Validate cost types and variable indices. The first step of the layout, run by `optimvars_nls` before the partition,
 # which needs valid costs.
-function check_tall_costs(problem::Model)
+function check_jacobian_costs(problem::Model)
     for costvec in values(problem.costs)
         if !(eltype(costvec) <: AbstractResidual)
             throw(ArgumentError("optimvars_nls only supports AbstractResidual costs; found $(eltype(costvec))"))
@@ -102,7 +102,7 @@ end
 # Elimination on the tall path: the partition of the normal path (`schur_partition`), provided every eliminated variable is
 # in a cost (QR cannot eliminate a block of the Jacobian with no rows). A single unfixed variable is never partitioned,
 # as on the normal path.
-function tall_schur_partition(problem::Model, unfixed, reduction::Symbol)
+function jacobian_schur_partition(problem::Model, unfixed, reduction::Symbol)
     unfixed isa Integer && return nothing
     partition = schur_partition(problem, unfixed, reduction)
     isnothing(partition) && return nothing
@@ -122,8 +122,8 @@ function tall_schur_partition(problem::Model, unfixed, reduction::Symbol)
     return partition
 end
 
-# The layout of the elimination, and a handle for each (cost, unfixed variable) to write through (see `TallSchurMap`)
-function tall_schur_map(problem::Model, partition, resblocksizes::Vector{Int}, dep_start_idx::Vector{Int}, nchunks::Int)
+# The layout of the elimination, and a handle for each (cost, unfixed variable) to write through (see `JacobianSchurMap`)
+function jacobian_schur_map(problem::Model, partition, resblocksizes::Vector{Int}, dep_start_idx::Vector{Int}, nchunks::Int)
     # BlockLinearSystems lays out the elimination from the description, with each cost's rows as a row block
     structure = SchurJacobianStructure(partition.blocksizes, partition.rowblocks, resblocksizes; eliminated=partition.eliminated, nchunks)
     layoutblock = zeros(Int, length(problem.variables)) # Layout block of each unfixed variable, 0 for a fixed one
@@ -139,12 +139,12 @@ function tall_schur_map(problem::Model, partition, resblocksizes::Vector{Int}, d
             dep_target[dep_start_idx[k] + d - 1] = j == 0 ? 0 : blockentry(structure, k, j)
         end
     end
-    return TallSchurMap(structure, dep_target)
+    return JacobianSchurMap(structure, dep_target)
 end
 
 # The layout of the tall system, and the Jacobian prototype: a `Matrix` or a `SparseMatrixCSC`, or with a `partition`
 # (elimination) a `SchurBlockJacobian`, whose reduced storage `storage` chooses
-function build_tall_layout(problem::Model, unfixed, storage::Symbol, max_dense_bytes::Int, partition=nothing, nchunks::Int=1)
+function build_jacobian_layout(problem::Model, unfixed, storage::Symbol, max_dense_bytes::Int, partition=nothing, nchunks::Int=1)
     # 2. Sizing and layout arrays
     K = Int(countcosts(costnum, problem.costs))
     M = Int(countcosts(resnum, problem.costs))
@@ -266,7 +266,7 @@ function build_tall_layout(problem::Model, unfixed, storage::Symbol, max_dense_b
     # With elimination: the tables, and where each cost goes in them. The storage of the reduced system follows the normal
     # path's rule (`reduced_storage`); the optimizer builds its own pattern for a sparse one.
     if !isnothing(partition)
-        schur = tall_schur_map(problem, partition, resblocksizes, dep_start_idx, nchunks)
+        schur = jacobian_schur_map(problem, partition, resblocksizes, dep_start_idx, nchunks)
         is_dense, = reduced_storage(SchurStructure(schur.structure), storage, max_dense_bytes, "reduced system"; needpattern=false)
         J_proto = SchurBlockJacobian{Float64, is_dense ? Matrix{Float64} : SparseMatrixCSC{Float64, Int}}(schur.structure)
         return NLSTallLayout(
@@ -558,8 +558,8 @@ end
 # Single residual and Jacobian evaluation returning (cost, clamped, err_code, err_val)
 # Per-task scratch matrix for a scaled Jacobian (Triggs correction, robust weights), so that nothing is allocated per cost.
 # The matrix is valid until the same task evaluates its next cost; `write_cost_jacobian!` consumes it straight away.
-function tall_scratch(::Type{T}, m::Int, P::Int)::Matrix{T} where T
-    cache = get!(() -> Dict{DataType, Any}(), task_local_storage(), :nllsmodel_tallcache)::Dict{DataType, Any}
+function jacobian_scratch(::Type{T}, m::Int, P::Int)::Matrix{T} where T
+    cache = get!(() -> Dict{DataType, Any}(), task_local_storage(), :nllsmodel_jacobiancache)::Dict{DataType, Any}
     bysize = get!(() -> Dict{Tuple{Int, Int}, Matrix{T}}(), cache, T)::Dict{Tuple{Int, Int}, Matrix{T}}
     return get!(() -> Matrix{T}(undef, m, P), bysize, (m, P))
 end
@@ -567,7 +567,7 @@ end
 # `w * jac`: unrolled for static Jacobians, into the per-task scratch matrix for dynamic ones
 @inline scaled_jacobian(jac::Union{StaticMatrix, Adjoint{<:Any, <:StaticVector}}, w) = jac .* w
 function scaled_jacobian(jac::AbstractMatrix, w)
-    out = tall_scratch(float(eltype(jac)), size(jac, 1), size(jac, 2))
+    out = jacobian_scratch(float(eltype(jac)), size(jac, 1), size(jac, 2))
     @inbounds for j in axes(jac, 2), i in axes(jac, 1)
         out[i, j] = jac[i, j] * w
     end
@@ -642,7 +642,7 @@ function eval_single_resjac!(r, J, vars, cost, k::Int, layout::NLSTallLayout, st
             jac_scaled = sqrt_dc * (jac_k - alpha * (n * u))
         else
             P = size(jac_k, 2)
-            jac_scaled = tall_scratch(eltype(jac_k), m_k, P)
+            jac_scaled = jacobian_scratch(eltype(jac_k), m_k, P)
             for col_j in 1:P
                 v_j = 0.0
                 for row_r in 1:m_k
@@ -668,7 +668,7 @@ end
 # With elimination the zeros of the tables are the entries no cost writes, and the damping rows, which only the optimizer's
 # copy of the tables uses. The tables must be those of this evaluator's structure, which says where each cost goes.
 function check_caller_jacobian!(J::SchurBlockJacobian, layout::NLSTallLayout; prezeroed::Bool=false)
-    (layout.schur isa TallSchurMap && J.structure === layout.schur.structure) ||
+    (layout.schur isa JacobianSchurMap && J.structure === layout.schur.structure) ||
         throw(ArgumentError("This SchurBlockJacobian has another structure: pass the prototype that optimvars_nls returned for this model, or a copy_structure of it."))
     prezeroed || zero!(J)
     return nothing
@@ -688,12 +688,12 @@ function check_caller_jacobian!(J, layout::NLSTallLayout; prezeroed::Bool=false)
     end
 end
 
-@inline function sync_tall_vars!(problem::Model, unfixed_inds::Integer, vars)
+@inline function sync_jacobian_vars!(problem::Model, unfixed_inds::Integer, vars)
     @inbounds problem.variables[unfixed_inds] = vars
     return problem.variables
 end
 
-@inline function sync_tall_vars!(problem::Model, unfixed_inds::Vector{Int}, vars)
+@inline function sync_jacobian_vars!(problem::Model, unfixed_inds::Vector{Int}, vars)
     @inbounds for (k, idx) in enumerate(unfixed_inds)
         problem.variables[idx] = vars[k]
     end
@@ -703,7 +703,7 @@ end
 # Every variable unfixed: `vars` is a complete set of variables and is evaluated as it is. It is not copied into the model:
 # `vars` may be the optimizer's current point, which is `problem.variables` itself, and a trial must not overwrite it.
 # (The same rule as `sync_unfixed_vars!` on the normal-equations path.)
-@inline sync_tall_vars!(::Model, ::Nothing, vars) = vars
+@inline sync_jacobian_vars!(::Model, ::Nothing, vars) = vars
 
 # The residual vector: one entry per residual row, except with elimination, where the residuals are written into the
 # tables of `J` and `r` is not used (the optimizer passes an empty one)
@@ -745,7 +745,7 @@ function OptimizationVariableInterface.syncvars!(problem::Model, fn::Union{NLSRe
     if isnothing(fn.unfixed_inds)
         x === problem.variables || copyto!(problem.variables, x)
     else
-        sync_tall_vars!(problem, fn.unfixed_inds, x)
+        sync_jacobian_vars!(problem, fn.unfixed_inds, x)
     end
     return problem
 end
@@ -759,7 +759,7 @@ Then `r` is the true (constant-scaled) residual and the cost returned is exactly
 `r` rely on. Otherwise some rows are reweighted and the cost is the robust cost, not `½‖r‖²`.
 """
 islinear(fn::Union{NLSResidual, NLSResJac}) = fn.layout.all_linear
-islinear(flat::NamedTuple) = flat.layout_tall.all_linear
+islinear(flat::NamedTuple) = flat.layout_jacobian.all_linear
 
 clamped_count(fn::Union{NLSResidual, NLSResJac}) = fn.status.clamped_count
 reset_clamped_count!(fn::Union{NLSResidual, NLSResJac}) = (fn.status.clamped_count = 0; fn.status.warned_clamp = false; fn)
@@ -800,7 +800,7 @@ end
     return combine_eval(head, eval_costvecs(evalone, Base.tail(costvecs), start_idx, nchunks, taskid, ind + 1))
 end
 
-function check_tall_status!(status, clamped_tot, err_code, err_val, fname)
+function check_jacobian_status!(status, clamped_tot, err_code, err_val, fname)
     if err_code != 0
         throw(DomainError(err_val, "Tall least-squares reweighting requires non-negative kernel derivative dc >= 0"))
     end
@@ -815,10 +815,10 @@ function check_tall_status!(status, clamped_tot, err_code, err_val, fname)
 end
 
 # Serial or threaded evaluation of all costs with `evalone(cost, k)`, shared by the residual and residual+Jacobian evaluators
-function tall_eval!(evalone::F, costvecs, layout, status, task_results, N_chunks::Int, fname) where F
+function jacobian_eval!(evalone::F, costvecs, layout, status, task_results, N_chunks::Int, fname) where F
     if N_chunks <= 1
         tot_cost, clamped_tot, err_code, err_val = eval_costvecs(evalone, costvecs, layout.costvec_start_idx, 1, 1, 1)
-        check_tall_status!(status, clamped_tot, err_code, err_val, fname)
+        check_jacobian_status!(status, clamped_tot, err_code, err_val, fname)
         return tot_cost
     end
     for t in 1:N_chunks
@@ -837,7 +837,7 @@ function tall_eval!(evalone::F, costvecs, layout, status, task_results, N_chunks
             throw(DomainError(task_results[t].err_val, "Tall least-squares reweighting requires non-negative kernel derivative dc >= 0"))
         end
     end
-    check_tall_status!(status, sum(t -> task_results[t].clamped, 1:N_chunks), 0, 0.0, fname)
+    check_jacobian_status!(status, sum(t -> task_results[t].clamped, 1:N_chunks), 0, 0.0, fname)
     return sum(t -> task_results[t].cost, 1:N_chunks)
 end
 
@@ -850,9 +850,9 @@ function (res!::NLSResidual)(r::AbstractVector{Float64}, vars)
     layout = res!.layout
     status = res!.status
 
-    full_vars = sync_tall_vars!(problem, res!.unfixed_inds, vars)
+    full_vars = sync_jacobian_vars!(problem, res!.unfixed_inds, vars)
 
-    return tall_eval!(
+    return jacobian_eval!(
         (c, k) -> eval_single_res!(residual_rows(r, nothing, k, layout), full_vars, c, k, layout, status),
         values(problem.costs), layout, status, res!.task_results, res!.nthreads, "res!")
 end
@@ -867,15 +867,15 @@ function (resjac!::NLSResJac)(r::AbstractVector{Float64}, J, vars; prezeroed::Bo
     layout = resjac!.layout
     status = resjac!.status
 
-    full_vars = sync_tall_vars!(problem, resjac!.unfixed_inds, vars)
+    full_vars = sync_jacobian_vars!(problem, resjac!.unfixed_inds, vars)
 
-    return tall_eval!(
+    return jacobian_eval!(
         (c, k) -> eval_single_resjac!(r, J, full_vars, c, k, layout, status),
         values(problem.costs), layout, status, resjac!.task_results, resjac!.nthreads, "resjac!")
 end
 
 """
-    optimvars_nls(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work=$MIN_WORK_PER_THREAD_TALL, min_work_cost=$MIN_WORK_PER_THREAD_COST)
+    optimvars_nls(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work=$MIN_WORK_PER_THREAD_JACOBIAN, min_work_cost=$MIN_WORK_PER_THREAD_COST)
 
 Constructs tall residual and Jacobian callable structs `(f, res!, resjac!, x0, J_proto)` for `problem`.
 
@@ -902,7 +902,7 @@ in the partition's order, retained first; [`syncvars!`](@ref) writes a solution 
 
 What `optimize!(model, options; formulation = :jacobian)` does with each prototype:
 
-$TALL_FORMULATION_DOC
+$JACOBIAN_FORMULATION_DOC
 
 $KEYWORDS_DOC"""
 function optimvars_nls(
@@ -912,15 +912,15 @@ function optimvars_nls(
     reduction::Symbol = :auto,
     storage::Symbol = :auto,
     max_dense_bytes::Integer = MAX_DENSE_BYTES,
-    min_work::Integer = MIN_WORK_PER_THREAD_TALL,
+    min_work::Integer = MIN_WORK_PER_THREAD_JACOBIAN,
     min_work_cost::Integer = MIN_WORK_PER_THREAD_COST,
 )
     check_reduction(reduction)
     check_storage(storage)
-    check_tall_costs(problem)
+    check_jacobian_costs(problem)
     conv_unfixed = convertunfixed(unfixed, problem)
-    partition = tall_schur_partition(problem, conv_unfixed, reduction)
-    layout, J_proto = build_tall_layout(problem, conv_unfixed, storage, Int(max_dense_bytes), partition, Int(dynamic(numthreads)))
+    partition = jacobian_schur_partition(problem, conv_unfixed, reduction)
+    layout, J_proto = build_jacobian_layout(problem, conv_unfixed, storage, Int(max_dense_bytes), partition, Int(dynamic(numthreads)))
 
     if !isnothing(partition)
         # The variables in the layout's order (retained, then eliminated), which is the column order of the tables
@@ -956,7 +956,7 @@ function optimvars_nls(
 end
 
 """
-    flat_optimvars_nls(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work=$MIN_WORK_PER_THREAD_TALL, min_work_cost=$MIN_WORK_PER_THREAD_COST)
+    flat_optimvars_nls(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work=$MIN_WORK_PER_THREAD_JACOBIAN, min_work_cost=$MIN_WORK_PER_THREAD_COST)
 
 Constructs a flat Euclidean vector wrapper around `optimvars_nls`.
 Returns a NamedTuple `(; f, res!, resjac!, jac!, x0, J_proto, layout, status)`. Its Jacobian is a plain matrix, for
@@ -974,7 +974,7 @@ function flat_optimvars_nls(
     reduction::Symbol = :auto,
     storage::Symbol = :auto,
     max_dense_bytes::Integer = MAX_DENSE_BYTES,
-    min_work::Integer = MIN_WORK_PER_THREAD_TALL,
+    min_work::Integer = MIN_WORK_PER_THREAD_JACOBIAN,
     min_work_cost::Integer = MIN_WORK_PER_THREAD_COST,
 )
     reduction = check_plain_reduction(reduction, "flat_optimvars_nls")
@@ -1032,7 +1032,7 @@ function flat_optimvars_nls(
         layout = layout,
         status = resjac!_orig.status,
         r_scratch = r_scratch,
-        layout_tall = res!_orig.layout,
+        layout_jacobian = res!_orig.layout,
     )
 end
 
@@ -1049,7 +1049,7 @@ function throw_nonlinear(name, problem)
 end
 
 """
-    nls_callbacks(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work=$MIN_WORK_PER_THREAD_TALL, min_work_cost=$MIN_WORK_PER_THREAD_COST)
+    nls_callbacks(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work=$MIN_WORK_PER_THREAD_JACOBIAN, min_work_cost=$MIN_WORK_PER_THREAD_COST)
 
 Lightweight callback helper for `LeastSquaresOptim.jl`.
 Accepts any non-adaptive `AbstractResidual` problem in which every cost has a linear kernel (`NoRobust`, or `Scaled` with a finite non-negative height).
@@ -1063,7 +1063,7 @@ function nls_callbacks(
     reduction::Symbol = :auto,
     storage::Symbol = :auto,
     max_dense_bytes::Integer = MAX_DENSE_BYTES,
-    min_work::Integer = MIN_WORK_PER_THREAD_TALL,
+    min_work::Integer = MIN_WORK_PER_THREAD_JACOBIAN,
     min_work_cost::Integer = MIN_WORK_PER_THREAD_COST,
 )
     check_plain_reduction(reduction, "nls_callbacks")
@@ -1081,7 +1081,7 @@ function nls_callbacks(
     islinear(flat) || throw_nonlinear("nls_callbacks", problem)
 
     N = flat.layout.n
-    M = flat.layout_tall.M
+    M = flat.layout_jacobian.M
     x_cached = fill(NaN, N)
     r_buf = zeros(Float64, M)
     last_cost = Ref(0.0)
