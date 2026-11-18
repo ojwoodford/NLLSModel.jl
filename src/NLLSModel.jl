@@ -31,6 +31,7 @@ import OptimizationVariableInterface:
 
 import FastNorm: sqnorm
 import SIRBSDispatch: sirbsdispatch
+using DampedLinearSolve: DampedLinearSolve, makehessiansystem, solve!, getdiag!, isfinitesystem, SolveStatus, Success
 
 # Export NLLSModel public interface
 # Problem construction & evaluation
@@ -108,6 +109,7 @@ include("keywords.jl")
 include("flatvars.jl")
 include("optimize.jl")
 include("tall_system.jl")
+include("recommender.jl")
 include("docstrings.jl")
 
 end # module NLLSModel

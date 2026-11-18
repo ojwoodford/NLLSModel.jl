@@ -29,7 +29,7 @@ const TEST_GROUPS = (
         "adaptivecost.jl", "gramkernels.jl", "problemapi.jl", "runtimeblocks.jl", "bigvariable.jl", "optimizeba.jl",
         "optimization.jl", "frontdoor.jl", "tallkernels.jl", "tallformulation.jl", "tallcontract.jl", "talliterators.jl",
         "tallalloc.jl", "tallelimination.jl", "eliminablesizes.jl", "tallcombinations.jl", "NLPModel.jl", "nls_interface.jl",
-        "keywords.jl"],
+        "keywords.jl", "recommender.jl"],
     threaded = ["multithreading.jl", "gramkernels_threaded.jl", "runtimeblocks_threaded.jl", "optimization_threaded.jl",
         "frontdoor_threaded.jl", "tallformulation_threaded.jl", "manyvariables.jl", "tallalloc_threaded.jl",
         "tallelimination_threaded.jl", "eliminablesizes_threaded.jl", "nls_interface_threaded.jl", "keywords_threaded.jl"],
