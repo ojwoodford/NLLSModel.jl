@@ -178,16 +178,7 @@ BlockLinearSystems.copy_structure(ls::UniVariateLSdynamic_ls) = UniVariateLSdyna
 BlockLinearSystems.copy_structure(::UniVariateLSstatic_ls{N, N2}) where {N, N2} = UniVariateLSstatic_ls{N, N2}()
 BlockLinearSystems.copy_structure(ls::MultiVariateLSdense_ls) = MultiVariateLSdense_ls(copy_structure(ls.A), zeros(Float64, length(ls.b)))
 BlockLinearSystems.copy_structure(ls::MultiVariateLSsparse_ls) = MultiVariateLSsparse_ls(copy_structure(ls.A), zeros(Float64, length(ls.b)))
-function BlockLinearSystems.copy_structure(ls::MultiVariateLSSchur_ls)
-    A = ls.A
-    R_copy = if A.R isa Matrix
-        similar(A.R)
-    else
-        copy_structure(A.R)
-    end
-    A_new = SchurBlockHessian(A.structure, R_copy, similar(A.E_data), similar(A.C_data))
-    return MultiVariateLSSchur_ls(A_new, zeros(Float64, length(ls.b)))
-end
+BlockLinearSystems.copy_structure(ls::MultiVariateLSSchur_ls) = MultiVariateLSSchur_ls(copy_structure(ls.A), zeros(Float64, length(ls.b)))
 BlockLinearSystems.copy_structure(ls::LinearSystem{F, V}) where {F, V} = LinearSystem{F, V}(ls.x, copy_structure(ls.ls))
 BlockLinearSystems.copy_structure(ls::LinearSystemShared{F, V, N}) where {F, V, N} = LinearSystemShared{F, V, N}(ls.x, SVector{N, V}(ntuple(i -> copy_structure(ls.ls[i]), Val(N))), MVector{N, Float64}(undef))
 
