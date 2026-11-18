@@ -35,15 +35,12 @@ struct NLSTallLayout{S}
     schur::S                        # With elimination, where each cost's rows go in the tables (`TallSchurMap`), otherwise nothing
 end
 
-# Elimination on the tall path: where each cost's rows go in the tables of a `SchurBlockJacobian`. A cost involving an
-# eliminated variable has its rows in that variable's table; any other cost has them in the table of its free group, the
-# costs whose unfixed variables are the same retained blocks.
+# Elimination on the tall path: each cost is a row block of the `SchurBlockJacobian`'s layout, which BlockLinearSystems
+# decides; a cost writes its block for each unfixed variable through that variable's handle in its row block.
 struct TallSchurMap
     structure::SchurJacobianStructure # Built once, at setup: the optimizer reuses a workspace only for the same object
-    cost_table::Vector{Int}           # Table of each cost: its eliminated block, or the number of eliminated blocks plus its free group
-    cost_row::Vector{Int}             # First row of each cost in its table
-    dep_target::Vector{Int}           # Per (cost, dependency), indexed as `sparse_p`: the entry of a retained block in the cost's
-                                      # table (> 0), minus the eliminated block (< 0), or 0 for a fixed variable
+    dep_target::Vector{Int}           # Per (cost, dependency), indexed as `sparse_p`: `blockentry(structure, cost, layout
+                                      # block)`, or 0 for a fixed variable
 end
 
 # Call `f(cost, k)` for every cost, with `k` its running index across all cost vectors. Recursing over the tuple of cost
@@ -125,58 +122,24 @@ function tall_schur_partition(problem::Model, unfixed, reduction::Symbol)
     return partition
 end
 
-# The tables of the elimination, and where each cost's rows go in them (see `TallSchurMap`)
+# The layout of the elimination, and a handle for each (cost, unfixed variable) to write through (see `TallSchurMap`)
 function tall_schur_map(problem::Model, partition, resblocksizes::Vector{Int}, dep_start_idx::Vector{Int}, nchunks::Int)
     # BlockLinearSystems lays out the elimination from the description, with each cost's rows as a row block
     structure = SchurJacobianStructure(partition.blocksizes, partition.rowblocks, resblocksizes; eliminated=partition.eliminated, nchunks)
-    nr = nretained(structure)
-    ne = count(partition.eliminated)
-    role = zeros(Int, length(problem.variables)) # Retained block (> 0), minus the eliminated block (< 0), or 0 for a fixed variable
+    layoutblock = zeros(Int, length(problem.variables)) # Layout block of each unfixed variable, 0 for a fixed one
     for (p, v) in enumerate(partition.unfixed_raw[blockorder(structure)])
-        role[v] = p <= nr ? p : nr - p
+        layoutblock[v] = p
     end
     K = length(resblocksizes)
-    cost_table = Vector{Int}(undef, K)
-    cost_row = Vector{Int}(undef, K)
-    e_rows = zeros(Int, ne)
-    group = Dict{Vector{Int}, Int}()
-    free_retained = Vector{Int}[]
-    free_rows = Int[]
-    eachcost(problem.costs) do c, k
-        vinds = varindices(c)
-        m = resblocksizes[k]
-        e = 0
-        rs = Int[]
-        for v in (vinds isa Integer ? (vinds,) : vinds)
-            role[v] < 0 && (e = -role[v])
-            role[v] > 0 && push!(rs, role[v])
-        end
-        if e > 0
-            cost_table[k] = e
-            cost_row[k] = e_rows[e] + 1
-            e_rows[e] += m
-        else
-            sort!(rs)
-            g = get(group, rs, 0)
-            if g == 0
-                push!(free_retained, rs)
-                push!(free_rows, 0)
-                g = group[rs] = length(free_rows)
-            end
-            cost_table[k] = ne + g
-            cost_row[k] = free_rows[g] + 1
-            free_rows[g] += m
-        end
-    end
     dep_target = zeros(Int, dep_start_idx[K + 1] - 1)
     eachcost(problem.costs) do c, k
         vinds = varindices(c)
         for d in 1:Int(dynamic(ndeps(c)))
-            ro = role[vinds isa Integer ? vinds : vinds[d]]
-            dep_target[dep_start_idx[k] + d - 1] = ro > 0 ? coupling_entry(structure, cost_table[k], ro) : ro
+            j = layoutblock[vinds isa Integer ? vinds : vinds[d]]
+            dep_target[dep_start_idx[k] + d - 1] = j == 0 ? 0 : blockentry(structure, k, j)
         end
     end
-    return TallSchurMap(structure, cost_table, cost_row, dep_target)
+    return TallSchurMap(structure, dep_target)
 end
 
 # The layout of the tall system, and the Jacobian prototype: a `Matrix` or a `SparseMatrixCSC`, or with a `partition`
@@ -452,8 +415,7 @@ end
 # The rows of cost `k`'s residual: in `r`, or with elimination in its table of `J` (`r` is then not used)
 @inline residual_rows(r, J, k::Int, layout::NLSTallLayout) =
     view(r, layout.resoffsets[k]:(layout.resoffsets[k] + layout.resblocksizes[k] - 1))
-@inline residual_rows(r, J::SchurBlockJacobian, k::Int, layout::NLSTallLayout) =
-    residual_block(J, layout.schur.cost_table[k], layout.schur.cost_row[k], layout.resblocksizes[k])
+@inline residual_rows(r, J::SchurBlockJacobian, k::Int, layout::NLSTallLayout) = residual_block(J, k, layout.resblocksizes[k])
 
 # Single residual evaluation returning (cost, clamped, err_code, err_val)
 # How a non-linear robust kernel reweights a residual (shared by the residual and the residual+Jacobian evaluators)
@@ -583,11 +545,9 @@ function write_block!(J::AbstractMatrix, src, loffset, k, dep, b, m, nb, layout:
     end
 end
 
-# Elimination: the cost's rows of its table, in the columns of the retained block's entry or of the eliminated block
+# Elimination: the cost's rows (its row block) in the columns of the variable's block
 function write_block!(J::SchurBlockJacobian, src, loffset, k, dep, b, m, nb, layout::NLSTallLayout)
-    target = layout.schur.dep_target[dep]
-    row = layout.schur.cost_row[k]
-    dest = target > 0 ? coupling_block(J, target, row, m, nb) : eliminated_block(J, -target, row, m, nb)
+    dest = block(J, k, layout.schur.dep_target[dep], m, nb)
     for c_loc in 1:nb
         for r_loc in 1:m
             dest[r_loc, c_loc] = jacobian_entry(src, r_loc, loffset + c_loc)

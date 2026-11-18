@@ -1,7 +1,7 @@
 using NLLSModel, Test, Static, StaticArrays, SparseArrays, Random, LinearAlgebra
 using SecondOrderOptimization, NLPModels
 import BlockLinearSystems
-import BlockLinearSystems: SchurBlockJacobian, coupling_block, eliminated_block, residual_block, copy_structure
+import BlockLinearSystems: SchurBlockJacobian, block, blockentry, residual_block, copy_structure
 import OptimizationVariableInterface
 
 fixture("optimization", "tallalloc")
@@ -148,7 +148,7 @@ function tables_as_plain(rj, J, plain)
         for v in (vinds isa Integer ? (vinds,) : vinds)
             j = layoutblock[v]
             j == 0 && continue
-            Jd[rows, cols(v)] = BlockLinearSystems.block(J, k, BlockLinearSystems.blockentry(jst, k, j), m, sizes[j])
+            Jd[rows, cols(v)] = block(J, k, blockentry(jst, k, j), m, sizes[j])
         end
         rd[rows] = residual_block(J, k)
     end

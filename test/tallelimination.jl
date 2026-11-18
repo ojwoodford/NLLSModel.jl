@@ -1,7 +1,7 @@
 using NLLSModel, Test, Static, StaticArrays, SparseArrays, Random, LinearAlgebra
 using SecondOrderOptimization, NLPModels
 import BlockLinearSystems
-import BlockLinearSystems: SchurBlockJacobian, coupling_block, eliminated_block, residual_block, copy_structure
+import BlockLinearSystems: SchurBlockJacobian, block, blockentry, residual_block, copy_structure
 import OptimizationVariableInterface
 
 include("fixtures/loader.jl")
