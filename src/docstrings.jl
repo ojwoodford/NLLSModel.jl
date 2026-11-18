@@ -470,3 +470,58 @@ Copies the flat solution vector `x` back into the problem's `variables` array,
 taking unfixed variable subsets and block variable structures into account.
 """
 syncvars!
+
+"""
+    recommendoptimizer(model::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), max_dense_bytes=$MAX_DENSE_BYTES) -> OptimizationRecommendation
+
+Recommends how to solve `model`, from its structure and its current values: a formulation (`:normal`, the normal
+equations, or `:tall`, the residual and the Jacobian), the `reduction` and `storage`, a linear solver and an iterator,
+each chosen by a hand-written rule. Displaying the result explains each choice and prints the equivalent call to
+`optimize!(model, options; ...)`; with SecondOrderOptimization loaded, `optimize!(model, rec)` runs it.
+
+It builds the normal path as `optimize!(model, options)` does with `reduction = storage = :auto`, then builds, linearizes
+and factorizes its linear system once, at the model's current values, to measure the spread of the Hessian's diagonal
+(largest over smallest), a lower bound on the condition number of the Jacobi-scaled Hessian `D^-½ H D^-½` (by
+$REC_INVERSE_ITERATIONS steps of inverse iteration), and the time of a cost evaluation, a linearization and an undamped
+solve. Then:
+
+- **Formulation:** `:tall` when every cost is an [`AbstractResidual`](@ref) and the condition estimate is finite and at
+  least $(REC_TALL_CONDITION); otherwise `:normal`. A system that does not factorize (rank-deficient or indefinite) has
+  no estimate and stays `:normal`. If [`optimvars_nls`](@ref) cannot build the model (an unfixed adaptive kernel, for
+  example), `:normal`.
+- **Reduction and storage:** what `:auto` builds, on the formulation's path.
+- **Linear solver:** on the normal path, `:cholesky` for a static, dense or eliminated system and `:ldl` for a sparse
+  one (what `linsolver = :auto` uses), but `:ldl` whenever a cost is not a residual, since the Hessian can then be
+  indefinite; on the tall path `:qr`.
+- **Iterator:** `:dogleg` when the undamped solve succeeded, the condition estimate is below $(REC_DOGLEG_CONDITION), the
+  diagonal's spread is below $(REC_DIAGSPREAD) and a solve takes at least as long as a linearization; otherwise
+  `:levenbergmarquardt_dtd` when the spread is at least $(REC_DIAGSPREAD); otherwise `:levenbergmarquardt`.
+
+Every threshold is a starting value, not yet measured against benchmarks. The model's variables are not changed. A model
+whose cost, gradient or Hessian is not finite at its current values is an `ArgumentError`.
+
+The keywords are those of [`optimvars`](@ref), with the same meanings and defaults; the recommendation keeps them, and
+`optimize!(model, rec)` uses them.
+
+# Example
+```julia
+rec = recommendoptimizer(model)   # displays the explanation and the call
+result = optimize!(model, rec)    # with `using SecondOrderOptimization`
+```
+"""
+recommendoptimizer
+
+"""
+    OptimizationRecommendation
+
+What [`recommendoptimizer`](@ref) recommends for a model: a formulation, reduction, storage, linear solver and iterator,
+the keywords it was made with, and the evidence for each choice (the features measured and the rule that fired).
+Displaying it in the REPL (`show` with `MIME"text/plain"`) explains each choice and prints the equivalent call to
+`optimize!(model, options; ...)`; the two-argument `show` is one line with the five choices. With SecondOrderOptimization
+loaded, `optimize!(model, rec)` and `optimize(model, rec)` run it.
+
+A recommendation holds for the model, and the values, it was made from; it is not checked against the model when it is
+used. Its fields are internal, and it cannot be changed: to change a choice, set the options and keywords by hand on
+`optimize!(model, options; ...)`, starting from the call it prints.
+"""
+OptimizationRecommendation

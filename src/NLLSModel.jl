@@ -40,6 +40,9 @@ export addvariable!, addcost!, subproblem, subproblem!
 export cost, optimvars, optimvars_nls, flat_optimvars_nls, syncvars!
 export islinear
 
+# Choosing how to solve a model
+export recommendoptimizer, OptimizationRecommendation
+
 # Cost and residual types & definition interface
 export AbstractCost, AbstractResidual, AbstractAdaptiveResidual
 export ndeps, nres, varindices, getvars

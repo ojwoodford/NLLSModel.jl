@@ -5,10 +5,11 @@ using NLLSModel, Test
 const PUBLIC_NAMES = sort([
     :AbstractAdaptiveResidual, :AbstractAdaptiveRobustifier, :AbstractCost, :AbstractResidual, :AbstractRobustifier,
     :ContaminatedGaussian, :GemanMcclure2oKernel, :GemanMcclureKernel, :Huber2oKernel, :HuberKernel,
-    :Model, :NLLSModel, :NLLSNLSModel, :NLPLSModel, :NoRobust, :Scaled, :SimpleError2, :SimpleError3, :SimpleError4,
+    :Model, :NLLSModel, :NLLSNLSModel, :NLPLSModel, :NoRobust, :OptimizationRecommendation, :Scaled,
+    :SimpleError2, :SimpleError3, :SimpleError4,
     :addcost!, :addvariable!, :computecost, :computecostgradhess, :computeresidual, :computeresjac,
     :cost, :flat_optimvars_nls, :generatemeasurement, :getvars, :islinear, :ndeps, :nres,
-    :optimvars, :optimvars_nls, :robustify, :robustifydcost, :robustifydkernel, :robustkernel,
+    :optimvars, :optimvars_nls, :recommendoptimizer, :robustify, :robustifydcost, :robustifydkernel, :robustkernel,
     :subproblem, :subproblem!, :syncvars!, :varindices,
 ])
 

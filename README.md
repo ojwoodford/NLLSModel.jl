@@ -91,6 +91,20 @@ Also:
 `formulation` is a keyword of `optimize!` and `optimize` only. It is not an `OptimizationOptions` field and is not inferred from
 `linsolver`; a caller of `optimvars` or `optimvars_nls` chooses by which one they call.
 
+### Choosing a configuration: `recommendoptimizer`
+
+`recommendoptimizer(model)` chooses the formulation, `reduction`, `storage`, linear solver and iterator by hand-written
+rules, from the model's structure and from one linearization and factorization of its normal equations at its current
+values (the conditioning and scaling of the Hessian, and how long a linearization and a solve take). Displayed, the
+recommendation explains each choice and prints the equivalent `optimize!(model, options; ...)` call, to copy and edit;
+`optimize!(model, rec)` runs it directly (other keywords go to `OptimizationOptions`). The rules' thresholds are starting
+values, not yet measured; see the "Linear Solvers & Sparsity" page of the docs for an example.
+
+```julia
+rec = recommendoptimizer(problem) # Displays the choices, the reasons and the call
+result = optimize!(problem, rec)
+```
+
 ### Advanced use: `optimvars`
 
 `optimvars` is needed for a custom outer loop, for reusing an `OptimizationWorkspace` across solves with your own objective
