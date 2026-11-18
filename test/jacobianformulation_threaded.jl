@@ -4,10 +4,10 @@ import OptimizationVariableInterface
 import OptimizationVariableInterface: nvars, update, update!, copyvars
 
 include("fixtures/loader.jl")
-fixture("frontdoor", "tallformulation", "tallproblems")
+fixture("frontdoor", "jacobianformulation", "jacobianproblems")
 
-# The testsets of tallformulation.jl whose behaviour depends on the thread count (the `threaded` group, run on 1 and on 4 threads).
-@testset "tallformulation.jl, threaded" begin
+# The testsets of jacobianformulation.jl whose behaviour depends on the thread count (the `threaded` group, run on 1 and on 4 threads).
+@testset "jacobianformulation.jl, threaded" begin
     @testset "keywords: used by :jacobian" begin
         model = curvefit()
         # numthreads

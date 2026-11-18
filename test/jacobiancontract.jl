@@ -3,11 +3,11 @@ import OptimizationVariableInterface
 import OptimizationVariableInterface: nvars, update, update!, copyvars
 
 include("fixtures/loader.jl")
-fixture("frontdoor", "tallproblems")
+fixture("frontdoor", "jacobianproblems")
 
 # T4: the contract the optimizer relies on.
 
-@testset "tallcontract.jl" begin
+@testset "jacobiancontract.jl" begin
     @testset "contract (T4): resjac! returns the true cost" begin
         for name in ("Huber", "Huber, mixed variables")
             for kernel in (true, :second)

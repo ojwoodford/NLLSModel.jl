@@ -5,10 +5,10 @@ import BlockLinearSystems: SchurBlockJacobian, block, blockentry, residual_block
 import OptimizationVariableInterface
 
 include("fixtures/loader.jl")
-fixture("allocations", "frontdoor", "tallelimination")
+fixture("allocations", "frontdoor", "jacobianelimination")
 
-# The testsets of tallelimination.jl whose behaviour depends on the thread count (the `threaded` group, run on 1 and on 4 threads).
-@testset "tallelimination.jl, threaded" begin
+# The testsets of jacobianelimination.jl whose behaviour depends on the thread count (the `threaded` group, run on 1 and on 4 threads).
+@testset "jacobianelimination.jl, threaded" begin
     @testset "threads: the tall floor's rule, the same tables" begin
         nt = Threads.nthreads()
         model = posechain(40, 60)

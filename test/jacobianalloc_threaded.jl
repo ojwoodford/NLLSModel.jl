@@ -3,10 +3,10 @@ using SecondOrderOptimization
 import OptimizationVariableInterface: update, update!, copyvars
 
 include("fixtures/loader.jl")
-fixture("allocations", "frontdoor", "tallalloc", "tallproblems")
+fixture("allocations", "frontdoor", "jacobianalloc", "jacobianproblems")
 
-# The testsets of tallalloc.jl whose behaviour depends on the thread count (the `threaded` group, run on 1 and on 4 threads).
-@testset "tallalloc.jl, threaded" begin
+# The testsets of jacobianalloc.jl whose behaviour depends on the thread count (the `threaded` group, run on 1 and on 4 threads).
+@testset "jacobianalloc.jl, threaded" begin
     # Threaded, a warm call allocates nothing either (the threads' arguments are passed by `threadargs`)
     @testset "threads: a warm call allocates nothing" begin
         nt = Threads.nthreads()

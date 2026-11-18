@@ -3,7 +3,7 @@ import BlockLinearSystems
 import DampedLinearSolve
 import OptimizationVariableInterface
 
-fixture("frontdoor", "optimization", "tallelimination", "nonsquaredcost", "adaptivecost")
+fixture("frontdoor", "optimization", "jacobianelimination", "nonsquaredcost", "adaptivecost")
 
 # Features built by hand, for the rules: a well-conditioned, well-scaled dense system whose solve costs more than its
 # linearization, unless a keyword says otherwise

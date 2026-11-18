@@ -4,7 +4,7 @@ import OptimizationVariableInterface: nvars, update, update!, copyvars
 
 fixture("frontdoor")
 
-# Test problems shared by tallkernels.jl and tallformulation.jl.
+# Test problems shared by jacobiankernels.jl and jacobianformulation.jl.
 
 # --- Test problems ---------------------------------------------------------------------------------------------------
 

@@ -3,7 +3,7 @@ using SecondOrderOptimization
 import OptimizationVariableInterface
 import OptimizationVariableInterface: nvars, update, update!, copyvars
 
-fixture("tallproblems")
+fixture("jacobianproblems")
 
 const TallExt = Base.get_extension(NLLSModel, :SecondOrderOptimizationExt)
 const TallOptions = OptimizationOptions(iterator=:levenbergmarquardt, maxiters=200)

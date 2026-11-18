@@ -27,12 +27,12 @@ end
 const TEST_GROUPS = (
     serial = ["imports.jl", "publicapi.jl", "CostStruct.jl", "robust.jl", "dynamicvars.jl", "autodiff.jl", "nonsquaredcost.jl",
         "adaptivecost.jl", "gramkernels.jl", "problemapi.jl", "runtimeblocks.jl", "bigvariable.jl", "optimizeba.jl",
-        "optimization.jl", "frontdoor.jl", "tallkernels.jl", "tallformulation.jl", "tallcontract.jl", "talliterators.jl",
-        "tallalloc.jl", "tallelimination.jl", "eliminablesizes.jl", "tallcombinations.jl", "NLPModel.jl", "nls_interface.jl",
+        "optimization.jl", "frontdoor.jl", "jacobiankernels.jl", "jacobianformulation.jl", "jacobiancontract.jl", "jacobianiterators.jl",
+        "jacobianalloc.jl", "jacobianelimination.jl", "eliminablesizes.jl", "jacobiancombinations.jl", "NLPModel.jl", "nls_interface.jl",
         "keywords.jl", "recommender.jl"],
     threaded = ["multithreading.jl", "gramkernels_threaded.jl", "runtimeblocks_threaded.jl", "optimization_threaded.jl",
-        "frontdoor_threaded.jl", "tallformulation_threaded.jl", "manyvariables.jl", "tallalloc_threaded.jl",
-        "tallelimination_threaded.jl", "eliminablesizes_threaded.jl", "nls_interface_threaded.jl", "keywords_threaded.jl"],
+        "frontdoor_threaded.jl", "jacobianformulation_threaded.jl", "manyvariables.jl", "jacobianalloc_threaded.jl",
+        "jacobianelimination_threaded.jl", "eliminablesizes_threaded.jl", "nls_interface_threaded.jl", "keywords_threaded.jl"],
     integration = ["nls_integration.jl"],
 )
 const SELECTED_GROUPS = isempty(ARGS) ? collect(keys(TEST_GROUPS)) : Symbol.(ARGS)

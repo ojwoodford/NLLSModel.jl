@@ -2,7 +2,7 @@ using NLLSModel, Test, Static, StaticArrays, SparseArrays, LinearAlgebra
 using SecondOrderOptimization, Krylov
 import BlockLinearSystems: SchurBlockJacobian
 
-fixture("tallelimination")
+fixture("jacobianelimination")
 
 # (reduction, storage) => (the Jacobian prototype, the linsolver values the optimizer accepts with it)
 const TALL_TABLE = Dict(

@@ -3,13 +3,13 @@ using SecondOrderOptimization
 import OptimizationVariableInterface: update, update!, copyvars
 
 include("fixtures/loader.jl")
-fixture("allocations", "frontdoor", "tallalloc", "tallproblems")
+fixture("allocations", "frontdoor", "jacobianalloc", "jacobianproblems")
 
 # Z4: the tall evaluators allocate nothing per call on one thread (warm).
 # Variables of static size use autodiff; Vector variables use hand-written Jacobians (TlHand), since autodiff of a Vector variable
 # allocates in `update`, in either formulation.
 
-@testset "tallalloc.jl" begin
+@testset "jacobianalloc.jl" begin
     @testset "one thread, a warm call allocates nothing: static variables, $name" for (name, make) in (
             ("no kernel", staticplain), ("Huber", () -> staticrobust(HuberKernel(0.3))), ("Huber2o", () -> staticrobust(Huber2oKernel(0.3))),
             ("Geman-McClure 2o", () -> staticrobust(GemanMcclure2oKernel(0.3))))

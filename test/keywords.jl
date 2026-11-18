@@ -2,7 +2,7 @@ using NLLSModel, Test, Static, StaticArrays, LinearAlgebra, SparseArrays
 using NLPModels, SecondOrderOptimization
 
 include("fixtures/loader.jl")
-fixture("keywords", "tallformulation")
+fixture("keywords", "jacobianformulation")
 
 # One keyword set for every way of building or optimizing a model (K1).
 
@@ -31,7 +31,7 @@ fixture("keywords", "tallformulation")
     end
 
     # NTP2: the normal path's rule; with no eliminable variable :eliminate is the partition's ArgumentError (elimination on
-    # the tall path itself is tested in tallelimination.jl)
+    # the tall path itself is tested in jacobianelimination.jl)
     @testset "reduction on the tall path: no eliminable variable" begin
         err = try optimvars_nls(model; reduction=:eliminate); nothing catch e e end
         @test err isa ArgumentError && occursin("eliminable", err.msg)

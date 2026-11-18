@@ -4,13 +4,13 @@ import OptimizationVariableInterface
 import OptimizationVariableInterface: nvars, update, update!, copyvars
 
 include("fixtures/loader.jl")
-fixture("frontdoor", "tallformulation", "tallproblems")
+fixture("frontdoor", "jacobianformulation", "jacobianproblems")
 
 # optimize!(model, options; formulation = :jacobian): the residual-and-Jacobian path.
 
 # --- Tests ------------------------------------------------------------------------------------------------------------
 
-@testset "tallformulation.jl" begin
+@testset "jacobianformulation.jl" begin
     @test TallExt isa Module
 
     @testset "formulation is a keyword of optimize! only" begin

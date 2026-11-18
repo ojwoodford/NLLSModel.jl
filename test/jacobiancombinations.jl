@@ -3,7 +3,7 @@ using SecondOrderOptimization, Krylov
 import BlockLinearSystems: SchurBlockJacobian
 
 include("fixtures/loader.jl")
-fixture("tallcombinations")
+fixture("jacobiancombinations")
 
 # NTP4: the table of what `formulation = :jacobian` supports (the front door's docstring, `TALL_FORMULATION_DOC` in
 # src/keywords.jl, the README and docs/src/index.md), as data. Every listed combination reaches the normal path's cost on a
@@ -12,7 +12,7 @@ fixture("tallcombinations")
 # `iterator`, so each row runs every listed solver with :levenbergmarquardt and every iterator with :auto, and each
 # unlisted solver once, with :levenbergmarquardt (rejection depends on the solver, never on the iterator).
 
-@testset "tallcombinations.jl" begin
+@testset "jacobiancombinations.jl" begin
     model = countedchain()
     c0 = NLLSModel.cost(model)
     cn = NLLSModel.cost(first(optimize(model, OptimizationOptions(iterator=:levenbergmarquardt, maxiters=200); numthreads=static(1))))

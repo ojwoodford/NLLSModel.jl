@@ -2,7 +2,7 @@ using NLLSModel, Test, Static, StaticArrays, SparseArrays, Random, LinearAlgebra
 using SecondOrderOptimization
 import OptimizationVariableInterface: update, update!, copyvars
 
-fixture("allocations", "frontdoor", "tallproblems")
+fixture("allocations", "frontdoor", "jacobianproblems")
 
 const AllocExt = Base.get_extension(NLLSModel, :SecondOrderOptimizationExt)
 

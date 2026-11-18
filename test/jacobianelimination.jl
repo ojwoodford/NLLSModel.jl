@@ -5,11 +5,11 @@ import BlockLinearSystems: SchurBlockJacobian, block, blockentry, residual_block
 import OptimizationVariableInterface
 
 include("fixtures/loader.jl")
-fixture("allocations", "frontdoor", "tallelimination")
+fixture("allocations", "frontdoor", "jacobianelimination")
 
 # NTP2: elimination on the tall path, by QR (a SchurBlockJacobian prototype).
 
-@testset "tallelimination.jl" begin
+@testset "jacobianelimination.jl" begin
     @testset "the prototype: $name" for (name, make, unfixed) in ELIM_MODELS
         model = make()
         J(; kw...) = optimvars_nls(model; unfixed, numthreads=static(1), kw...)[5]

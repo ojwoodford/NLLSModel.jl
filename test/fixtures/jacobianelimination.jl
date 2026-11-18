@@ -4,7 +4,7 @@ import BlockLinearSystems
 import BlockLinearSystems: SchurBlockJacobian, block, blockentry, residual_block, copy_structure
 import OptimizationVariableInterface
 
-fixture("optimization", "tallalloc")
+fixture("optimization", "jacobianalloc")
 
 # A pose chain with landmarks. Poses (x, y, θ) are retained, linked by odometry and anchored by a prior on the first; landmarks
 # (x, y) are eliminable, each seen by two or three poses. The odometry and the prior involve no eliminated variable, so their
@@ -156,7 +156,7 @@ function tables_as_plain(rj, J, plain)
 end
 
 # Bytes allocated by a whole solve through the optimizer: the third of three identical runs (the same start, the same
-# workspace), so that every branch the run takes is compiled; measured through a function barrier, as in tallalloc.jl
+# workspace), so that every branch the run takes is compiled; measured through a function barrier, as in jacobianalloc.jl
 measure_run(x0, obj, opts, ws) = (a = @allocated(res = SecondOrderOptimization.optimize!(x0, obj, opts; workspace=ws)); (a, res.niterations))
 function elim_warmbytes(make; numthreads, storage=:dense, linsolver=:auto, n=30)
     opts = OptimizationOptions(iterator=:levenbergmarquardt, linsolver=linsolver, maxiters=n, reldcost=0.0, absdcost=0.0, dstep=0.0, gtol=0.0, maxstall=10^6,

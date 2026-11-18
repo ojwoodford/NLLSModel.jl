@@ -2,7 +2,7 @@ using NLLSModel, Test, Static, StaticArrays, LinearAlgebra, SparseArrays
 using NLPModels, SecondOrderOptimization
 
 include("fixtures/loader.jl")
-fixture("keywords", "tallformulation")
+fixture("keywords", "jacobianformulation")
 
 # The testsets of keywords.jl whose behaviour depends on the thread count (the `threaded` group, run on 1 and on 4 threads).
 @testset "keywords.jl, threaded" begin
