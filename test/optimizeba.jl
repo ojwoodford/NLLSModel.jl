@@ -177,7 +177,13 @@ fixture("allocations", "optimizeba")
         addcost!(prob_rr, SimpleError2{SVector{6, Float64}, Landmark3D{Float64}}(randn(SVector{2, Float64}), cam, l))
     end
     addcost!(prob_rr, SimpleError2{SVector{6, Float64}, SVector{6, Float64}}(randn(SVector{2, Float64}), 2, 3)) # relative-pose cost
-    @test NLLSModel.partition_schur_problem(prob_rr, trues(7), true).extra_blocks == [(2, 3)]
+    # The description lists the relative-pose cost as a row block of variables 2 and 3, so the reduced system has a block
+    # for the pair
+    d_rr = NLLSModel.partition_schur_problem(prob_rr, trues(7), true)
+    @test d_rr.rowblocks[end] == [2, 3]
+    st_rr = SchurStructure(d_rr.blocksizes, d_rr.rowblocks; eliminated=d_rr.eliminated)
+    pos_rr = invperm(blockorder(st_rr))
+    @test build_schur_pattern(st_rr).block_pattern[minmax(pos_rr[2], pos_rr[3])...]
     f_rd, fdf_rd!, x0_rd, H_rd = optimvars(prob_rr; numthreads=static(1), reduction=:eliminate, storage=:dense)
     f_rs, fdf_rs!, x0_rs, H_rs = optimvars(prob_rr; numthreads=static(1), reduction=:eliminate, storage=:sparse)
     tot_rr = H_rd.structure.nr + sum(H_rd.structure.e_dims)

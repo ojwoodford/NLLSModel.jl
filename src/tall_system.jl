@@ -116,7 +116,7 @@ function tall_schur_partition(problem::Model, unfixed, reduction::Symbol)
             incost[v] = true
         end
     end
-    for v in view(partition.unfixed_inds, partition.nrblocks+1:length(partition.unfixed_inds))
+    for v in view(partition.unfixed_raw, partition.eliminated)
         if !incost[v]
             reduction === :eliminate && throw(ArgumentError("reduction = :eliminate on the tall path needs every eliminated variable in a cost; variable $v is in none."))
             return nothing
@@ -127,9 +127,12 @@ end
 
 # The tables of the elimination, and where each cost's rows go in them (see `TallSchurMap`)
 function tall_schur_map(problem::Model, partition, resblocksizes::Vector{Int}, dep_start_idx::Vector{Int}, nchunks::Int)
-    nr, ne = partition.nrblocks, partition.neblocks
+    # BlockLinearSystems lays out the elimination from the description, with each cost's rows as a row block
+    structure = SchurJacobianStructure(partition.blocksizes, partition.rowblocks, resblocksizes; eliminated=partition.eliminated, nchunks)
+    nr = nretained(structure)
+    ne = count(partition.eliminated)
     role = zeros(Int, length(problem.variables)) # Retained block (> 0), minus the eliminated block (< 0), or 0 for a fixed variable
-    for (p, v) in enumerate(partition.unfixed_inds)
+    for (p, v) in enumerate(partition.unfixed_raw[blockorder(structure)])
         role[v] = p <= nr ? p : nr - p
     end
     K = length(resblocksizes)
@@ -165,8 +168,6 @@ function tall_schur_map(problem::Model, partition, resblocksizes::Vector{Int}, d
             free_rows[g] += m
         end
     end
-    schur = SchurStructure(partition.r_dims, partition.e_dims, partition.couplings; nchunks)
-    structure = SchurJacobianStructure(schur, e_rows; free_rows, free_retained, nchunks)
     dep_target = zeros(Int, dep_start_idx[K + 1] - 1)
     eachcost(problem.costs) do c, k
         vinds = varindices(c)
@@ -303,7 +304,7 @@ function build_tall_layout(problem::Model, unfixed, storage::Symbol, max_dense_b
     # path's rule (`reduced_storage`); the optimizer builds its own pattern for a sparse one.
     if !isnothing(partition)
         schur = tall_schur_map(problem, partition, resblocksizes, dep_start_idx, nchunks)
-        is_dense, = reduced_storage(schur.structure.schur, partition.extra_blocks, storage, max_dense_bytes, "reduced system"; needpattern=false)
+        is_dense, = reduced_storage(SchurStructure(schur.structure), (), storage, max_dense_bytes, "reduced system"; needpattern=false)
         J_proto = SchurBlockJacobian{Float64, is_dense ? Matrix{Float64} : SparseMatrixCSC{Float64, Int}}(schur.structure)
         return NLSTallLayout(
             K, M, N, 0,
@@ -962,9 +963,9 @@ function optimvars_nls(
     layout, J_proto = build_tall_layout(problem, conv_unfixed, storage, Int(max_dense_bytes), partition, Int(dynamic(numthreads)))
 
     if !isnothing(partition)
-        # The variables in the partition's order (retained, then eliminated), which is the column order of the tables
+        # The variables in the layout's order (retained, then eliminated), which is the column order of the tables
         is_single = false
-        unfixed_inds = partition.unfixed_inds
+        unfixed_inds = partition.unfixed_raw[blockorder(layout.schur.structure)]
     elseif conv_unfixed isa Integer
         is_single = true
         unfixed_inds = conv_unfixed

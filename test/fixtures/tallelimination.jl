@@ -129,28 +129,28 @@ const ELIM_MODELS = (
     ("pose chain, two variables fixed", () -> posechain(8, 12), [2:8; 10:20]))
 
 # The tables of a SchurBlockJacobian as one plain Jacobian and residual, in the row order of the plain tall path, and the
-# columns in the variable order of `plain` (a `resjac!` without elimination of the same model)
+# columns in the variable order of `plain` (a `resjac!` without elimination of the same model): each cost is a row block,
+# read through blockentry, block and residual_block
 function tables_as_plain(rj, J, plain)
-    lay, sch = rj.layout, rj.layout.schur
-    jst = sch.structure
-    ne = jst.schur.neblocks
-    # The plain row of each row of each table
-    rowof = [zeros(Int, BlockLinearSystems.reduced_nrows(jst) + 1000) for _ in 1:jst.ntables]
-    for k in 1:lay.K, i in 1:lay.resblocksizes[k]
-        rowof[sch.cost_table[k]][sch.cost_row[k] + i - 1] = lay.resoffsets[k] + i - 1
+    lay, pl = rj.layout, plain.layout
+    jst = J.structure
+    layoutblock = zeros(Int, length(rj.problem.variables))   # Layout block of each unfixed variable
+    for (p, v) in enumerate(rj.unfixed_inds)
+        layoutblock[v] = p
     end
-    # The plain columns of each variable, by its place in the partition (retained blocks, then eliminated blocks)
-    pl = plain.layout
+    sizes = BlockLinearSystems.blocksizes(jst)
     cols(v) = pl.varoffsets[pl.blockindices[v]] .+ (0:pl.varblocksizes[pl.blockindices[v]]-1)
-    retained, eliminated = rj.unfixed_inds[1:jst.schur.nrblocks], rj.unfixed_inds[jst.schur.nrblocks+1:end]
     Jd, rd = zeros(lay.M, lay.N), zeros(lay.M)
-    for t in 1:jst.ntables
-        rows = filter(!iszero, rowof[t])
-        for u in jst.table_ptr[t]:jst.table_ptr[t+1]-1
-            Jd[rows, cols(retained[jst.entry_retained[u]])] = coupling_block(J, u)
+    NLLSModel.eachcost(rj.problem.costs) do c, k
+        m = lay.resblocksizes[k]
+        rows = lay.resoffsets[k] .+ (0:m-1)
+        vinds = NLLSModel.varindices(c)
+        for v in (vinds isa Integer ? (vinds,) : vinds)
+            j = layoutblock[v]
+            j == 0 && continue
+            Jd[rows, cols(v)] = BlockLinearSystems.block(J, k, BlockLinearSystems.blockentry(jst, k, j), m, sizes[j])
         end
-        t <= ne && (Jd[rows, cols(eliminated[t])] = eliminated_block(J, t))
-        rd[rows] = residual_block(J, t)
+        rd[rows] = residual_block(J, k)
     end
     return Jd, rd
 end

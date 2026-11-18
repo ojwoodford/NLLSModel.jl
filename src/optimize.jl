@@ -245,12 +245,17 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
 
     partition = schur_partition(problem, unfixed, reduction)
     if !isnothing(partition)
-        structure = SchurStructure(partition.r_dims, partition.e_dims, partition.couplings; nchunks=dynamic(numthreads))
+        # BlockLinearSystems lays out the elimination from the description: the block order, the couplings, the pairs of
+        # retained variables that share a cost
+        structure = SchurStructure(partition.blocksizes, partition.rowblocks; eliminated=partition.eliminated, nchunks=dynamic(numthreads))
+        unfixed_inds = partition.unfixed_raw[blockorder(structure)]
+        nrb = nretained(structure)
+        neb = count(partition.eliminated)
 
         # Dense or sparse. The pattern includes retained-retained pairs sharing a cost, not only those sharing an
         # eliminated variable. When the symbolic analysis is run for the decision, it is kept and handed on with the
         # pattern, so the linear system does not analyse the same pattern again.
-        is_dense, pattern, analysed = reduced_storage(structure, partition.extra_blocks, storage, max_dense_bytes, "reduced Hessian"; needpattern=true)
+        is_dense, pattern, analysed = reduced_storage(structure, (), storage, max_dense_bytes, "reduced Hessian"; needpattern=true)
 
         total_e_size = sum(Int(d)^2 for d in structure.e_dims; init=0)
         total_c_size = sum(Int(structure.e_dims[e]) * Int(structure.r_dims[structure.entry_retained[c]]) for e in eachindex(structure.e_dims) for c in structure.eliminated_ptr[e]:(structure.eliminated_ptr[e+1]-1); init=0)
@@ -267,18 +272,18 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
             SchurBlockHessian(structure, R_sys, E_data, C_data; pattern=carried)
         end
 
-        nblocks_tot = partition.nrblocks + partition.neblocks
+        nblocks_tot = nrb + neb
         blockindices = zeros(UInt, length(problem.variables))
-        for (b, var_idx) in enumerate(partition.unfixed_inds)
+        for (b, var_idx) in enumerate(unfixed_inds)
             blockindices[var_idx] = b
         end
 
         boffsets = Vector{Int}(undef, nblocks_tot + 1)
-        for b in 1:partition.nrblocks
+        for b in 1:nrb
             boffsets[b] = structure.boffsets_r[b]
         end
-        for e in 1:partition.neblocks
-            boffsets[partition.nrblocks + e] = structure.nr + structure.boffsets_e[e]
+        for e in 1:neb
+            boffsets[nrb + e] = structure.nr + structure.boffsets_e[e]
         end
         boffsets[end] = structure.nr + sum(Int, structure.e_dims; init=0) + 1
 
@@ -286,15 +291,15 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
         x_vec = zeros(Float64, tot_len)
         b_vec = zeros(Float64, tot_len)
 
-        ls_x = MultiVariateLSSchur_x(x_vec, blockindices, boffsets, structure, partition.unfixed_inds)
+        ls_x = MultiVariateLSSchur_x(x_vec, blockindices, boffsets, structure, unfixed_inds)
         ls_val = MultiVariateLSSchur_ls(H, b_vec)
         lsschur = LinearSystem(ls_x, ls_val)
-        ls_shared = sharedschurlinearsystem(lsschur, workestimates(problem, partition.unfixed_inds).normal, numthreads, costsplit(problem.costs), min_work)
-        plan = ls_shared isa LinearSystemShared ? build_schur_thread_plan!(problem, blockindices, partition.nrblocks, partition.neblocks, length(ls_shared.ls)) : nothing
+        ls_shared = sharedschurlinearsystem(lsschur, workestimates(problem, unfixed_inds).normal, numthreads, costsplit(problem.costs), min_work)
+        plan = ls_shared isa LinearSystemShared ? build_schur_thread_plan!(problem, blockindices, nrb, neb, length(ls_shared.ls)) : nothing
 
-        f = MultiVarCostFunc(problem, partition.unfixed_inds, numthreads, min_work_cost)
-        fdf! = MultiVarSchurFDF(ls_shared, problem, partition.unfixed_inds, plan)
-        x0 = problem.variables[partition.unfixed_inds]
+        f = MultiVarCostFunc(problem, unfixed_inds, numthreads, min_work_cost)
+        fdf! = MultiVarSchurFDF(ls_shared, problem, unfixed_inds, plan)
+        x0 = problem.variables[unfixed_inds]
         return (f, fdf!, x0, H)
     end
 
