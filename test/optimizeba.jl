@@ -56,12 +56,11 @@ fixture("allocations", "optimizeba")
     @test nvars(x0_int[2]) == 6
     @test nvars(x0_int[3]) == 3
     @test nvars(x0_int[4]) == 3
-    # Check that linear system internal block sizes form a BlockRLE with exactly 2 runs: [2 => 6, 2 => 3]
+    # Check that the linear system's block sizes are grouped, two runs: [6, 6, 3, 3] (a BlockRLE is canonical, so this is
+    # its run structure)
     orig_A_int = NLLSModel.getA(fdf_int!.linsystem)
-    @test orig_A_int.rowblocksizes isa NLLSModel.BlockRLE
-    @test BlockLinearSystems.nruns(orig_A_int.rowblocksizes) == 2
-    @test orig_A_int.rowblocksizes.runlengths == [2, 2]
-    @test orig_A_int.rowblocksizes.blocksizes == [6, 3]
+    @test blocksizes(orig_A_int, 1) isa NLLSModel.BlockRLE
+    @test collect(blocksizes(orig_A_int, 1)) == [6, 6, 3, 3]
 
     # M9: syncvars! writes a solution back in the block order optimvars used
     orig_int = copy(problem_interleaved.variables)
