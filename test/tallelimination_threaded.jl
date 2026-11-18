@@ -34,24 +34,16 @@ fixture("allocations", "frontdoor", "tallelimination")
     # A whole solve with a dense reduced system (QR of the reduced Jacobian, or Cholesky of its normal equations), serial and
     # threaded. A sparse reduced system allocates inside CHOLMOD (rules.md 21's exception), so it is not checked here.
     #
-    # BlockLinearSystems' kernels thread whenever Julia has more than one thread (whatever `numthreads` says), and on Julia
-    # 1.10 each threaded call may allocate (rules.md 21's exception, up to 2 048 bytes per thread per call). A whole solve
-    # makes some hundred such calls, a number its result does not report, so that bound cannot be applied to a solve.
-    # Fully serial (NLLSModel on one thread, BlockLinearSystems' threading off through its `SCHUR_THREAD_MIN_WORK`), a solve
-    # allocates nothing on every version. With threads it allocates nothing from Julia 1.11 on; on 1.10 its threaded calls
-    # are bounded per call by BlockLinearSystems' own tests, and the solve is not checked here.
+    # `numthreads` reaches BlockLinearSystems' kernels through the structure's `nchunks`: with `numthreads = 1` they run
+    # serially too, and a solve allocates nothing on every version. With threads, on Julia 1.10 each threaded kernel call
+    # may allocate (rules.md 21's exception, up to 2 048 bytes per thread per call); a whole solve makes some hundred
+    # such calls, a number its result does not report, so that bound cannot be applied to a solve: from Julia 1.11 on it
+    # allocates nothing, and on 1.10 its threaded calls are bounded per call by BlockLinearSystems' own tests.
     @testset "a whole solve: zero allocation, $name, $linsolver" for (name, make) in (
             ("bundle adjustment", () -> (Random.seed!(6); optlandmark_problem(6, 40))), ("pose chain with landmarks", () -> posechain(40, 60))),
             linsolver in (:auto, :cholesky)
-        minwork = BlockLinearSystems.SCHUR_THREAD_MIN_WORK[]
-        try
-            BlockLinearSystems.SCHUR_THREAD_MIN_WORK[] = typemax(Int)
-            @test elim_warmbytes(make; numthreads=static(1), linsolver) == 0
-        finally
-            BlockLinearSystems.SCHUR_THREAD_MIN_WORK[] = minwork
-        end
+        @test elim_warmbytes(make; numthreads=static(1), linsolver) == 0
         if VERSION >= v"1.11" || Threads.nthreads() == 1
-            @test elim_warmbytes(make; numthreads=static(1), linsolver) == 0
             @test elim_warmbytes(make; numthreads=static(Threads.nthreads()), linsolver) == 0
         end
     end
