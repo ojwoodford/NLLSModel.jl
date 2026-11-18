@@ -69,7 +69,11 @@ jacobianreductionstorage(::SchurBlockJacobian{T, <:Matrix}) where T = (:eliminat
 jacobianreductionstorage(::SchurBlockJacobian) = (:eliminate, :sparse)
 
 # Retained and eliminated dimensions under elimination on the Hessian path
-elimdims(H::SchurBlockHessian) = (H.structure.nr, sum(Int, H.structure.e_dims; init=0))
+function elimdims(H::SchurBlockHessian)
+    sizes = BlockLinearSystems.blocksizes(H.structure)
+    nr = nretained(H.structure)
+    return (sum(view(sizes, 1:nr); init=0), sum(view(sizes, nr+1:length(sizes)); init=0))
+end
 elimdims(H) = (0, 0)
 
 # Rule L, the linear solver of the Hessian formulation: the explicit solver that `linsolver = :auto` resolves to for the

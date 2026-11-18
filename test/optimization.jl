@@ -37,7 +37,7 @@ end
     prob = optlandmark_problem(4, 20)
     _, _, _, H = optimvars(prob; numthreads=static(1), reduction=:eliminate, storage=:sparse)
     @test H.pattern !== nothing
-    @test size(H.pattern.S_sparse, 1) == H.structure.nr
+    @test size(H.pattern.S_sparse, 1) == sum(BlockLinearSystems.blocksizes(H.structure)[1:BlockLinearSystems.nretained(H.structure)])
     _, _, _, Hd = optimvars(prob; numthreads=static(1), reduction=:eliminate, storage=:dense)
     @test Hd.pattern === nothing
     # The solver accepts it and optimizes

@@ -18,7 +18,7 @@ fixture("allocations", "optimization", "optimizeba")
         f4, fdf4!, x4, H4 = optimvars(p_threads; numthreads=static(4), reduction=:eliminate, storage)
         @test fdf4!.linsystem isa NLLSModel.LinearSystemShared
         @test fdf4!.plan isa NLLSModel.SchurThreadPlan
-        n = H1.structure.nr + sum(H1.structure.e_dims)
+        n = sum(BlockLinearSystems.blocksizes(H1.structure))
         g1 = zeros(n); g4 = zeros(n)
         for _ in 1:2 # Evaluate twice: buffers must be re-zeroed
             @test fdf1!(g1, H1, x1) ≈ fdf4!(g4, H4, x4)

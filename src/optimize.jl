@@ -183,18 +183,20 @@ end
 # one above `max_dense_bytes` is an `ArgumentError` naming `what`); `:auto` chooses dense for a reduced system of at most
 # 2 000 that fits under the cap and whose Cholesky factor CHOLMOD predicts to be at least 40% full. Returns
 # `(is_dense, pattern, analysed)`: the reduced system's pattern, when it was built (for the decision, or because the caller
-# `needpattern`), and CHOLMOD's symbolic analysis of it, when that was run.
-function reduced_storage(structure::SchurStructure, extra_blocks, storage::Symbol, max_dense_bytes::Int, what::String; needpattern::Bool)
+# `needpattern`), and CHOLMOD's symbolic analysis of it, when that was run. The pattern holds every pair of retained
+# variables that share a cost: BlockLinearSystems keeps them in the structure.
+function reduced_storage(structure::SchurStructure, storage::Symbol, max_dense_bytes::Int, what::String; needpattern::Bool)
+    nr = sum(view(BlockLinearSystems.blocksizes(structure), 1:nretained(structure)))
     if storage === :dense
-        check_densefits(what, structure.nr, structure.nr, max_dense_bytes)
+        check_densefits(what, nr, nr, max_dense_bytes)
         return true, nothing, nothing
     end
-    pattern = (needpattern || storage === :auto) ? build_schur_pattern(structure; extra_blocks) : nothing
-    if storage === :auto && structure.nr <= 2000 && densefits(structure.nr, structure.nr, max_dense_bytes)
+    pattern = (needpattern || storage === :auto) ? build_schur_pattern(structure) : nothing
+    if storage === :auto && nr <= 2000 && densefits(nr, nr, max_dense_bytes)
         chol_fac = SparseArrays.CHOLMOD.analyze(SparseArrays.CHOLMOD.Sparse(Symmetric(pattern.S_sparse, :U)))
         # Fall back to the pattern's own size if CHOLMOD's prediction is unavailable
-        factor_nnz = something(cholmod_symbolic_nnz(chol_fac, structure.nr), nnz(pattern.S_sparse))
-        return factor_nnz >= 0.40 * 0.5 * structure.nr^2, pattern, chol_fac
+        factor_nnz = something(cholmod_symbolic_nnz(chol_fac, nr), nnz(pattern.S_sparse))
+        return factor_nnz >= 0.40 * 0.5 * nr^2, pattern, chol_fac
     end
     return false, pattern, nothing
 end
@@ -255,39 +257,26 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
         # Dense or sparse. The pattern includes retained-retained pairs sharing a cost, not only those sharing an
         # eliminated variable. When the symbolic analysis is run for the decision, it is kept and handed on with the
         # pattern, so the linear system does not analyse the same pattern again.
-        is_dense, pattern, analysed = reduced_storage(structure, (), storage, max_dense_bytes, "reduced Hessian"; needpattern=true)
+        is_dense, pattern, analysed = reduced_storage(structure, storage, max_dense_bytes, "reduced Hessian"; needpattern=true)
 
-        total_e_size = sum(Int(d)^2 for d in structure.e_dims; init=0)
-        total_c_size = sum(Int(structure.e_dims[e]) * Int(structure.r_dims[structure.entry_retained[c]]) for e in eachindex(structure.e_dims) for c in structure.eliminated_ptr[e]:(structure.eliminated_ptr[e+1]-1); init=0)
-        E_data = zeros(Float64, total_e_size)
-        C_data = zeros(Float64, total_c_size)
-
+        # BlockLinearSystems allocates the system; a sparse one on the pattern built for the decision
         H = if is_dense
-            R_dense = zeros(Float64, structure.nr, structure.nr)
-            SchurBlockHessian(structure, R_dense, E_data, C_data)
+            SchurBlockHessian{Float64, Matrix{Float64}}(structure)
         else
-            R_sys = SparseBlockLinearSystem{Float64}(TransposedPattern(pattern.block_pattern), structure.r_dims, structure.r_dims)
             # The pattern (and analysed factor, if any) travel with the matrix to the linear system
             carried = isnothing(analysed) ? pattern : merge(pattern, (S_factor = analysed,))
-            SchurBlockHessian(structure, R_sys, E_data, C_data; pattern=carried)
+            SchurBlockHessian{Float64, SparseBlockLinearSystem{Float64}}(structure; pattern=carried)
         end
 
-        nblocks_tot = nrb + neb
         blockindices = zeros(UInt, length(problem.variables))
         for (b, var_idx) in enumerate(unfixed_inds)
             blockindices[var_idx] = b
         end
 
-        boffsets = Vector{Int}(undef, nblocks_tot + 1)
-        for b in 1:nrb
-            boffsets[b] = structure.boffsets_r[b]
-        end
-        for e in 1:neb
-            boffsets[nrb + e] = structure.nr + structure.boffsets_e[e]
-        end
-        boffsets[end] = structure.nr + sum(Int, structure.e_dims; init=0) + 1
-
-        tot_len = structure.nr + sum(Int, structure.e_dims; init=0)
+        # The full vector is in layout order: block b starts at boffsets[b]
+        sizes = BlockLinearSystems.blocksizes(structure)
+        tot_len = sum(sizes; init=0)
+        boffsets = push!(computestartindices(sizes), tot_len + 1)
         x_vec = zeros(Float64, tot_len)
         b_vec = zeros(Float64, tot_len)
 

@@ -142,7 +142,7 @@ fixture("allocations", "optimizeba")
     f_ds, fdf_ds!, x0_ds, H_ds = optimvars(prob_schur; numthreads=static(1), reduction=:eliminate, storage=:dense)
     @test H_ds isa BlockLinearSystems.SchurBlockHessian
     @test H_ds.R isa Matrix{Float64}
-    tot_dim_ds = H_ds.structure.nr + sum(H_ds.structure.e_dims)
+    tot_dim_ds = sum(blocksizes(H_ds.structure))
     g_ds = zeros(tot_dim_ds)
     c_ds = fdf_ds!(g_ds, H_ds, x0_ds)
     @test isapprox(c_ds, f_ds(x0_ds); atol=1e-12)
@@ -186,7 +186,7 @@ fixture("allocations", "optimizeba")
     @test build_schur_pattern(st_rr).block_pattern[minmax(pos_rr[2], pos_rr[3])...]
     f_rd, fdf_rd!, x0_rd, H_rd = optimvars(prob_rr; numthreads=static(1), reduction=:eliminate, storage=:dense)
     f_rs, fdf_rs!, x0_rs, H_rs = optimvars(prob_rr; numthreads=static(1), reduction=:eliminate, storage=:sparse)
-    tot_rr = H_rd.structure.nr + sum(H_rd.structure.e_dims)
+    tot_rr = sum(blocksizes(H_rd.structure))
     g_rd = zeros(tot_rr); g_rs = zeros(tot_rr)
     @test fdf_rd!(g_rd, H_rd, x0_rd) ≈ fdf_rs!(g_rs, H_rs, x0_rs)
     @test g_rd ≈ g_rs

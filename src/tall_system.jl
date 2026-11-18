@@ -304,7 +304,7 @@ function build_tall_layout(problem::Model, unfixed, storage::Symbol, max_dense_b
     # path's rule (`reduced_storage`); the optimizer builds its own pattern for a sparse one.
     if !isnothing(partition)
         schur = tall_schur_map(problem, partition, resblocksizes, dep_start_idx, nchunks)
-        is_dense, = reduced_storage(SchurStructure(schur.structure), (), storage, max_dense_bytes, "reduced system"; needpattern=false)
+        is_dense, = reduced_storage(SchurStructure(schur.structure), storage, max_dense_bytes, "reduced system"; needpattern=false)
         J_proto = SchurBlockJacobian{Float64, is_dense ? Matrix{Float64} : SparseMatrixCSC{Float64, Int}}(schur.structure)
         return NLSTallLayout(
             K, M, N, 0,
