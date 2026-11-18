@@ -41,7 +41,8 @@ copy_vars_list(vars::Vector) = deepcopy(vars)
 end
 @inline unpack_single_var(v, x) = typeof(v)(x)
 
-@inline unpack_var_elem(::StaticVector{N, T}, x, idx, _) where {N, T} = SVector{N, T}(ntuple(k -> @inbounds(x[idx + k - 1]), Val(N)))
+# A static vector comes back as its own type (an SVector for an SVector), which the model's variable vector can hold
+@inline unpack_var_elem(v::StaticVector{N}, x, idx, _) where N = similar_type(v)(ntuple(k -> @inbounds(x[idx + k - 1]), Val(N)))
 @inline unpack_var_elem(::Number, x, idx, _) = @inbounds x[idx]
 @inline function unpack_var_elem(v::Vector{T}, x, idx, bsz) where T
     @inbounds for k in 1:bsz

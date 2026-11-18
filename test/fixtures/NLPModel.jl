@@ -50,6 +50,16 @@ Base.eltype(::AnchorVal) = Float64
 OptimizationVariableInterface.iseliminable(::Type{<:SVector{2, Float64}}) = static(true)
 NLLSModel.generatemeasurement(camera::SVector{6, T}, pt::SVector{2, U}) where {T, U} = SVector(camera[1] * pt[1] + camera[2] * pt[2], camera[5] * pt[1] + camera[6] * pt[2])
 
+# An eliminable point of two coordinates: a static vector type of its own (not an SVector), so that marking it eliminable
+# leaves every other test's 2-vectors as they are
+struct ElimPoint2{T} <: FieldVector{2, T}
+    x::T
+    y::T
+end
+OptimizationVariableInterface.update(v::ElimPoint2, δ, start=1) = ElimPoint2(v.x + δ[start], v.y + δ[start+1])
+OptimizationVariableInterface.iseliminable(::Type{<:ElimPoint2}) = static(true)
+NLLSModel.generatemeasurement(camera::SVector{6, T}, pt::ElimPoint2) where T = SVector(camera[1] * pt[1] + camera[2] * pt[2], camera[5] * pt[1] + camera[6] * pt[2])
+
 # Variables NLPLSModel cannot take (AN9): a struct holding its coordinates, which does not pack into a flat vector (as a
 # bundle-adjustment point type might), and a vector whose update is multiplicative, not addition
 struct OpaquePoint

@@ -270,3 +270,20 @@ end
         @test obj(nlp, [0.25, 0.25]) ≈ 0.5 * ((0.5 - 1)^2 + (sum(v isa OpaquePoint ? v.p : v) - 1)^2)
     end
 end
+
+# A static vector type other than SVector, among other variable types, is written back as itself: the flat vector's
+# values go into a variable of the type it had, not into an SVector the model's variable vector cannot hold
+@testset "the flat paths write a static vector back as its own type" begin
+    prob = Model(Union{SVector{3, Float64}, ElimPoint2{Float64}}, CountedPrior)
+    addvariable!(prob, SVector(0.5, 0.5, 0.5))
+    addvariable!(prob, ElimPoint2(0.25, 0.25))
+    addcost!(prob, CountedPrior(1))
+    addcost!(prob, CountedPrior(2))
+    x = [0.1, 0.2, 0.3, 0.4, 0.5]
+    nlp = NLPLSModel(prob)
+    @test obj(nlp, x) ≈ 0.5 * ((0.6 - 1)^2 + (0.9 - 1)^2)
+    @test NLLSModel.flat_optimvars_nls(prob).f(x) ≈ obj(nlp, x)
+    syncvars!(nlp, x)
+    @test prob.variables[1] == SVector(0.1, 0.2, 0.3)
+    @test prob.variables[2] isa ElimPoint2{Float64} && prob.variables[2] == ElimPoint2(0.4, 0.5)
+end
