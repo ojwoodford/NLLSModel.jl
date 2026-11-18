@@ -27,7 +27,7 @@ fixture("manyvariables")
             normal = deepcopy(model)
             optimize!(normal, opts; unfixed, numthreads=static(numthreads))
             tall = deepcopy(model)
-            optimize!(tall, opts; formulation=:tall, unfixed, numthreads=static(numthreads))
+            optimize!(tall, opts; formulation=:jacobian, unfixed, numthreads=static(numthreads))
             @test NLLSModel.cost(normal) < NLLSModel.cost(model)
             @test NLLSModel.cost(tall) ≈ NLLSModel.cost(normal) rtol=1e-8
         end

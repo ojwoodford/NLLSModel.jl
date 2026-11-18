@@ -5,7 +5,7 @@ import BlockLinearSystems: SchurBlockJacobian
 include("fixtures/loader.jl")
 fixture("tallcombinations")
 
-# NTP4: the table of what `formulation = :tall` supports (the front door's docstring, `TALL_FORMULATION_DOC` in
+# NTP4: the table of what `formulation = :jacobian` supports (the front door's docstring, `TALL_FORMULATION_DOC` in
 # src/keywords.jl, the README and docs/src/index.md), as data. Every listed combination reaches the normal path's cost on a
 # model with eliminable variables; every other one throws before any residual is evaluated. Which (prototype, solver,
 # iterator) combinations work is the optimizer's table, tested there: this package never inspects `linsolver` or
@@ -25,7 +25,7 @@ fixture("tallcombinations")
             TALL_EVALS[] = 0
             outcome = try
                 options = OptimizationOptions(; iterator, linsolver, maxiters=200)
-                solved, result = optimize(model, options; formulation=:tall, reduction, storage, numthreads=static(1))
+                solved, result = optimize(model, options; formulation=:jacobian, reduction, storage, numthreads=static(1))
                 (NLLSModel.cost(solved), result)
             catch err
                 err
@@ -55,7 +55,7 @@ fixture("tallcombinations")
         J = optimvars_nls(model; numthreads=static(1))[5]
         H = optimvars(model; numthreads=static(1))[4]
         @test J isa (H.R isa Matrix ? SchurBlockJacobian{Float64, Matrix{Float64}} : SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}})
-        @test NLLSModel.cost(first(optimize(model, OptimizationOptions(iterator=:levenbergmarquardt, maxiters=200); formulation=:tall, numthreads=static(1)))) ≈ cn rtol=1e-8
+        @test NLLSModel.cost(first(optimize(model, OptimizationOptions(iterator=:levenbergmarquardt, maxiters=200); formulation=:jacobian, numthreads=static(1)))) ≈ cn rtol=1e-8
         @test cn < 0.1 * c0
     end
 end

@@ -8,28 +8,28 @@ fixture("frontdoor", "tallformulation", "tallproblems")
 
 # The testsets of tallformulation.jl whose behaviour depends on the thread count (the `threaded` group, run on 1 and on 4 threads).
 @testset "tallformulation.jl, threaded" begin
-    @testset "keywords: used by :tall" begin
+    @testset "keywords: used by :jacobian" begin
         model = curvefit()
         # numthreads
-        a, _ = optimize(model, TallOptions; formulation=:tall, numthreads=static(1), min_work=1)
-        b, _ = optimize(model, TallOptions; formulation=:tall, numthreads=static(4), min_work=1)
+        a, _ = optimize(model, TallOptions; formulation=:jacobian, numthreads=static(1), min_work=1)
+        b, _ = optimize(model, TallOptions; formulation=:jacobian, numthreads=static(4), min_work=1)
         @test NLLSModel.cost(a) ≈ NLLSModel.cost(b) rtol=1e-10
         # callback
         calls = Ref(0)
         counter(cost, unused...) = (calls[] += 1; (cost, 0))
-        optimize(model, TallOptions; formulation=:tall, numthreads=static(1), callback=counter)
+        optimize(model, TallOptions; formulation=:jacobian, numthreads=static(1), callback=counter)
         @test calls[] > 0
         # workspace: built for the same objective and reused
         m = deepcopy(model)
         f, _, resjac!, x0, J = tlnls(m; numthreads=static(1), storage=:dense)
         obj = JacobianObjective(f, TallExt.TallResJac(resjac!), J)
         ws = OptimizationWorkspace(x0, obj, TallOptions)
-        r1 = optimize!(deepcopy(model), TallOptions; formulation=:tall, numthreads=static(1), workspace=ws)
-        r2 = optimize!(deepcopy(model), TallOptions; formulation=:tall, numthreads=static(1), workspace=ws)
+        r1 = optimize!(deepcopy(model), TallOptions; formulation=:jacobian, numthreads=static(1), workspace=ws)
+        r2 = optimize!(deepcopy(model), TallOptions; formulation=:jacobian, numthreads=static(1), workspace=ws)
         @test r1.bestcost == r2.bestcost
-        @test r1.bestcost ≈ optimize(model, TallOptions; formulation=:tall, numthreads=static(1))[2].bestcost rtol=1e-10
+        @test r1.bestcost ≈ optimize(model, TallOptions; formulation=:jacobian, numthreads=static(1))[2].bestcost rtol=1e-10
         # min_work: the same answer however it is split
-        c, _ = optimize(model, TallOptions; formulation=:tall, numthreads=static(1), min_work=10^9)
+        c, _ = optimize(model, TallOptions; formulation=:jacobian, numthreads=static(1), min_work=10^9)
         @test NLLSModel.cost(c) ≈ NLLSModel.cost(a) rtol=1e-10
     end
 
@@ -59,7 +59,7 @@ fixture("frontdoor", "tallformulation", "tallproblems")
         Threads.nthreads() > 1 && @test offthread(() -> cb0.f([0.3])) && !offthread(() -> cbbig.f([0.3]))
         # optimize!: the residual and Jacobian fill held serial, so only the cost function can thread
         model = spymodel(400)
-        solve(min_work_cost) = optimize(model, TallOptions; formulation=:tall, numthreads=static(4), min_work=10^9, min_work_cost)
+        solve(min_work_cost) = optimize(model, TallOptions; formulation=:jacobian, numthreads=static(4), min_work=10^9, min_work_cost)
         @test NLLSModel.cost(solve(0)[1]) ≈ NLLSModel.cost(solve(10^9)[1]) rtol=1e-10
         if Threads.nthreads() > 1
             @test offthread(() -> solve(0)) && !offthread(() -> solve(10^9))
@@ -68,8 +68,8 @@ fixture("frontdoor", "tallformulation", "tallproblems")
 
     @testset "threads: the same result however many" begin
         model = posemodel()
-        a, ra = optimize(model, TallOptions; formulation=:tall, numthreads=static(1), min_work=1)
-        b, rb = optimize(model, TallOptions; formulation=:tall, numthreads=static(Threads.nthreads()), min_work=1)
+        a, ra = optimize(model, TallOptions; formulation=:jacobian, numthreads=static(1), min_work=1)
+        b, rb = optimize(model, TallOptions; formulation=:jacobian, numthreads=static(Threads.nthreads()), min_work=1)
         @test NLLSModel.cost(a) ≈ NLLSModel.cost(b) rtol=1e-10
         @test samevars(a, b; atol=1e-8)
     end

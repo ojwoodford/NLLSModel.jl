@@ -269,7 +269,7 @@ fixture("frontdoor", "optimization", "recommender")
         model = posechain(8, 12)
         rec = NLLSModel.recommendoptimizer(model; numthreads=static(1))
         # Each keyword the recommendation owns is refused, naming it, before anything runs
-        for (name, value) in ((:iterator, :dogleg), (:linsolver, :ldl), (:formulation, :tall), (:reduction, :none),
+        for (name, value) in ((:iterator, :dogleg), (:linsolver, :ldl), (:formulation, :jacobian), (:reduction, :none),
                 (:storage, :sparse), (:unfixed, 1), (:numthreads, 1), (:max_dense_bytes, 10^6))
             m = deepcopy(model)
             err = try optimize!(m, rec; name => value); nothing catch e e end

@@ -474,8 +474,8 @@ syncvars!
 """
     recommendoptimizer(model::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), max_dense_bytes=$MAX_DENSE_BYTES) -> OptimizationRecommendation
 
-Recommends how to solve `model`, from its structure and its current values: a formulation (`:normal`, the normal
-equations, or `:tall`, the residual and the Jacobian), the `reduction` and `storage`, a linear solver and an iterator,
+Recommends how to solve `model`, from its structure and its current values: a formulation (`:hessian`, the normal
+equations, or `:jacobian`, the residual and the Jacobian), the `reduction` and `storage`, a linear solver and an iterator,
 each chosen by a hand-written rule. Displaying the result explains each choice and prints the equivalent call to
 `optimize!(model, options; ...)`; with SecondOrderOptimization loaded, `optimize!(model, rec)` runs it.
 
@@ -485,10 +485,10 @@ and factorizes its linear system once, at the model's current values, to measure
 $REC_INVERSE_ITERATIONS steps of inverse iteration), and the time of a cost evaluation, a linearization and an undamped
 solve. Then:
 
-- **Formulation:** `:tall` when every cost is an [`AbstractResidual`](@ref) and the condition estimate is finite and at
-  least $(REC_TALL_CONDITION); otherwise `:normal`. A system that does not factorize (rank-deficient or indefinite) has
-  no estimate and stays `:normal`. If [`optimvars_nls`](@ref) cannot build the model (an unfixed adaptive kernel, for
-  example), `:normal`.
+- **Formulation:** `:jacobian` when every cost is an [`AbstractResidual`](@ref) and the condition estimate is finite and at
+  least $(REC_TALL_CONDITION); otherwise `:hessian`. A system that does not factorize (rank-deficient or indefinite) has
+  no estimate and stays `:hessian`. If [`optimvars_nls`](@ref) cannot build the model (an unfixed adaptive kernel, for
+  example), `:hessian`.
 - **Reduction and storage:** what `:auto` builds, on the formulation's path.
 - **Linear solver:** on the normal path, `:cholesky` for a static, dense or eliminated system and `:ldl` for a sparse
   one (what `linsolver = :auto` uses), but `:ldl` whenever a cost is not a residual, since the Hessian can then be

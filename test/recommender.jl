@@ -24,11 +24,11 @@ fixture("recommender")
 
     @testset "rule F, the formulation" begin
         F(; kw...) = NLLSModel.rule_formulation(recfeatures(; kw...))
-        @test F(condition=NLLSModel.REC_TALL_CONDITION) == (:tall, :F_illconditioned)
-        @test F(condition=prevfloat(NLLSModel.REC_TALL_CONDITION)) == (:normal, :F_wellconditioned)
-        @test F(condition=Inf, status=DampedLinearSolve.NotPositiveDefinite) == (:normal, :F_singular)
-        @test F(condition=1e20, allresiduals=false) == (:normal, :F_nonresidual)
-        @test F(condition=Inf, allresiduals=false) == (:normal, :F_nonresidual)
+        @test F(condition=NLLSModel.REC_TALL_CONDITION) == (:jacobian, :F_illconditioned)
+        @test F(condition=prevfloat(NLLSModel.REC_TALL_CONDITION)) == (:hessian, :F_wellconditioned)
+        @test F(condition=Inf, status=DampedLinearSolve.NotPositiveDefinite) == (:hessian, :F_singular)
+        @test F(condition=1e20, allresiduals=false) == (:hessian, :F_nonresidual)
+        @test F(condition=Inf, allresiduals=false) == (:hessian, :F_nonresidual)
     end
 
     @testset "rule I, the iterator" begin
@@ -70,11 +70,11 @@ fixture("recommender")
         @test isfinite(f.condition) == (f.status == DampedLinearSolve.Success)
         @test all(t -> t >= 0, (f.t_cost, f.t_linearize, f.t_solve))
         @test rec.unfixed === nothing && rec.numthreads === static(1) && rec.max_dense_bytes == NLLSModel.MAX_DENSE_BYTES
-        @test NLLSModel.rule_formulation(f)[1] === (spec.name == "an unfixed adaptive kernel" ? :tall : rec.formulation)
+        @test NLLSModel.rule_formulation(f)[1] === (spec.name == "an unfixed adaptive kernel" ? :jacobian : rec.formulation)
         @test rec.iterator === NLLSModel.rule_iterator(f)[1]
 
         # reduction and storage are what optimvars (optimvars_nls on the Jacobian path) builds with :auto
-        if rec.formulation === :normal
+        if rec.formulation === :hessian
             @test rec.rules.reduction === rec.rules.storage === :RS_hessian
             @test (rec.reduction, rec.storage) == NLLSModel.reductionstorage(NLLSModel.hessiansystemkind(optimvars(model; numthreads=static(1))[4]))
         else
@@ -96,7 +96,7 @@ fixture("recommender")
     @testset "the fallback from the Jacobian path" begin
         rec = NLLSModel.recommendoptimizer(adaptivemodel(); numthreads=static(1))
         @test rec.features.condition >= NLLSModel.REC_TALL_CONDITION
-        @test rec.formulation === :normal && rec.rules.formulation === :F_tall_unavailable
+        @test rec.formulation === :hessian && rec.rules.formulation === :F_tall_unavailable
         @test occursin("adaptive", rec.fallback)
         @test rec.rules.reduction === :RS_hessian && rec.rules.linsolver === :L_dense
     end
@@ -104,7 +104,7 @@ fixture("recommender")
     @testset "the explicit linear solver gives the step of :auto" begin
         # Every kind of system, residual costs only
         @testset "Hessian path: $(spec.name)" for spec in REC_MODELS
-            (spec.formulation === :normal && spec.linsolver !== :ldl || spec.kind === :sparse) || continue
+            (spec.formulation === :hessian && spec.linsolver !== :ldl || spec.kind === :sparse) || continue
             spec.name == "an unfixed adaptive kernel" && continue
             model = spec.make()
             linsolver = NLLSModel.rule_linsolver(true, spec.kind)[1]
@@ -149,26 +149,26 @@ fixture("recommender")
             @test rec.features.condition <= truth * (1 + 1e-6)
             @test truth / rec.features.condition <= 1.001 * (1 + (n - 1) * c) + 0.01
             @test truth / rec.features.condition <= 6.01
-            @test rec.formulation === (c == 1 - 1e-13 ? :tall : :normal)
+            @test rec.formulation === (c == 1 - 1e-13 ? :jacobian : :hessian)
         end
         # Badly scaled but well conditioned: a small condition estimate and a large spread
         rec = NLLSModel.recommendoptimizer(linearmodel(scaledjacobian(3, 0.5, [1.0, 1e4, 1e-3])); numthreads=static(1))
         @test rec.features.condition < 4
         @test rec.features.diagspread ≈ 1e14
-        @test rec.formulation === :normal && rec.iterator === :levenbergmarquardt_dtd
+        @test rec.formulation === :hessian && rec.iterator === :levenbergmarquardt_dtd
         # Rank-deficient (exactly: x₁ - x₂ alone): the factorization fails, so Inf, and the normal equations
         rec = NLLSModel.recommendoptimizer(linearmodel([1.0 -1.0]); numthreads=static(1))
         @test rec.features.status == DampedLinearSolve.NotPositiveDefinite
         @test rec.features.condition == Inf
-        @test rec.formulation === :normal && rec.rules.formulation === :F_singular
+        @test rec.formulation === :hessian && rec.rules.formulation === :F_singular
         # A zero diagonal entry (a variable no cost moves): Inf, and an infinite spread
         rec = NLLSModel.recommendoptimizer(linearmodel([1.0 0.0; 2.0 0.0]); numthreads=static(1))
         @test rec.features.diag_min == 0 && rec.features.diagspread == Inf && rec.features.condition == Inf
-        @test rec.formulation === :normal
+        @test rec.formulation === :hessian
         # Finitely and badly conditioned: the Jacobian path, with QR
         rec = NLLSModel.recommendoptimizer(linearmodel(scaledjacobian(3, 1 - 1e-13)); numthreads=static(1))
         @test isfinite(rec.features.condition) && rec.features.condition >= NLLSModel.REC_TALL_CONDITION
-        @test rec.formulation === :tall && rec.linsolver === :qr
+        @test rec.formulation === :jacobian && rec.linsolver === :qr
         # The estimate of a system that does not factorize
         ls = DampedLinearSolve.makehessiansystem(zeros(2, 2), :cholesky)
         @test NLLSModel.scaled_condition_estimate(ls, :cholesky, ones(2)) == Inf
@@ -190,9 +190,9 @@ fixture("recommender")
     end
 
     @testset "show: the one-line form" begin
-        rec = recby(formulation=:normal, reduction=:eliminate, storage=:sparse, linsolver=:cholesky, iterator=:dogleg,
+        rec = recby(formulation=:hessian, reduction=:eliminate, storage=:sparse, linsolver=:cholesky, iterator=:dogleg,
             features=recfeatures(hessiansystem=:schur_sparse, retained=6, eliminated=9, dimension=15))
-        @test sprint(show, rec) == "OptimizationRecommendation(formulation = :normal, reduction = :eliminate, storage = :sparse, linsolver = :cholesky, iterator = :dogleg)"
+        @test sprint(show, rec) == "OptimizationRecommendation(formulation = :hessian, reduction = :eliminate, storage = :sparse, linsolver = :cholesky, iterator = :dogleg)"
         @test repr(rec) == sprint(show, rec)
     end
 
@@ -242,23 +242,23 @@ fixture("recommender")
         @test occursin("could not be factorized (NotPositiveDefinite, smallest diagonal entry -2.0)",
             reason(NLLSModel.formulation_reason; features=recfeatures(status=DampedLinearSolve.NotPositiveDefinite, condition=Inf, diag_min=-2.0)))
         @test occursin("12.3, is below 1.0e12", reason(NLLSModel.formulation_reason; features=recfeatures(condition=12.345)))
-        @test occursin("3.0e13, is at least 1.0e12", reason(NLLSModel.formulation_reason; formulation=:tall, features=recfeatures(condition=3e13)))
+        @test occursin("3.0e13, is at least 1.0e12", reason(NLLSModel.formulation_reason; formulation=:jacobian, features=recfeatures(condition=3e13)))
         @test occursin("cannot be built for this model (why not)", reason(NLLSModel.formulation_reason;
             features=recfeatures(condition=3e13), rule_f=:F_tall_unavailable, fallback="why not"))
         schur = recfeatures(hessiansystem=:schur_dense, retained=6, eliminated=9, dimension=15)
         @test occursin("9 of the 15 dimensions are eliminated", reason(NLLSModel.reduction_reason; reduction=:eliminate, features=schur))
-        @test occursin("eliminated by QR", reason(NLLSModel.reduction_reason; formulation=:tall, reduction=:eliminate, features=schur))
+        @test occursin("eliminated by QR", reason(NLLSModel.reduction_reason; formulation=:jacobian, reduction=:eliminate, features=schur))
         @test occursin("single unfixed variable", reason(NLLSModel.reduction_reason; features=recfeatures(nvariables=1)))
-        @test occursin("Jacobian path: no variables", reason(NLLSModel.reduction_reason; formulation=:tall))
+        @test occursin("Jacobian path: no variables", reason(NLLSModel.reduction_reason; formulation=:jacobian))
         @test occursin("no eliminable variables", reason(NLLSModel.reduction_reason))
         @test occursin("the 6×6 reduced system is stored sparse, from the predicted fill",
             reason(NLLSModel.storage_reason; reduction=:eliminate, storage=:sparse, features=schur))
         @test occursin("static (stack-allocated) 2×2", reason(NLLSModel.storage_reason; features=recfeatures(hessiansystem=:static, dimension=2)))
         @test occursin("the 4×4 Hessian is stored dense, from its sparsity", reason(NLLSModel.storage_reason))
         @test occursin("a single variable's always is", reason(NLLSModel.storage_reason; features=recfeatures(nvariables=1)))
-        @test occursin("the 6×4 Jacobian is stored sparse", reason(NLLSModel.storage_reason; formulation=:tall, storage=:sparse))
-        @test occursin("Jacobian path: the reduced system is stored dense", reason(NLLSModel.storage_reason; formulation=:tall, reduction=:eliminate))
-        @test occursin("QR", reason(NLLSModel.linsolver_reason; formulation=:tall))
+        @test occursin("the 6×4 Jacobian is stored sparse", reason(NLLSModel.storage_reason; formulation=:jacobian, storage=:sparse))
+        @test occursin("Jacobian path: the reduced system is stored dense", reason(NLLSModel.storage_reason; formulation=:jacobian, reduction=:eliminate))
+        @test occursin("QR", reason(NLLSModel.linsolver_reason; formulation=:jacobian))
         @test occursin("can be indefinite", reason(NLLSModel.linsolver_reason; features=recfeatures(allresiduals=false)))
         @test occursin("sparse Hessian", reason(NLLSModel.linsolver_reason; features=recfeatures(hessiansystem=:sparse)))
         @test occursin("Schur complement", reason(NLLSModel.linsolver_reason; features=schur))

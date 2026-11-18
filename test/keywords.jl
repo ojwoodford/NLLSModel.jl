@@ -44,8 +44,8 @@ fixture("keywords", "tallformulation")
         @test res_auto!(r_auto, x) == res_none!(r_none, x)
         @test r_auto == r_none
         # And from the front door, raised by optimvars_nls
-        err = try optimize!(deepcopy(model), KW_OPTIONS; formulation=:tall, reduction=:eliminate); nothing catch e e end
-        @test err isa ArgumentError && startswith(err.msg, "formulation = :tall:") && occursin("eliminable", err.msg)
+        err = try optimize!(deepcopy(model), KW_OPTIONS; formulation=:jacobian, reduction=:eliminate); nothing catch e e end
+        @test err isa ArgumentError && startswith(err.msg, "formulation = :jacobian:") && occursin("eliminable", err.msg)
     end
 
     # max_dense_bytes on the tall path: :auto switches to a sparse Jacobian just above the cap, :dense throws there

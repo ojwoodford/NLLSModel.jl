@@ -23,7 +23,7 @@ islinear
 
 With `using SecondOrderOptimization`, a package extension adds methods to its functions:
 
-- `optimize!(model::Model, options = OptimizationOptions(); formulation = :normal, callback, workspace, unfixed, numthreads, reduction = :auto, storage = :auto, max_dense_bytes, min_work, min_work_cost) -> result` solves the model and writes the solution into `model.variables`. `formulation = :tall` solves from the residual and the Jacobian (see the home page).
+- `optimize!(model::Model, options = OptimizationOptions(); formulation = :hessian, callback, workspace, unfixed, numthreads, reduction = :auto, storage = :auto, max_dense_bytes, min_work, min_work_cost) -> result` solves the model and writes the solution into `model.variables`. `formulation = :jacobian` solves from the residual and the Jacobian (see the home page).
 - `optimize(model::Model, options = OptimizationOptions(); kwargs...) -> (model_copy, result)` does the same on a copy.
 - `optimize!(model::Model, rec::OptimizationRecommendation; callback, workspace, min_work, min_work_cost, options...) -> result`
   solves the model as a recommendation from [`recommendoptimizer`](@ref) says; the other keywords go to

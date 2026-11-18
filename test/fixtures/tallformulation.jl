@@ -46,7 +46,7 @@ end
 function sameoptimum(model, options=TallOptions; atol=1e-5, kwargs...)
     c0 = NLLSModel.cost(model)
     normal, rn = optimize(model, options; numthreads=static(1), kwargs...)
-    tall, rt = optimize(model, options; formulation=:tall, numthreads=static(1), kwargs...)
+    tall, rt = optimize(model, options; formulation=:jacobian, numthreads=static(1), kwargs...)
     cn, ct = NLLSModel.cost(normal), NLLSModel.cost(tall)
     ok = isapprox(ct, cn; rtol=1e-8, atol=1e-10 * c0) && isapprox(ct, rt.bestcost; rtol=1e-12) && samevars(tall, normal; atol) && rt.bestcost < c0
     return ok, ct, cn

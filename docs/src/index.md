@@ -61,14 +61,14 @@ building or optimizing a model takes the same keywords (see [`optimvars`](@ref))
 
 ## Tall formulation
 
-`optimize!(model, options; formulation = :tall)` solves the same model from the residual vector and the Jacobian instead of
+`optimize!(model, options; formulation = :jacobian)` solves the same model from the residual vector and the Jacobian instead of
 the normal equations. Each step is a QR factorization of the Jacobian (dense, or SuiteSparse's sparse QR), or with
 elimination a QR of each eliminated variable's rows and a solve of the reduced problem, so `JᵀJ` is not formed (only the
 reduced system's normal equations, when `linsolver` asks for them) and the conditioning is that of `J`, not its square. Use it when the model is ill conditioned (the normal equations stall above
 the minimum).
 
 ```julia
-result = optimize!(problem, OptimizationOptions(iterator = :levenbergmarquardt); formulation = :tall)
+result = optimize!(problem, OptimizationOptions(iterator = :levenbergmarquardt); formulation = :jacobian)
 ```
 
 What it supports, by the `reduction` and `storage` it ends up with and the `linsolver` given in `OptimizationOptions`:
@@ -90,7 +90,7 @@ the linear system of each row and the iterators it takes are in the "Supported c
 Also:
 
 - every cost must be a non-adaptive `AbstractResidual`, and no adaptive kernel variable may be unfixed. Otherwise the error
-  from [`optimvars_nls`](@ref) is rethrown with the prefix `formulation = :tall:`, as is a dense Jacobian forced above
+  from [`optimvars_nls`](@ref) is rethrown with the prefix `formulation = :jacobian:`, as is a dense Jacobian forced above
   `max_dense_bytes` (default 256 MB), raised before it is allocated;
 - `min_work` is the floor of the residual and Jacobian fill (the tables, with elimination), in its own work estimate,
   with its own default;

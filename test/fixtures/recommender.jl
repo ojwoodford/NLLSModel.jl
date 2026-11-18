@@ -70,27 +70,27 @@ end
 # The models, what the recommender reads from each, and what it should choose. `kind` is the Hessian path's system.
 const REC_MODELS = (
     (name = "one static variable", make = () -> singleproblem(SVector{2, Float64}, 2, 1)[1],
-        kind = :static, formulation = :normal, linsolver = :cholesky),
+        kind = :static, formulation = :hessian, linsolver = :cholesky),
     (name = "several variables, dense", make = () -> chainproblem(5, 2, 2)[1],
-        kind = :dense, formulation = :normal, linsolver = :cholesky),
+        kind = :dense, formulation = :hessian, linsolver = :cholesky),
     (name = "several variables, sparse", make = () -> chainproblem(60, 2, 2)[1],
-        kind = :sparse, formulation = :normal, linsolver = :ldl),
+        kind = :sparse, formulation = :hessian, linsolver = :ldl),
     (name = "eliminable, dense reduced system", make = () -> posechain(8, 12),
-        kind = :schur_dense, formulation = :normal, linsolver = :cholesky),
+        kind = :schur_dense, formulation = :hessian, linsolver = :cholesky),
     (name = "eliminable, sparse reduced system", make = () -> posechain(200, 100),
-        kind = :schur_sparse, formulation = :normal, linsolver = :cholesky),
+        kind = :schur_sparse, formulation = :hessian, linsolver = :cholesky),
     (name = "a non-residual cost", make = nonresidualmodel,
-        kind = :dense, formulation = :normal, linsolver = :ldl),
+        kind = :dense, formulation = :hessian, linsolver = :ldl),
     (name = "an unfixed adaptive kernel", make = adaptivemodel,
-        kind = :dense, formulation = :normal, linsolver = :cholesky),
+        kind = :dense, formulation = :hessian, linsolver = :cholesky),
     (name = "ill-conditioned, one variable", make = () -> linearmodel(scaledjacobian(3, 1 - 1e-13)),
-        kind = :dense, formulation = :tall, linsolver = :qr),
+        kind = :dense, formulation = :jacobian, linsolver = :qr),
     (name = "ill-conditioned, sparse", make = () -> weakchain(60, 1e-14),
-        kind = :sparse, formulation = :tall, linsolver = :qr),
+        kind = :sparse, formulation = :jacobian, linsolver = :qr),
     # A gauge freedom (no prior): rounding lets the factorization succeed, with a finite condition estimate near 1/eps,
     # so the formulation rule sends it to the Jacobian path (measured; see the Status of RC in NLLSModel.jl-fixes.md)
     (name = "bundle adjustment, a gauge freedom", make = () -> (Random.seed!(3); optlandmark_problem(4, 20)),
-        kind = :schur_dense, formulation = :tall, linsolver = :qr),
+        kind = :schur_dense, formulation = :jacobian, linsolver = :qr),
 )
 
 # The features that do not depend on timing
@@ -130,11 +130,11 @@ function tallstep(model, linsolver; kwargs...)
 end
 
 # A recommendation built by hand, for `show`: the rules' symbols default to those its choices and features imply
-function recby(; features=recfeatures(), formulation=:normal, reduction=:none, storage=:dense, linsolver=:cholesky,
+function recby(; features=recfeatures(), formulation=:hessian, reduction=:none, storage=:dense, linsolver=:cholesky,
         iterator=:levenbergmarquardt, unfixed=nothing, numthreads=static(Threads.nthreads()),
         max_dense_bytes=NLLSModel.MAX_DENSE_BYTES, fallback="",
-        rule_f=NLLSModel.rule_formulation(features)[2], rule_rs=(formulation === :tall ? :RS_jacobian : :RS_hessian),
-        rule_l=(formulation === :tall ? :L_tall : NLLSModel.rule_linsolver(features.allresiduals, features.hessiansystem)[2]),
+        rule_f=NLLSModel.rule_formulation(features)[2], rule_rs=(formulation === :jacobian ? :RS_jacobian : :RS_hessian),
+        rule_l=(formulation === :jacobian ? :L_tall : NLLSModel.rule_linsolver(features.allresiduals, features.hessiansystem)[2]),
         rule_i=NLLSModel.rule_iterator(features)[2])
     rules = (formulation = rule_f, reduction = rule_rs, storage = rule_rs, linsolver = rule_l, iterator = rule_i)
     return NLLSModel.OptimizationRecommendation(formulation, reduction, storage, linsolver, iterator, unfixed, numthreads,

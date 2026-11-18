@@ -29,7 +29,7 @@ function check_densefits(what, rows::Integer, cols::Integer, max_dense_bytes::In
     throw(ArgumentError("A dense $(rows)×$(cols) $what needs $(8 * Int(rows) * Int(cols)) bytes, which exceeds max_dense_bytes = $max_dense_bytes; $remedy."))
 end
 
-# What `formulation = :tall` supports, interpolated into the docstrings of the front door (`optimize!(model, options)`) and
+# What `formulation = :jacobian` supports, interpolated into the docstrings of the front door (`optimize!(model, options)`) and
 # of `optimvars_nls`. The README and docs/src/index.md hold the same table, by hand.
 const TALL_FORMULATION_DOC = """
 | `reduction` | `storage` | Jacobian prototype | `linsolver` |
@@ -66,7 +66,7 @@ The same for [`optimvars`](@ref), [`optimvars_nls`](@ref), [`flat_optimvars_nls`
 - `storage = :auto`: storage of the matrix the solver receives: the Hessian, the reduced system under elimination (on
   either path), or the Jacobian. `:auto` chooses from the structure (the sparsity of the Hessian, the predicted fill of the reduced
   system's Cholesky factor, or the fill of the Jacobian); `:dense` and `:sparse` force the choice. On the tall path the
-  Jacobian is a `Matrix{Float64}` or a `SparseMatrixCSC{Float64, Int}`, and `optimize!(...; formulation = :tall)` hands
+  Jacobian is a `Matrix{Float64}` or a `SparseMatrixCSC{Float64, Int}`, and `optimize!(...; formulation = :jacobian)` hands
   either to the optimizer. On the normal path a single unfixed variable's Hessian is always dense, so `:sparse` is an
   `ArgumentError` there.
 - `max_dense_bytes = $MAX_DENSE_BYTES` (256 MiB): under `storage = :auto` a dense matrix larger than this is not chosen (it is

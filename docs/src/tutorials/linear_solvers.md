@@ -52,7 +52,7 @@ the system that is left (the reduced system, after elimination).
 optimize!(problem, options; reduction = :eliminate, storage = :sparse)
 ```
 
-The same keywords, with the same rule, apply to `formulation = :tall` (the residual and the Jacobian). There the
+The same keywords, with the same rule, apply to `formulation = :jacobian` (the residual and the Jacobian). There the
 eliminated variables are eliminated by QR of their rows of the Jacobian, so `JᵀJ` is not formed for them: the prototype
 handed to the optimizer is a `SchurBlockJacobian`, and `storage` chooses the storage of the reduced system the same way.
 The tall path also needs each eliminated variable to be in at least one cost.
@@ -73,7 +73,7 @@ The result, an [`OptimizationRecommendation`](@ref), explains itself when displa
 julia> rec = recommendoptimizer(model)
 OptimizationRecommendation for 70 unfixed variables of total dimension 170, 130
 costs and 290 residual rows, at the model's current values:
-  formulation = :normal
+  formulation = :hessian
       Every cost is a residual, and the condition estimate of the Jacobi-scaled
       Hessian, 118000.0, is below 1.0e12: the normal equations are accurate
       enough.
@@ -100,7 +100,7 @@ The same choices, by hand (with SecondOrderOptimization loaded):
   optimize!(model,
       OptimizationOptions(iterator = :dogleg,
           linsolver = :cholesky);
-      formulation = :normal, reduction = :eliminate, storage = :sparse)
+      formulation = :hessian, reduction = :eliminate, storage = :sparse)
 ```
 
 There are two ways to use it, with `using SecondOrderOptimization`:

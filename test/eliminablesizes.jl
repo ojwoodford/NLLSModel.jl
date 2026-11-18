@@ -25,7 +25,7 @@ fixture("allocations", "eliminablesizes")
         for storage in (:dense, :sparse)
             @test optimvars(model; numthreads=static(1), reduction=:eliminate, storage)[4] isa SchurBlockHessian
             @test solvedcost(model; reduction=:eliminate, storage) ≈ cn rtol=1e-8
-            @test solvedcost(model; formulation=:tall, reduction=:eliminate, storage) ≈ cn rtol=1e-8
+            @test solvedcost(model; formulation=:jacobian, reduction=:eliminate, storage) ≈ cn rtol=1e-8
         end
         # Zero allocation per evaluation, serial (threaded: eliminablesizes_threaded.jl)
         for storage in (:dense, :sparse)

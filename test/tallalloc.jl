@@ -52,10 +52,10 @@ fixture("allocations", "frontdoor", "tallalloc", "tallproblems")
     # `result.linearsolves` times one `update` of every variable, whatever steps the iterator takes.
     @testset "a whole solve allocates only the variables' updates: $name, $formulation" for (name, make) in (
             ("static", () -> staticrobust(Huber2oKernel(0.3))), ("Vector, hand-written", () -> handmodel(Huber2oKernel(0.3), NoRobust()))),
-            formulation in (:tall, :normal)
+            formulation in (:jacobian, :hessian)
         opts = OptimizationOptions(iterator=:levenbergmarquardt, maxiters=60, reldcost=0.0, absdcost=0.0, dstep=0.0, gtol=0.0, maxstall=10^6)
         m = make()
-        if formulation === :tall
+        if formulation === :jacobian
             f, _, rj, x0, J = optimvars_nls(m; numthreads=static(1), storage=:dense)
             obj = JacobianObjective(f, AllocExt.TallResJac(rj), J)
         else

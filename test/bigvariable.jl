@@ -43,14 +43,14 @@ fixture("bigvariable")
         @test 0 < cn < 0.1 * c0
         @test optimvars(problem; numthreads=static(1), storage=:sparse)[4] isa SparseMatrixCSC
         @test solved(problem; reduction=:none, storage=:sparse) ≈ cn rtol=1e-8
-        @test solved(problem; formulation=:tall, storage=:dense) ≈ cn rtol=1e-8
-        @test solved(problem; formulation=:tall, storage=:sparse) ≈ cn rtol=1e-8
+        @test solved(problem; formulation=:jacobian, storage=:dense) ≈ cn rtol=1e-8
+        @test solved(problem; formulation=:jacobian, storage=:sparse) ≈ cn rtol=1e-8
         # Retained in a Schur system
         schur = schurproblem(n)
         @test optimvars(schur; numthreads=static(1))[4] isa BlockLinearSystems.SchurBlockHessian
         for storage in (:dense, :sparse)
             @test solved(schur; reduction=:eliminate, storage) ≈ solved(schur; reduction=:none) atol=1e-12
-            @test solved(schur; formulation=:tall, reduction=:eliminate, storage) ≈ solved(schur; reduction=:none) atol=1e-12
+            @test solved(schur; formulation=:jacobian, reduction=:eliminate, storage) ≈ solved(schur; reduction=:none) atol=1e-12
         end
     end
     @testset "eliminated blocks of $n dimensions" for n in (256,)
@@ -61,7 +61,7 @@ fixture("bigvariable")
         @test optimvars(problem; numthreads=static(1))[4] isa BlockLinearSystems.SchurBlockHessian
         for storage in (:dense, :sparse)
             @test solved(problem; reduction=:eliminate, storage) ≈ cn rtol=1e-8
-            @test solved(problem; formulation=:tall, reduction=:eliminate, storage) ≈ cn rtol=1e-8
+            @test solved(problem; formulation=:jacobian, reduction=:eliminate, storage) ≈ cn rtol=1e-8
         end
     end
 end

@@ -10,7 +10,7 @@ const KW_ENTRY = (
     ("optimvars_nls", (m; kw...) -> optimvars_nls(m; kw...), KW_SET),
     ("flat_optimvars_nls", (m; kw...) -> flat_optimvars_nls(m; kw...), KW_SET),
     ("optimize!, normal", (m; kw...) -> optimize!(deepcopy(m), KW_OPTIONS; kw...), KW_SET),
-    ("optimize!, tall", (m; kw...) -> optimize!(deepcopy(m), KW_OPTIONS; formulation=:tall, kw...), KW_SET),
+    ("optimize!, tall", (m; kw...) -> optimize!(deepcopy(m), KW_OPTIONS; formulation=:jacobian, kw...), KW_SET),
     ("NLPLSModel", (m; kw...) -> NLPLSModel(m; kw...), KW_SET),
     ("NLLSNLSModel", (m; kw...) -> NLLSNLSModel(m; kw...), KW_SET),
 )

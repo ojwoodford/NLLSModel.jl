@@ -26,12 +26,12 @@ fixture("allocations", "frontdoor", "tallelimination")
         model = make()
         c0 = NLLSModel.cost(model)
         normal, _ = optimize(model, ElimOptions; unfixed, numthreads=static(1))
-        tall, rt = optimize(model, ElimOptions; formulation=:tall, reduction=:eliminate, storage, unfixed, numthreads=static(1))
-        plain, _ = optimize(model, ElimOptions; formulation=:tall, reduction=:none, unfixed, numthreads=static(1))
+        tall, rt = optimize(model, ElimOptions; formulation=:jacobian, reduction=:eliminate, storage, unfixed, numthreads=static(1))
+        plain, _ = optimize(model, ElimOptions; formulation=:jacobian, reduction=:none, unfixed, numthreads=static(1))
         @test NLLSModel.cost(tall) ≈ NLLSModel.cost(normal) rtol=1e-8 atol=1e-10 * c0
         @test NLLSModel.cost(tall) ≈ NLLSModel.cost(plain) rtol=1e-8 atol=1e-10 * c0
         # linsolver = :qr, a QR of the reduced Jacobian, dense or sparse (a sparse one since SecondOrderOptimization TP6)
-        tallqr, _ = optimize(model, OptimizationOptions(iterator=:levenbergmarquardt, linsolver=:qr, maxiters=200); formulation=:tall,
+        tallqr, _ = optimize(model, OptimizationOptions(iterator=:levenbergmarquardt, linsolver=:qr, maxiters=200); formulation=:jacobian,
             reduction=:eliminate, storage, unfixed, numthreads=static(1))
         @test NLLSModel.cost(tallqr) ≈ NLLSModel.cost(normal) rtol=1e-8 atol=1e-10 * c0
         # The solution is written back through the partition (syncvars!)
@@ -85,7 +85,7 @@ fixture("allocations", "frontdoor", "tallelimination")
         err = try optimvars_nls(lonely; numthreads=static(1), reduction=:eliminate); nothing catch e e end
         @test err isa ArgumentError && occursin("in none", err.msg)
         # Front door: :eliminate is not rejected
-        @test optimize!(deepcopy(ba), ElimOptions; formulation=:tall, reduction=:eliminate, numthreads=static(1)) isa OptimizationResult
+        @test optimize!(deepcopy(ba), ElimOptions; formulation=:jacobian, reduction=:eliminate, numthreads=static(1)) isa OptimizationResult
         # A single unfixed variable is never partitioned, as on the normal path
         @test optimvars_nls(ba; unfixed=1, numthreads=static(1), reduction=:eliminate)[5] isa Matrix{Float64}
         # A dense reduced system above the cap: an ArgumentError naming it (4 cameras of 6: 24×24, 4608 bytes)

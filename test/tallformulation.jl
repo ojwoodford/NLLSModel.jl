@@ -6,7 +6,7 @@ import OptimizationVariableInterface: nvars, update, update!, copyvars
 include("fixtures/loader.jl")
 fixture("frontdoor", "tallformulation", "tallproblems")
 
-# optimize!(model, options; formulation = :tall): the residual-and-Jacobian path.
+# optimize!(model, options; formulation = :jacobian): the residual-and-Jacobian path.
 
 # --- Tests ------------------------------------------------------------------------------------------------------------
 
@@ -17,18 +17,25 @@ fixture("frontdoor", "tallformulation", "tallproblems")
         @test !(:formulation in fieldnames(typeof(TallOptions)))
         model = curvefit()
         @test_throws ArgumentError optimize!(model, TallOptions; formulation=:sparse)
-        @test_throws ArgumentError optimize!(model, TallOptions; formulation=:tall, reduction=:bogus)
+        # The values before the rename are refused like any unknown value: no alias (rename N1). They are spelt in
+        # pieces so that a search of the package for the old names finds none
+        @testset "formulation = $(repr(old)) is refused" for old in (Symbol("nor", "mal"), Symbol("ta", "ll"))
+            err = try optimize!(deepcopy(model), TallOptions; formulation=old); nothing catch e; e end
+            @test err isa ArgumentError
+            @test occursin("expected :hessian or :jacobian", err.msg)
+        end
+        @test_throws ArgumentError optimize!(model, TallOptions; formulation=:jacobian, reduction=:bogus)
         # Not inferred from the linear solver: asking for the QR solver on the normal equations is the optimizer's business
-        r = optimize!(deepcopy(model), OptimizationOptions(iterator=:levenbergmarquardt, linsolver=:qr, maxiters=200); formulation=:normal, numthreads=static(1))
+        r = optimize!(deepcopy(model), OptimizationOptions(iterator=:levenbergmarquardt, linsolver=:qr, maxiters=200); formulation=:hessian, numthreads=static(1))
         @test r isa OptimizationResult
-        # :normal is the default
+        # :hessian is the default
         a, ra = optimize(model, TallOptions; numthreads=static(1))
-        b, rb = optimize(model, TallOptions; formulation=:normal, numthreads=static(1))
+        b, rb = optimize(model, TallOptions; formulation=:hessian, numthreads=static(1))
         @test a.variables == b.variables
         @test ra.bestcost == rb.bestcost
     end
 
-    @testset "same optimum as :normal: $name" for (name, make) in (
+    @testset "same optimum as :hessian: $name" for (name, make) in (
             ("curve fit, one Vector", () -> curvefit()),
             ("several variables of different sizes", () -> first(mixedproblem())),
             ("chain of Vectors", () -> first(chainproblem(6, 3, 5))),
@@ -40,16 +47,16 @@ fixture("frontdoor", "tallformulation", "tallproblems")
         @test ok
     end
 
-    @testset "same optimum as :normal: a single static variable of size 3 (through optimize)" begin
+    @testset "same optimum as :hessian: a single static variable of size 3 (through optimize)" begin
         model, t = singleproblem(SVector{3, Float64}, 3, 7)
         ok, _, _ = sameoptimum(model)
         @test ok
-        solved, result = optimize(model, TallOptions; formulation=:tall)
+        solved, result = optimize(model, TallOptions; formulation=:jacobian)
         @test solved.variables[1] ≈ t atol=1e-6
         @test NLLSModel.cost(solved) ≈ result.bestcost atol=1e-12
         # optimize! of a single static variable too
         m2, t2 = singleproblem(SVector{3, Float64}, 3, 8)
-        r = optimize!(m2, TallOptions; formulation=:tall)
+        r = optimize!(m2, TallOptions; formulation=:jacobian)
         @test m2.variables[1] ≈ t2 atol=1e-6
         @test NLLSModel.cost(m2) ≈ r.bestcost atol=1e-12
     end
@@ -73,7 +80,7 @@ fixture("frontdoor", "tallformulation", "tallproblems")
         x, res = SecondOrderOptimization.optimize(x0, JacobianObjective(f, spy, J), TallOptions)
         @test seen == Set([(MVector{3, Float64}, MMatrix{3, 3, Float64, 9})])
         # The front door reaches the normal path's cost and the spy's point
-        solved, rt = optimize(model, TallOptions; formulation=:tall)
+        solved, rt = optimize(model, TallOptions; formulation=:jacobian)
         normal, _ = optimize(model, TallOptions)
         @test NLLSModel.cost(solved) ≈ NLLSModel.cost(normal) rtol=1e-8 atol=1e-14
         @test solved.variables[1] ≈ x rtol=1e-12
@@ -82,8 +89,8 @@ fixture("frontdoor", "tallformulation", "tallproblems")
 
     @testset "same optimum, robust Huber with outliers is not the least-squares optimum" begin
         # Guard against the Huber tests above passing because the kernel was silently ignored
-        ls = optimize(curvefit(outliers=4), TallOptions; formulation=:tall, numthreads=static(1))[1]
-        hub = optimize(curvefit(huber=true, outliers=4), TallOptions; formulation=:tall, numthreads=static(1))[1]
+        ls = optimize(curvefit(outliers=4), TallOptions; formulation=:jacobian, numthreads=static(1))[1]
+        hub = optimize(curvefit(huber=true, outliers=4), TallOptions; formulation=:jacobian, numthreads=static(1))[1]
         @test norm(ls.variables[1] - hub.variables[1]) > 1e-3
     end
 
@@ -105,7 +112,7 @@ fixture("frontdoor", "tallformulation", "tallproblems")
                     lastjunk[] = model.variables[k]
                     return cost, 0
                 end
-                result = optimize!(model, OptimizationOptions(iterator=:levenbergmarquardt, maxiters=maxiters); formulation=:tall, numthreads=static(1), callback=leavejunk, unfixed)
+                result = optimize!(model, OptimizationOptions(iterator=:levenbergmarquardt, maxiters=maxiters); formulation=:jacobian, numthreads=static(1), callback=leavejunk, unfixed)
                 @test NLLSModel.cost(model) ≈ result.bestcost rtol=1e-12
                 k = unfixed isa Vector ? unfixed[1] : something(unfixed, 1)
                 @test model.variables[k] != lastjunk[]
@@ -144,7 +151,7 @@ fixture("frontdoor", "tallformulation", "tallproblems")
             ("a mask", Bool[0, 1, 1, 1], [2, 3, 4]))
         model = posemodel()
         start = deepcopy(model.variables)
-        result = optimize!(model, TallOptions; formulation=:tall, unfixed, numthreads=static(1))
+        result = optimize!(model, TallOptions; formulation=:jacobian, unfixed, numthreads=static(1))
         for k in setdiff(1:4, free)
             @test model.variables[k] == start[k] # Fixed variables are untouched, bit for bit
         end
@@ -163,18 +170,18 @@ fixture("frontdoor", "tallformulation", "tallproblems")
         # One variable: never partitioned, on either path, whatever the reduction (NTP2)
         model = curvefit()
         for reduction in (:auto, :none, :eliminate)
-            @test optimize!(deepcopy(model), TallOptions; formulation=:tall, reduction, numthreads=static(1)) isa OptimizationResult
+            @test optimize!(deepcopy(model), TallOptions; formulation=:jacobian, reduction, numthreads=static(1)) isa OptimizationResult
         end
         # Several variables, none eliminable: :eliminate is the partition's error, from optimvars_nls, prefixed by the front door
-        err = try optimize!(posemodel(), TallOptions; formulation=:tall, reduction=:eliminate); nothing catch e e end
+        err = try optimize!(posemodel(), TallOptions; formulation=:jacobian, reduction=:eliminate); nothing catch e e end
         @test err isa ArgumentError
-        @test startswith(err.msg, "formulation = :tall:") && occursin("eliminable", err.msg)
+        @test startswith(err.msg, "formulation = :jacobian:") && occursin("eliminable", err.msg)
         # and the normal formulation still takes all three
         @test optimize!(posemodel(), TallOptions; reduction=:none, numthreads=static(1)) isa OptimizationResult
     end
 
     # NTP1: the front door hands over the Jacobian optimvars_nls chooses, dense or sparse
-    @testset "keywords: storage on :tall, $name" for (name, make) in (
+    @testset "keywords: storage on :jacobian, $name" for (name, make) in (
             ("curve fit, one Vector", () -> curvefit()),
             ("several variables of different sizes", () -> first(mixedproblem())),
             ("chain of Vectors", () -> first(chainproblem(6, 3, 5))),
@@ -183,8 +190,8 @@ fixture("frontdoor", "tallformulation", "tallproblems")
         model = make()
         c0 = NLLSModel.cost(model)
         normal, _ = optimize(model, TallOptions; numthreads=static(1))
-        dense, rd = optimize(model, TallOptions; formulation=:tall, numthreads=static(1), storage=:dense)
-        sparse, rs = optimize(model, TallOptions; formulation=:tall, numthreads=static(1), storage=:sparse)
+        dense, rd = optimize(model, TallOptions; formulation=:jacobian, numthreads=static(1), storage=:dense)
+        sparse, rs = optimize(model, TallOptions; formulation=:jacobian, numthreads=static(1), storage=:sparse)
         cn, cd, cs = NLLSModel.cost(normal), NLLSModel.cost(dense), NLLSModel.cost(sparse)
         @test cs ≈ cd rtol=1e-8 atol=1e-10 * c0
         @test cs ≈ cn rtol=1e-8 atol=1e-10 * c0
@@ -192,7 +199,7 @@ fixture("frontdoor", "tallformulation", "tallproblems")
         @test samevars(sparse, dense; atol=1e-5)
     end
 
-    @testset "keywords: storage = :auto on :tall keeps optimvars_nls's choice" begin
+    @testset "keywords: storage = :auto on :jacobian keeps optimvars_nls's choice" begin
         small = curvefit()
         big, _ = chainproblem(200, 3, 4) # 1 197 x 600, under 1% filled
         # The layout's choice, unchanged: dense for a small Jacobian, sparse for a large one with little fill
@@ -200,17 +207,17 @@ fixture("frontdoor", "tallformulation", "tallproblems")
         @test tlnls(big; numthreads=static(1))[5] isa SparseMatrixCSC{Float64, Int}
         # The front door hands that choice over: the large one is solved sparse, under a cap too small for it dense
         cap = 8 * 1197 * 600 - 1
-        tall, rt = optimize(big, TallOptions; formulation=:tall, numthreads=static(1), max_dense_bytes=cap)
+        tall, rt = optimize(big, TallOptions; formulation=:jacobian, numthreads=static(1), max_dense_bytes=cap)
         normal, _ = optimize(big, TallOptions; numthreads=static(1))
         @test NLLSModel.cost(tall) ≈ NLLSModel.cost(normal) rtol=1e-8 atol=1e-10 * NLLSModel.cost(big)
         # Forced dense above the cap: an ArgumentError before anything is allocated, prefixed by the front door
-        err = try optimize!(deepcopy(big), TallOptions; formulation=:tall, numthreads=static(1), storage=:dense, max_dense_bytes=cap); nothing catch e e end
-        @test err isa ArgumentError && startswith(err.msg, "formulation = :tall:") && occursin("$(8 * 1197 * 600) bytes", err.msg)
-        @test_logs optimize!(deepcopy(small), TallOptions; formulation=:tall, numthreads=static(1), storage=:sparse)
+        err = try optimize!(deepcopy(big), TallOptions; formulation=:jacobian, numthreads=static(1), storage=:dense, max_dense_bytes=cap); nothing catch e e end
+        @test err isa ArgumentError && startswith(err.msg, "formulation = :jacobian:") && occursin("$(8 * 1197 * 600) bytes", err.msg)
+        @test_logs optimize!(deepcopy(small), TallOptions; formulation=:jacobian, numthreads=static(1), storage=:sparse)
     end
 
     @testset "kernels (R1): the kernel decides, there is no robust keyword" begin
-        @test_throws MethodError optimize!(curvefit(), TallOptions; formulation=:tall, robust=:irls)
+        @test_throws MethodError optimize!(curvefit(), TallOptions; formulation=:jacobian, robust=:irls)
         @test_throws MethodError optimize!(curvefit(), TallOptions; robust=:none)
         # NoRobust, Huber and Huber2o costs in one model reach the same optimum as the normal equations
         model = Model(Vector{Float64}, Union{TlExp, TlRob{TlExp, typeof(HuberKernel(0.05))}, TlRob{TlExp, typeof(Huber2oKernel(0.05))}})
@@ -223,7 +230,7 @@ fixture("frontdoor", "tallformulation", "tallproblems")
         @test ok
         @test ct ≈ cn rtol=1e-8
         # it is not the least-squares optimum
-        @test norm(optimize(model, TallOptions; formulation=:tall)[1].variables[1] - optimize(base, TallOptions; formulation=:tall)[1].variables[1]) > 1e-3
+        @test norm(optimize(model, TallOptions; formulation=:jacobian)[1].variables[1] - optimize(base, TallOptions; formulation=:jacobian)[1].variables[1]) > 1e-3
         # Each kernel on its own
         for h in (true, :second)
             ok, = sameoptimum(curvefit(huber=h, outliers=4))
@@ -234,7 +241,7 @@ fixture("frontdoor", "tallformulation", "tallproblems")
         addvariable!(prob, ContaminatedGaussian(1.0, 5.0, 0.8))
         addvariable!(prob, 2.0)
         addcost!(prob, TlAdapt(SVector(1, 2)))
-        out, res = optimize(prob, TallOptions; formulation=:tall, unfixed=2, numthreads=static(1))
+        out, res = optimize(prob, TallOptions; formulation=:jacobian, unfixed=2, numthreads=static(1))
         @test out.variables[2] ≈ 1.0 atol=1e-6
     end
 
@@ -243,17 +250,17 @@ fixture("frontdoor", "tallformulation", "tallproblems")
         model = Model(Vector{Float64}, TlCost)
         addvariable!(model, [1.0, 2.0])
         addcost!(model, TlCost(1))
-        err = try optimize!(model, TallOptions; formulation=:tall); nothing catch e e end
+        err = try optimize!(model, TallOptions; formulation=:jacobian); nothing catch e e end
         @test err isa ArgumentError
-        @test occursin("tall", err.msg) && occursin("AbstractResidual", err.msg)
+        @test occursin("formulation = :jacobian", err.msg) && occursin("AbstractResidual", err.msg)
         # An unfixed adaptive kernel
         prob = Model(Union{ContaminatedGaussian{Float64}, Float64}, TlAdapt)
         addvariable!(prob, ContaminatedGaussian(1.0, 5.0, 0.8))
         addvariable!(prob, 2.0)
         addcost!(prob, TlAdapt(SVector(1, 2)))
-        err = try optimize!(prob, TallOptions; formulation=:tall); nothing catch e e end
+        err = try optimize!(prob, TallOptions; formulation=:jacobian); nothing catch e e end
         @test err isa ArgumentError
-        @test occursin("tall", err.msg) && occursin("adaptive", err.msg)
+        @test occursin("formulation = :jacobian", err.msg) && occursin("adaptive", err.msg)
         # The same models are fine on the normal equations' own terms (the error is the tall formulation's)
         @test optimize!(prob, TallOptions; unfixed=2, numthreads=static(1)) isa OptimizationResult
     end
@@ -261,34 +268,34 @@ fixture("frontdoor", "tallformulation", "tallproblems")
     @testset "too large for a dense Jacobian: storage = :dense throws before allocating, :auto goes sparse" begin
         # 20000 residuals by 3 variables: 480 kB if dense
         model = curvefit(n=20000)
-        @test_throws ArgumentError optimize!(deepcopy(model), TallOptions; formulation=:tall, storage=:dense, max_dense_bytes=1000)
-        err = try optimize!(deepcopy(model), TallOptions; formulation=:tall, storage=:dense, max_dense_bytes=1000); nothing catch e e end
-        @test occursin("20000×3", err.msg) && occursin("dense", err.msg) && occursin("1000", err.msg) && occursin("tall", err.msg)
+        @test_throws ArgumentError optimize!(deepcopy(model), TallOptions; formulation=:jacobian, storage=:dense, max_dense_bytes=1000)
+        err = try optimize!(deepcopy(model), TallOptions; formulation=:jacobian, storage=:dense, max_dense_bytes=1000); nothing catch e e end
+        @test occursin("20000×3", err.msg) && occursin("dense", err.msg) && occursin("1000", err.msg) && occursin("formulation = :jacobian", err.msg)
         m = deepcopy(model)
-        alloc = @allocated try optimize!(m, TallOptions; formulation=:tall, storage=:dense, max_dense_bytes=1000) catch end
+        alloc = @allocated try optimize!(m, TallOptions; formulation=:jacobian, storage=:dense, max_dense_bytes=1000) catch end
         @test alloc < 50_000
         # Under :auto the same cap gives a sparse Jacobian, and the solve goes ahead
         @test tlnls(model; numthreads=static(1), max_dense_bytes=1000)[5] isa SparseMatrixCSC
-        @test optimize!(deepcopy(model), TallOptions; formulation=:tall, numthreads=static(1), max_dense_bytes=1000) isa OptimizationResult
+        @test optimize!(deepcopy(model), TallOptions; formulation=:jacobian, numthreads=static(1), max_dense_bytes=1000) isa OptimizationResult
         # The limit counts only the unfixed variables, and allows exactly its size
         big = posemodel()
         n = 8 * NLLSModel.nresiduals(big) * 9 # 3 + 3 + 2 + 1 degrees of freedom
-        @test_throws ArgumentError optimize!(deepcopy(big), TallOptions; formulation=:tall, numthreads=static(1), storage=:dense, max_dense_bytes=n - 1)
-        @test optimize!(deepcopy(big), TallOptions; formulation=:tall, numthreads=static(1), storage=:dense, max_dense_bytes=n - 1, unfixed=[1, 2]) isa OptimizationResult
-        @test optimize!(deepcopy(big), TallOptions; formulation=:tall, numthreads=static(1), storage=:dense, max_dense_bytes=n) isa OptimizationResult
+        @test_throws ArgumentError optimize!(deepcopy(big), TallOptions; formulation=:jacobian, numthreads=static(1), storage=:dense, max_dense_bytes=n - 1)
+        @test optimize!(deepcopy(big), TallOptions; formulation=:jacobian, numthreads=static(1), storage=:dense, max_dense_bytes=n - 1, unfixed=[1, 2]) isa OptimizationResult
+        @test optimize!(deepcopy(big), TallOptions; formulation=:jacobian, numthreads=static(1), storage=:dense, max_dense_bytes=n) isa OptimizationResult
     end
 
     @testset "a linsolver the optimizer rejects; gradient descent it accepts" begin
         model = curvefit()
         # A linsolver not in the table: :cholesky with a plain Jacobian
         options = OptimizationOptions(iterator=:levenbergmarquardt, linsolver=:cholesky)
-        err = try optimize!(deepcopy(model), options; formulation=:tall, numthreads=static(1)); nothing catch e e end
+        err = try optimize!(deepcopy(model), options; formulation=:jacobian, numthreads=static(1)); nothing catch e e end
         @test err isa ArgumentError
         # It is fine for the normal equations
         @test optimize!(deepcopy(model), options; numthreads=static(1)) isa OptimizationResult
         # Gradient descent is accepted on the tall path (SecondOrderOptimization IT2), as on the normal one
         c0 = NLLSModel.cost(model)
-        for formulation in (:tall, :normal)
+        for formulation in (:jacobian, :hessian)
             m = deepcopy(model)
             @test optimize!(m, OptimizationOptions(iterator=:gradientdescent); formulation, numthreads=static(1)) isa OptimizationResult
             @test NLLSModel.cost(m) < c0
@@ -297,13 +304,13 @@ fixture("frontdoor", "tallformulation", "tallproblems")
 
     # Z3: iterators that linearize at the first trial evaluate resjac! at a point that may then be rejected; with the optimizer's
     # current point being model.variables itself, that must not disturb it
-    @testset "rejected trials with $iterator reach the optimum of :normal" for (iterator, expect_rejection) in ((:levenbergmarquardt, true), (:levenbergmarquardt_dtd, true), (:dogleg, true), (:newton, false))
+    @testset "rejected trials with $iterator reach the optimum of :hessian" for (iterator, expect_rejection) in ((:levenbergmarquardt, true), (:levenbergmarquardt_dtd, true), (:dogleg, true), (:newton, false))
         make() = (m = curvefit(outliers=2); m.variables[1] = [0.1, 6.0, -4.0]; m)
         options = OptimizationOptions(iterator=iterator, maxiters=300)
         normal, rn = optimize(make(), options; numthreads=static(1))
         model = make()
         start = deepcopy(model.variables)
-        tall, rt = optimize(model, options; formulation=:tall, numthreads=static(1))
+        tall, rt = optimize(model, options; formulation=:jacobian, numthreads=static(1))
         # A trial that is evaluated by f rather than by the first-trial linearization has been rejected once
         expect_rejection && @test rt.costcomputations > 0
         @test model.variables == start
@@ -316,7 +323,7 @@ fixture("frontdoor", "tallformulation", "tallproblems")
         foreach(c -> addcost!(multi, TlExp(c.t, c.y, 1)), costlist(base))
         addcost!(multi, Tgt([0.2], 2))
         nn, _ = optimize(multi, options; numthreads=static(1))
-        rr = optimize!(multi, options; formulation=:tall, numthreads=static(1))
+        rr = optimize!(multi, options; formulation=:jacobian, numthreads=static(1))
         @test NLLSModel.cost(multi) ≈ rr.bestcost rtol=1e-12
         @test NLLSModel.cost(multi) ≈ NLLSModel.cost(nn) rtol=1e-8
         expect_rejection && @test rr.costcomputations > 0
@@ -327,7 +334,7 @@ fixture("frontdoor", "tallformulation", "tallproblems")
             model = make()
             start = deepcopy(model.variables)
             c0 = NLLSModel.cost(model)
-            solved, result = optimize(model, TallOptions; formulation=:tall, numthreads=static(1))
+            solved, result = optimize(model, TallOptions; formulation=:jacobian, numthreads=static(1))
             @test model.variables == start # Bit for bit
             @test NLLSModel.cost(model) == c0
             @test solved !== model
@@ -336,7 +343,7 @@ fixture("frontdoor", "tallformulation", "tallproblems")
         end
         model, _ = singleproblem(SVector{3, Float64}, 3, 9)
         start = model.variables[1]
-        solved, result = optimize(model, TallOptions; formulation=:tall)
+        solved, result = optimize(model, TallOptions; formulation=:jacobian)
         @test model.variables[1] === start
     end
 

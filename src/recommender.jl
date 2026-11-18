@@ -92,10 +92,10 @@ end
 # conditioned. A system that could not be factorized (`condition = Inf`, rank-deficient or indefinite) stays on the Hessian
 # path: a gauge freedom is no better conditioned as a Jacobian, and damping handles it.
 function rule_formulation(f::RecommenderFeatures)
-    f.allresiduals || return (:normal, :F_nonresidual)
-    isfinite(f.condition) || return (:normal, :F_singular)
-    f.condition >= REC_TALL_CONDITION && return (:tall, :F_illconditioned)
-    return (:normal, :F_wellconditioned)
+    f.allresiduals || return (:hessian, :F_nonresidual)
+    isfinite(f.condition) || return (:hessian, :F_singular)
+    f.condition >= REC_TALL_CONDITION && return (:jacobian, :F_illconditioned)
+    return (:hessian, :F_wellconditioned)
 end
 
 # The tests of dogleg's rule, each with whether it passed
@@ -185,7 +185,7 @@ function recommendoptimizer(model::Model; unfixed=nothing, numthreads=StaticInt(
     formulation, rule_f = rule_formulation(features)
     rule_rs = :RS_hessian
     fallback = ""
-    if formulation === :tall
+    if formulation === :jacobian
         try
             J = optimvars_nls(model; unfixed, numthreads, max_dense_bytes)[5]
             reduction, storage = jacobianreductionstorage(J)
@@ -193,7 +193,7 @@ function recommendoptimizer(model::Model; unfixed=nothing, numthreads=StaticInt(
             rule_rs = :RS_jacobian
         catch err
             err isa ArgumentError || rethrow()
-            formulation, rule_f, fallback = :normal, :F_tall_unavailable, err.msg
+            formulation, rule_f, fallback = :hessian, :F_tall_unavailable, err.msg
         end
     end
     iterator, rule_i = rule_iterator(features)
