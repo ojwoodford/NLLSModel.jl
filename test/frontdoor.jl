@@ -4,10 +4,10 @@ import BlockLinearSystems
 import OptimizationVariableInterface
 
 include("fixtures/loader.jl")
-fixture("frontdoor", "optimization")
+fixture("frontdoor", "optimization", "recommender")
 
 # The front door: optimize!(model, options) and optimize(model, options) (the extension), and the `reduction` and `storage`
-# keywords of optimvars.
+# keywords of optimvars; optimize!(model, rec) and optimize(model, rec) for a recommendation (RC5).
 
 @testset "frontdoor.jl" begin
     @testset "variables hold the solution: $name" for (name, V, n) in (("static 1", SVector{1, Float64}, 1), ("static 16", SVector{16, Float64}, 16), ("static 17", SVector{17, Float64}, 17), ("dynamic Vector", Vector{Float64}, 17), ("short Vector", Vector{Float64}, 3))
@@ -229,6 +229,70 @@ fixture("frontdoor", "optimization")
             @test_throws MethodError optimvars(ba; numthreads=static(1), linsolver=:schur)
             @test_throws MethodError optimvars(plain; numthreads=static(1), linsolver=:cholesky)
             @test_throws MethodError optimize!(deepcopy(plain), FDOptions; linsolver=:schur)
+        end
+    end
+
+    # RC5: a recommendation runs as the call it prints
+    @testset "optimize!(model, rec) is the printed call: $(spec.name)" for spec in REC_MODELS
+        model = spec.make()
+        rec = NLLSModel.recommendoptimizer(model; numthreads=static(1))
+        a, b = deepcopy(model), deepcopy(model)
+        r1 = optimize!(a, rec)
+        call = Meta.parse(let text = longform(rec); text[first(findfirst("optimize!(model,", text)):end] end)
+        r2 = Core.eval(Main, :(let model = $b; $call; end))
+        @test r1 isa OptimizationResult
+        @test r1.iterator === r2.iterator === rec.iterator
+        @test r1.niterations == r2.niterations
+        @test r1.bestcost === r2.bestcost
+        @test a.variables == b.variables
+        @test r1.niterations > 0 && r1.bestcost <= r1.startcost
+        # The non-mutating form
+        c, r3 = optimize(model, rec)
+        @test model.variables == spec.make().variables # Unchanged
+        @test r3.bestcost === r1.bestcost && c.variables == a.variables
+    end
+
+    @testset "optimize!(model, rec): with unfixed, the printed call" begin
+        model = posechain(8, 12)
+        unfixed = [2:8; 10:20]
+        rec = NLLSModel.recommendoptimizer(model; unfixed, numthreads=static(1), max_dense_bytes=10^6)
+        a, b = deepcopy(model), deepcopy(model)
+        r1 = optimize!(a, rec)
+        call = Meta.parse(let text = longform(rec); text[first(findfirst("optimize!(model,", text)):end] end)
+        r2 = Core.eval(Main, :(let model = $b, unfixed = $unfixed; $call; end))
+        @test (r1.iterator, r1.niterations, r1.bestcost) === (r2.iterator, r2.niterations, r2.bestcost)
+        @test a.variables == b.variables
+        @test a.variables[1] == model.variables[1] && a.variables[9] == model.variables[9] # Fixed
+    end
+
+    @testset "optimize!(model, rec): keywords" begin
+        model = posechain(8, 12)
+        rec = NLLSModel.recommendoptimizer(model; numthreads=static(1))
+        # Each keyword the recommendation owns is refused, naming it, before anything runs
+        for (name, value) in ((:iterator, :dogleg), (:linsolver, :ldl), (:formulation, :tall), (:reduction, :none),
+                (:storage, :sparse), (:unfixed, 1), (:numthreads, 1), (:max_dense_bytes, 10^6))
+            m = deepcopy(model)
+            err = try optimize!(m, rec; name => value); nothing catch e e end
+            @test err isa ArgumentError && startswith(err.msg, "$name is set by the recommendation")
+            @test occursin("optimize!(model, options; ...)", err.msg)
+            @test m.variables == model.variables
+            @test_throws ArgumentError optimize(model, rec; name => value)
+        end
+        # A forwarded keyword takes effect
+        @test optimize!(deepcopy(model), rec; maxiters=1).niterations == 1
+        @test optimize(model, rec; maxiters=1)[2].niterations == 1
+        # callback, workspace, min_work and min_work_cost are passed on
+        calls = Ref(0)
+        cb(cost, args...) = (calls[] += 1; (cost, 0))
+        optimize!(deepcopy(model), rec; callback=cb, min_work=0, min_work_cost=0)
+        @test calls[] > 0
+        # An unknown keyword is an error
+        @test_throws MethodError optimize!(deepcopy(model), rec; maxiter=1)
+    end
+
+    @testset "OptimizationOptions takes every choice the rules can make" begin
+        for iterator in (:dogleg, :levenbergmarquardt_dtd, :levenbergmarquardt), linsolver in (:cholesky, :ldl, :qr)
+            @test OptimizationOptions(; iterator, linsolver) isa OptimizationOptions
         end
     end
 end

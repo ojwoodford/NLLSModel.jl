@@ -4,7 +4,8 @@ using NLLSModel
 using SecondOrderOptimization
 using OptimizationVariableInterface
 using Static
-import NLLSModel: MIN_WORK_PER_THREAD_NORMAL, MIN_WORK_PER_THREAD_COST, MIN_WORK_PER_THREAD_TALL, MAX_DENSE_BYTES, KEYWORDS_DOC, TALL_FORMULATION_DOC
+import NLLSModel: MIN_WORK_PER_THREAD_NORMAL, MIN_WORK_PER_THREAD_COST, MIN_WORK_PER_THREAD_TALL, MAX_DENSE_BYTES, KEYWORDS_DOC, TALL_FORMULATION_DOC,
+    OptimizationRecommendation
 
 # Hands `resjac!` to the optimizer with `prezeroed = true`: the structural zeros of `J` are already in place (the optimizer
 # allocates `J` as zeros and, from SecondOrderOptimization's Z1, neither re-zeroes it nor writes anything but this evaluator's
@@ -43,6 +44,9 @@ end
 
 Solve `model` and write the solution back into `model.variables`. This is the normal way to solve a `Model`; it is defined when
 `SecondOrderOptimization` is loaded (`using SecondOrderOptimization`).
+
+The second method, `optimize!(model, rec)`, takes every choice from an `OptimizationRecommendation` made by
+[`recommendoptimizer`](@ref); its docstring is below.
 
 `formulation` chooses how the model is linearized:
 
@@ -93,6 +97,53 @@ Like `optimize!(model, options; kwargs...)` (including `formulation`), but runs 
 function SecondOrderOptimization.optimize(model::Model, options::OptimizationOptions=OptimizationOptions(); kwargs...)
     copied = deepcopy(model)
     result = SecondOrderOptimization.optimize!(copied, options; kwargs...)
+    return copied, result
+end
+
+# The keywords a recommendation sets: the options' iterator and linear solver, the formulation, and the keywords of the
+# model's linearization that it was made with
+const RECOMMENDATION_KEYWORDS = (:iterator, :linsolver, :formulation, :reduction, :storage, :unfixed, :numthreads, :max_dense_bytes)
+
+"""
+    optimize!(model::Model, rec::OptimizationRecommendation; callback=nullcallback, workspace=nothing, min_work, min_work_cost=$MIN_WORK_PER_THREAD_COST, options...) -> OptimizationResult
+
+Solve `model` as the recommendation `rec` (from [`recommendoptimizer`](@ref)) says, and write the solution back into
+`model.variables`. It builds `OptimizationOptions(; iterator = rec.iterator, linsolver = rec.linsolver, options...)` and
+calls `optimize!(model, options; formulation, reduction, storage, unfixed, numthreads, max_dense_bytes)` with the
+recommendation's values: exactly the call that displaying `rec` prints.
+
+The remaining keywords are passed to the `OptimizationOptions` constructor (`maxiters`, `maxtime`, the tolerances, ...),
+so an unknown one is an error there. A keyword the recommendation sets (`iterator`, `linsolver`, `formulation`,
+`reduction`, `storage`, `unfixed`, `numthreads`, `max_dense_bytes`) is an `ArgumentError`, raised before anything is
+built: to change one, use `optimize!(model, options; ...)`, starting from the call that `show` prints. `callback`,
+`workspace`, `min_work` (default the formulation's) and `min_work_cost` are as for `optimize!(model, options)`.
+
+The options are built from the recommendation's values at run time, so the call dispatches once on their type. Setting
+the options by hand, from the call that `show` prints, avoids it.
+"""
+function SecondOrderOptimization.optimize!(model::Model, rec::OptimizationRecommendation;
+        callback=nullcallback, workspace=nothing,
+        min_work::Integer=(rec.formulation === :tall ? MIN_WORK_PER_THREAD_TALL : MIN_WORK_PER_THREAD_NORMAL),
+        min_work_cost::Integer=MIN_WORK_PER_THREAD_COST, options...)
+    # The one slurped keyword list in an entry point (rules.md 19): every keyword in it goes to the `OptimizationOptions`
+    # constructor, whose keywords are spelled out, so a misspelt or stale keyword is still an error
+    for name in keys(options)
+        name in RECOMMENDATION_KEYWORDS && throw(ArgumentError("$name is set by the recommendation; to set it by hand, use optimize!(model, options; ...), starting from the call that displaying the recommendation prints."))
+    end
+    opts = OptimizationOptions(; iterator=rec.iterator, linsolver=rec.linsolver, options...)
+    return SecondOrderOptimization.optimize!(model, opts; formulation=rec.formulation, reduction=rec.reduction,
+        storage=rec.storage, unfixed=rec.unfixed, numthreads=rec.numthreads, max_dense_bytes=rec.max_dense_bytes,
+        callback, workspace, min_work, min_work_cost)
+end
+
+"""
+    optimize(model::Model, rec::OptimizationRecommendation; kwargs...) -> (model_copy, result)
+
+Like `optimize!(model, rec; kwargs...)`, but runs on a `deepcopy` of `model` and leaves `model` unchanged.
+"""
+function SecondOrderOptimization.optimize(model::Model, rec::OptimizationRecommendation; kwargs...)
+    copied = deepcopy(model)
+    result = SecondOrderOptimization.optimize!(copied, rec; kwargs...)
     return copied, result
 end
 
