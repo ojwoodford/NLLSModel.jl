@@ -46,10 +46,6 @@ NLLSModel.getvars(::AnchorVal, vars::Vector) = (vars[1]::SVector{1, Float64},)
 NLLSModel.computeresidual(r::AnchorVal, x1) = SVector(x1[1] - r.val)
 Base.eltype(::AnchorVal) = Float64
 
-# Mark 2-vectors as eliminable (test-only; nothing else in the tests uses a 2-vector as a variable)
-OptimizationVariableInterface.iseliminable(::Type{<:SVector{2, Float64}}) = static(true)
-NLLSModel.generatemeasurement(camera::SVector{6, T}, pt::SVector{2, U}) where {T, U} = SVector(camera[1] * pt[1] + camera[2] * pt[2], camera[5] * pt[1] + camera[6] * pt[2])
-
 # An eliminable point of two coordinates: a static vector type of its own (not an SVector), so that marking it eliminable
 # leaves every other test's 2-vectors as they are
 struct ElimPoint2{T} <: FieldVector{2, T}

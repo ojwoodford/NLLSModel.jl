@@ -233,14 +233,14 @@ end
     @test prob.variables[3] ≈ orig[3] .+ 1
 
     # Models with eliminable variables use a non-Schur system
-    pe = Model(Union{SVector{6, Float64}, SVector{2, Float64}}, SimpleError2{2, Float64, SVector{6, Float64}, SVector{2, Float64}})
+    pe = Model(Union{SVector{6, Float64}, ElimPoint2{Float64}}, SimpleError2{2, Float64, SVector{6, Float64}, ElimPoint2{Float64}})
     addvariable!(pe, SVector(1.0, 0.0, 0.0, 0.0, 1.0, 0.0))
     addvariable!(pe, SVector(1.1, 0.1, 0.0, 0.0, 1.0, 0.1))
-    for p in (SVector(0.1, 0.2), SVector(0.2, 0.3), SVector(0.3, 0.1))
+    for p in (ElimPoint2(0.1, 0.2), ElimPoint2(0.2, 0.3), ElimPoint2(0.3, 0.1))
         addvariable!(pe, p)
     end
     for c in 1:2, l in 3:5
-        addcost!(pe, SimpleError2{SVector{6, Float64}, SVector{2, Float64}}(SVector(0.1, 0.2), c, l))
+        addcost!(pe, SimpleError2{SVector{6, Float64}, ElimPoint2{Float64}}(SVector(0.1, 0.2), c, l))
     end
     nlp_e = NLPLSModel(pe)
     @test nlp_e isa AbstractNLPModel
