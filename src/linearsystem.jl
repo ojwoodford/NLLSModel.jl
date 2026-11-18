@@ -278,16 +278,12 @@ function updatesymlinearsystem!(linsystem::MultiVariateLS, g::AbstractVector, H:
     updatesymA!(getA(linsystem), H, vars, varflags, blockindices)
 end
 
+# One cost's gradient and Hessian into a Schur system: each block of the cost's Hessian is added to the system by naming
+# the pair of variables, once for each variable with itself and once for each pair `j < i`. BlockLinearSystems decides
+# where and in which orientation the pair is stored. No cost has two unfixed eliminated variables (the partition's
+# check), so every pair named has storage.
 function updatesymschur!(H_schur::SchurBlockHessian{Float64}, g_full::Vector{Float64}, g::AbstractVector, H::AbstractArray, vars, varflags, boffsets, blockindices)
     updateb!(g_full, g, vars, varflags, boffsets, blockindices)
-
-    structure = H_schur.structure
-    nrblocks = structure.nrblocks
-    eliminated_ptr = structure.eliminated_ptr
-    entry_retained = structure.entry_retained
-    coffsets = structure.coffsets
-    eoffsets = structure.eoffsets
-    boffsets_r = structure.boffsets_r
 
     loffseti = static(0)
     @unroll for i in 1:MAX_ARGS
@@ -296,26 +292,7 @@ function updatesymschur!(H_schur::SchurBlockHessian{Float64}, g_full::Vector{Flo
             nvi = nvars(vars[i])
             rangei = blockrange(loffseti + static(1), nvi)
             loffseti += nvi
-            ni = dynamic(nvi)
-
-            if bi <= nrblocks
-                if H_schur.R isa Matrix{Float64}
-                    ro = boffsets_r[bi]
-                    @inbounds for col in 1:ni, row in 1:ni
-                        H_schur.R[ro + row - 1, ro + col - 1] += H[rangei[row], rangei[col]]
-                    end
-                else
-                    @inbounds block(H_schur.R, bi, bi, nvi, nvi) .+= view(H, rangei, rangei)
-                end
-            else
-                e = bi - nrblocks
-                eo = eoffsets[e]
-                idx = eo
-                @inbounds for col in 1:ni, row in 1:ni
-                    H_schur.E_data[idx] += H[rangei[row], rangei[col]]
-                    idx += 1
-                end
-            end
+            @inbounds addblock!(H_schur, bi, bi, H, rangei, rangei)
 
             loffsetj = static(0)
             @unroll for j in 1:i-1
@@ -324,43 +301,7 @@ function updatesymschur!(H_schur::SchurBlockHessian{Float64}, g_full::Vector{Flo
                     nvj = nvars(vars[j])
                     rangej = blockrange(loffsetj + static(1), nvj)
                     loffsetj += nvj
-                    nj = dynamic(nvj)
-
-                    if bi <= nrblocks && bj <= nrblocks
-                        if H_schur.R isa Matrix{Float64}
-                            ro_i = boffsets_r[bi]
-                            ro_j = boffsets_r[bj]
-                            if bi <= bj
-                                @inbounds for col in 1:nj, row in 1:ni
-                                    H_schur.R[ro_i + row - 1, ro_j + col - 1] += H[rangei[row], rangej[col]]
-                                end
-                            else
-                                @inbounds for col in 1:ni, row in 1:nj
-                                    H_schur.R[ro_j + row - 1, ro_i + col - 1] += H[rangej[row], rangei[col]]
-                                end
-                            end
-                        else
-                            if bi >= bj
-                                @inbounds block(H_schur.R, bi, bj, nvi, nvj) .+= view(H, rangei, rangej)
-                            else
-                                @inbounds block(H_schur.R, bj, bi, nvj, nvi) .+= view(H, rangej, rangei)
-                            end
-                        end
-                    elseif bi <= nrblocks && bj > nrblocks
-                        e = bj - nrblocks
-                        c_idx = searchsortedfirst(@inbounds(view(entry_retained, eliminated_ptr[e]:(eliminated_ptr[e+1]-1))), bi) + eliminated_ptr[e] - 1
-                        co = coffsets[c_idx]
-                        @inbounds for col in 1:nj, row in 1:ni
-                            H_schur.C_data[co + (row - 1)*nj + col - 1] += H[rangei[row], rangej[col]]
-                        end
-                    elseif bi > nrblocks && bj <= nrblocks
-                        e = bi - nrblocks
-                        c_idx = searchsortedfirst(@inbounds(view(entry_retained, eliminated_ptr[e]:(eliminated_ptr[e+1]-1))), bj) + eliminated_ptr[e] - 1
-                        co = coffsets[c_idx]
-                        @inbounds for col in 1:ni, row in 1:nj
-                            H_schur.C_data[co + (row - 1)*ni + col - 1] += H[rangej[row], rangei[col]]
-                        end
-                    end
+                    @inbounds addblock!(H_schur, bi, bj, H, rangei, rangej)
                 end
             end
         end
