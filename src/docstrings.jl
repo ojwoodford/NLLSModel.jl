@@ -485,12 +485,22 @@ It builds the Hessian path as `optimize!(model, options)` does with `reduction =
 and factorizes its linear system once, at the model's current values, to measure the spread of the Hessian's diagonal
 (largest over smallest), a lower bound on the condition number of the Jacobi-scaled Hessian `D^-½ H D^-½` (by
 $REC_INVERSE_ITERATIONS steps of inverse iteration), and the time of a cost evaluation, a linearization and an undamped
-solve. Then:
+solve. When every cost is an [`AbstractResidual`](@ref) and the Hessian is ill-conditioned (the estimate is at least
+$(REC_JACOBIAN_CONDITION)) or could not be factorized undamped, it also tests the rank of the Jacobian `J`: it takes the
+weakest direction `w` of the scaled Hessian (from the undamped factorization, or else from the first of the scaled
+dampings `H + λD`, λ in $(REC_RANK_DAMPINGS), that factorizes), refines it by $(REC_RANK_REFINEMENTS) step of inverse
+iteration on `JᵀJ`, with products of `J`, and reads `t = ‖J D^-½ w‖`, with `‖w‖ = 1`: the smallest of the readings
+before and after each step.
+The column-scaled `J D^-½` has unit columns, so `t` is an upper bound on its smallest singular value. This evaluates
+the Jacobian once, through [`optimvars_nls`](@ref) without elimination; the first such call compiles the Jacobian
+evaluators. Then:
 
-- **Formulation:** `:jacobian` when every cost is an [`AbstractResidual`](@ref) and the condition estimate is finite and at
-  least $(REC_JACOBIAN_CONDITION); otherwise `:hessian`. A system that does not factorize (rank-deficient or indefinite) has
-  no estimate and stays `:hessian`. If [`optimvars_nls`](@ref) cannot build the model (an unfixed adaptive kernel, for
-  example), `:hessian`.
+- **Formulation:** `:hessian` when the Hessian is well conditioned, or when a cost is not a residual. Otherwise the rank
+  test decides: `J` is numerically rank-deficient when `t` is below $(REC_RANK_TOLERANCE) (a gauge freedom, for example),
+  which factorizing `J` would not help and damping handles, so `:hessian`; otherwise `J` has full numerical rank, and
+  `:jacobian`, since forming `JᵀJ` squares its conditioning. Where the test cannot run, `:hessian`: the Hessian has a
+  diagonal entry that is not positive, no damping tried factorizes it (it is indefinite, say), or [`optimvars_nls`](@ref)
+  cannot build the model (an unfixed adaptive kernel, for example).
 - **Reduction and storage:** what `:auto` builds, on the formulation's path.
 - **Linear solver:** on the Hessian path, `:cholesky` for a static, dense or eliminated system and `:ldl` for a sparse
   one (what `linsolver = :auto` uses), but `:ldl` whenever a cost is not a residual, since the Hessian can then be
@@ -501,6 +511,11 @@ solve. Then:
 
 Every threshold is a starting value, not yet measured against benchmarks. The model's variables are not changed. A model
 whose cost, gradient or Hessian is not finite at its current values is an `ArgumentError`.
+
+The rank test detects a null space of `J`; it is not an estimate of `J`'s condition number. Its known limits: a null
+space together with a remainder whose smallest scaled singular value is below about 1e-7 reads as full rank, and goes to
+the Jacobian path; and a full-rank `J` with a condition number near 1e13 reads about 1e-8 when damping was needed, so it
+too goes to the Jacobian path.
 
 The keywords are those of [`optimvars`](@ref), with the same meanings and defaults; the recommendation keeps them, and
 `optimize!(model, rec)` uses them.

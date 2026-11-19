@@ -62,7 +62,10 @@ The Jacobian path also needs each eliminated variable to be in at least one cost
 [`recommendoptimizer`](@ref) chooses the formulation, `reduction`, `storage`, linear solver and iterator for a model by
 hand-written rules, from the model's structure and from one linearization and factorization of its Hessian at
 the model's current values. That probe measures the spread of the Hessian's diagonal, a lower bound on the condition
-number of the Jacobi-scaled Hessian, and how long a cost evaluation, a linearization and a solve take. `reduction` and
+number of the Jacobi-scaled Hessian, and how long a cost evaluation, a linearization and a solve take. When the Hessian is
+ill-conditioned, or cannot be factorized undamped, it also evaluates the Jacobian once and tests its rank along the
+Hessian's weakest direction: a rank-deficient Jacobian (a gauge freedom, say) keeps the Hessian path, where damping
+handles it, and a full-rank one goes to the Jacobian path, which does not square its conditioning. `reduction` and
 `storage` are what `:auto` builds; the other three choices follow the rules in its docstring. Every threshold in them is a
 starting value, not yet measured.
 

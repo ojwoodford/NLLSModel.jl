@@ -26,9 +26,32 @@ fixture("recommender")
         F(; kw...) = NLLSModel.rule_formulation(recfeatures(; kw...))
         @test F(condition=NLLSModel.REC_JACOBIAN_CONDITION) == (:jacobian, :F_illconditioned)
         @test F(condition=prevfloat(NLLSModel.REC_JACOBIAN_CONDITION)) == (:hessian, :F_wellconditioned)
-        @test F(condition=Inf, status=DampedLinearSolve.NotPositiveDefinite) == (:hessian, :F_singular)
+        @test F(condition=Inf, status=DampedLinearSolve.NotPositiveDefinite, ranktest=:nofactorization) == (:hessian, :F_singular)
         @test F(condition=1e20, allresiduals=false) == (:hessian, :F_nonresidual)
         @test F(condition=Inf, allresiduals=false) == (:hessian, :F_nonresidual)
+    end
+
+    @testset "rule F, the rank test (RC8)" begin
+        F(; kw...) = NLLSModel.rule_formulation(recfeatures(; kw...))
+        tol = NLLSModel.REC_RANK_TOLERANCE
+        # An ill-conditioned Hessian and an undamped failure take the same branches, the tolerance from both sides
+        for ill in ((condition=1e15,), (condition=Inf, status=DampedLinearSolve.NotPositiveDefinite),
+                (condition=Inf, status=DampedLinearSolve.Indefinite))
+            @test NLLSModel.needsranktest(recfeatures(; ill...))
+            @test F(; ill..., rank_t=tol) == (:jacobian, :F_illconditioned)
+            @test F(; ill..., rank_t=prevfloat(tol)) == (:hessian, :F_rankdeficient)
+            @test F(; ill..., rank_t=0.0) == (:hessian, :F_rankdeficient)
+            @test F(; ill..., ranktest=:nodiagonal) == (:hessian, :F_singular)
+            @test F(; ill..., ranktest=:nofactorization) == (:hessian, :F_singular)
+            @test F(; ill..., ranktest=:nojacobian) == (:hessian, :F_jacobian_unavailable)
+            @test F(; ill..., allresiduals=false) == (:hessian, :F_nonresidual)
+        end
+        # Not needed: a well-conditioned Hessian that factorizes undamped, or a cost that is not a residual
+        @test !NLLSModel.needsranktest(recfeatures(condition=prevfloat(NLLSModel.REC_JACOBIAN_CONDITION)))
+        @test NLLSModel.needsranktest(recfeatures(condition=NLLSModel.REC_JACOBIAN_CONDITION))
+        @test !NLLSModel.needsranktest(recfeatures(condition=1e20, allresiduals=false))
+        # A failed undamped solve needs the test, whatever the condition field says
+        @test NLLSModel.needsranktest(recfeatures(condition=10.0, status=DampedLinearSolve.NotPositiveDefinite))
     end
 
     @testset "rule I, the iterator" begin
@@ -70,7 +93,9 @@ fixture("recommender")
         @test isfinite(f.condition) == (f.status == DampedLinearSolve.Success)
         @test all(t -> t >= 0, (f.t_cost, f.t_linearize, f.t_solve))
         @test rec.unfixed === nothing && rec.numthreads === static(1) && rec.max_dense_bytes == NLLSModel.MAX_DENSE_BYTES
-        @test NLLSModel.rule_formulation(f)[1] === (spec.name == "an unfixed adaptive kernel" ? :jacobian : rec.formulation)
+        @test NLLSModel.rule_formulation(f) == (rec.formulation, rec.rules.formulation)
+        @test (f.ranktest !== :notneeded) == NLLSModel.needsranktest(f)
+        @test isnan(f.rank_t) == isnan(f.rank_damping) == (f.ranktest !== :ran)
         @test rec.iterator === NLLSModel.rule_iterator(f)[1]
 
         # reduction and storage are what optimvars (optimvars_nls on the Jacobian path) builds with :auto
@@ -86,7 +111,7 @@ fixture("recommender")
 
         # Two calls agree on everything but the timings (and the iterator, where the timings decided it)
         rec2 = NLLSModel.recommendoptimizer(model; numthreads=static(1))
-        @test untimed(rec2.features) == untimed(f)
+        @test isequal(untimed(rec2.features), untimed(f))
         @test (rec2.formulation, rec2.reduction, rec2.storage, rec2.linsolver) == (rec.formulation, rec.reduction, rec.storage, rec.linsolver)
         @test rec2.fallback == rec.fallback
         timingdecided(f) || @test rec2.iterator === rec.iterator
@@ -99,6 +124,124 @@ fixture("recommender")
         @test rec.formulation === :hessian && rec.rules.formulation === :F_jacobian_unavailable
         @test occursin("adaptive", rec.fallback)
         @test rec.rules.reduction === :RS_hessian && rec.rules.linsolver === :L_dense
+    end
+
+    @testset "the rank test: $(spec.name)" for spec in REC_RANK_MODELS
+        model = spec.make()
+        start = deepcopy(model.variables)
+        rec = NLLSModel.recommendoptimizer(model; numthreads=static(1))
+        f = rec.features
+        @test model.variables == start # The model is not changed
+        @test NLLSModel.needsranktest(f)
+        @test rec.rules.formulation === spec.rule && f.ranktest === spec.ranktest
+        @test (f.hessiansystem === :static) == occursin("static", spec.name)
+        @test rec.formulation === (spec.rule === :F_illconditioned ? :jacobian : :hessian)
+        @test isequal(f.rank_damping, spec.damping)
+        @test (f.status == DampedLinearSolve.Success) == (spec.damping == 0) # Damping only when the undamped solve failed
+        @test isfinite(f.condition) == (f.status == DampedLinearSolve.Success)
+        if rec.formulation === :jacobian
+            @test rec.linsolver === :qr && rec.rules.linsolver === :L_jacobian && rec.rules.reduction === :RS_jacobian
+            @test (rec.reduction, rec.storage) == NLLSModel.jacobianreductionstorage(optimvars_nls(model; numthreads=static(1))[5])
+        end
+        # Two calls agree on everything but the timings
+        rec2 = NLLSModel.recommendoptimizer(model; numthreads=static(1))
+        @test isequal(untimed(rec2.features), untimed(f))
+        @test (rec2.formulation, rec2.reduction, rec2.storage, rec2.linsolver) == (rec.formulation, rec.reduction, rec.storage, rec.linsolver)
+        @test model.variables == start
+        # The explanation, and the call it prints runs
+        @test occursin(flat(NLLSModel.formulation_reason(rec)), flat(longform(rec)))
+        @test all(line -> textwidth(line) <= 80, split(longform(rec), '\n'))
+        positional, keywords, optkw = printedcall(rec)
+        @test keywords[:formulation] == QuoteNode(rec.formulation) && optkw[:linsolver] == QuoteNode(rec.linsolver)
+        # The printed call runs, and does not raise the cost
+        copied = deepcopy(model)
+        runprintedcall(rec, copied)
+        @test cost(copied) <= cost(model)
+    end
+
+    @testset "the rank test's readings" begin
+        tol = NLLSModel.REC_RANK_TOLERANCE
+        # Full rank, ill-conditioned, factorizes undamped: t is an upper bound on the smallest singular value of the
+        # column-scaled J, and close to it (measured: equal to three digits on Julia 1.13 and 1.10)
+        model = REC_RANK_MODELS[1].make()
+        t = NLLSModel.recommendoptimizer(model; numthreads=static(1)).features.rank_t
+        sv = scaledsvdvals(rankpieces(model).J)
+        σ = last(sv)
+        @test 1e7 < first(sv) / σ < 1e8 # The condition number of the column-scaled J
+        @test σ * (1 - 1e-8) <= t <= 1.05 * σ
+        # Without and with the refinement step; the test reads the smaller
+        r = rankreadings(model)
+        @test length(r) == NLLSModel.REC_RANK_REFINEMENTS + 1 && t == minimum(r)
+        # A null space with a remainder to 1e-4 and to 1e-6: rank-deficient after the refinement. To 1e-6 the unrefined
+        # reading is above the tolerance, so the refinement decides (measured on Julia 1.13: 7.3e-14 and 1.8e-16 to 1e-4,
+        # 4.1e-11 and 1.9e-14 to 1e-6)
+        r4 = rankreadings(REC_RANK_MODELS[3].make())
+        r6 = rankreadings(REC_RANK_MODELS[4].make())
+        @test r4[2] < tol && r6[2] < tol
+        @test r6[1] >= tol
+        @test r4[2] < r4[1] && r6[2] < r6[1]
+        # The degree-14 monomial fit: full rank, read through the damping (measured: 71 and 69 times the true value, 2.5e-10,
+        # on Julia 1.13 and 1.10)
+        model = REC_RANK_MODELS[2].make()
+        t = NLLSModel.recommendoptimizer(model; numthreads=static(1)).features.rank_t
+        σ = scaledsigmamin(rankpieces(model).J)
+        @test σ <= t <= 200 * σ
+        # On a J of full rank the refinement step is zero but for rounding, so its reading can be far above the unrefined
+        # one; the smaller is kept (the existing fixture "ill-conditioned, one variable", measured: 3.2e-7 unrefined, and
+        # 0.066 refined on Julia 1.13, 0.45 on 1.10)
+        model = linearmodel(scaledjacobian(3, 1 - 1e-13))
+        r = rankreadings(model)
+        @test NLLSModel.recommendoptimizer(model; numthreads=static(1)).features.rank_t == minimum(r)
+        @test minimum(r) <= 1.05 * scaledsigmamin(rankpieces(model).J)
+    end
+
+    @testset "the same formulation whether or not the undamped solve succeeds" begin
+        # A degree-13 monomial fit, whose undamped Cholesky fails or not by rounding (at these sizes, on Julia 1.13, it
+        # succeeds at 400 points only; on 1.10, at 800 only): the Jacobian path every time
+        for m in (200, 400, 800, 1600, 3200)
+            rec = NLLSModel.recommendoptimizer(monomialmodel(m, 13); numthreads=static(1))
+            @test rec.formulation === :jacobian && rec.rules.formulation === :F_illconditioned
+            @test rec.features.rank_damping == (rec.features.status == DampedLinearSolve.Success ? 0.0 : first(NLLSModel.REC_RANK_DAMPINGS))
+        end
+        # Both outcomes forced on one model: the test run undamped, and as if the undamped solve had failed
+        pc = rankpieces(monomialmodel(400, 13))
+        DampedLinearSolve.solve!(pc.ls, pc.linsolver) == DampedLinearSolve.Success || DampedLinearSolve.dampen!(pc.ls, 1e-14, pc.d)
+        rho, w = NLLSModel.scaled_inverse_iteration(pc.ls, pc.linsolver, sqrt.(pc.d))
+        kw = (unfixed=nothing, numthreads=static(1), max_dense_bytes=NLLSModel.MAX_DENSE_BYTES)
+        order = NLLSModel.varorder(pc.fdf!, monomialmodel(400, 13))
+        model = monomialmodel(400, 13)
+        undamped = NLLSModel.jacobian_rank_test(model, pc.ls, pc.linsolver, pc.d, rho, w, order; kw...)
+        failed = NLLSModel.jacobian_rank_test(model, pc.ls, pc.linsolver, pc.d, Inf, nothing, order; kw...)
+        @test undamped[1:2] == (:ran, 0.0) && failed[1:2] == (:ran, first(NLLSModel.REC_RANK_DAMPINGS))
+        F(status, condition, t, λ) = NLLSModel.rule_formulation(recfeatures(; status, condition, rank_t=t, rank_damping=λ))
+        @test F(DampedLinearSolve.Success, 1e15, undamped[3], 0.0) == F(DampedLinearSolve.NotPositiveDefinite, Inf, failed[3], 1e-14) == (:jacobian, :F_illconditioned)
+    end
+
+    @testset "the rank test's order: $name" for (name, make, kw) in (
+            ("blocks sorted by size", () -> mixedproblem()[1], (;)),
+            ("blocks sorted, an unfixed subset", () -> mixedproblem()[1], (unfixed=[1, 2, 4, 5, 7],)),
+            ("eliminated, dense", () -> posechain(8, 12), (;)),
+            ("eliminated, sparse", () -> posechain(8, 12), (storage=:sparse,)),
+            ("eliminated, an unfixed subset", () -> posechain(8, 12), (unfixed=[2:8; 10:20],)),
+            ("one variable", () -> linearmodel(scaledjacobian(3, 0.5)), (;)),
+            ("a robust kernel, first order", () -> curvefit(; huber=true, outliers=5), (;)),
+            ("a robust kernel, second order", gemanmcclurecurve, (;)))
+        model = make()
+        pc = rankpieces(model; kw...)
+        lhs, rhs = permutedproducts(pc)
+        @test lhs ≈ rhs rtol = 1e-13
+        # The products check the order: the identity in place of a permutation that is not one does not agree
+        if pc.p != 1:length(pc.p)
+            lhs1, rhs1 = permutedproducts(pc, collect(1:length(pc.p)))
+            @test !isapprox(lhs1, rhs1; rtol=1e-6)
+        end
+    end
+
+    @testset "a robust kernel: the J of the Jacobian path" begin
+        # The reweighted J the Jacobian path factorizes, not the residual's own: the plain model's J differs
+        plain = rankpieces(curvefit(; outliers=5)).J
+        @test !isapprox(rankpieces(curvefit(; huber=true, outliers=5)).J, plain; rtol=1e-3)
+        @test !isapprox(rankpieces(gemanmcclurecurve()).J, plain; rtol=1e-3)
     end
 
     @testset "the explicit linear solver gives the step of :auto" begin
@@ -156,11 +299,12 @@ fixture("recommender")
         @test rec.features.condition < 4
         @test rec.features.diagspread ≈ 1e14
         @test rec.formulation === :hessian && rec.iterator === :levenbergmarquardt_dtd
-        # Rank-deficient (exactly: x₁ - x₂ alone): the factorization fails, so Inf, and the normal equations
+        # Rank-deficient (exactly: x₁ - x₂ alone): the factorization fails, so Inf; the damped one does, and the rank test
+        # finds J rank-deficient, so the normal equations
         rec = NLLSModel.recommendoptimizer(linearmodel([1.0 -1.0]); numthreads=static(1))
         @test rec.features.status == DampedLinearSolve.NotPositiveDefinite
         @test rec.features.condition == Inf
-        @test rec.formulation === :hessian && rec.rules.formulation === :F_singular
+        @test rec.formulation === :hessian && rec.rules.formulation === :F_rankdeficient
         # A zero diagonal entry (a variable no cost moves): Inf, and an infinite spread
         rec = NLLSModel.recommendoptimizer(linearmodel([1.0 0.0; 2.0 0.0]); numthreads=static(1))
         @test rec.features.diag_min == 0 && rec.features.diagspread == Inf && rec.features.condition == Inf
@@ -171,7 +315,7 @@ fixture("recommender")
         @test rec.formulation === :jacobian && rec.linsolver === :qr
         # The estimate of a system that does not factorize
         ls = DampedLinearSolve.makehessiansystem(zeros(2, 2), :cholesky)
-        @test NLLSModel.scaled_condition_estimate(ls, :cholesky, ones(2)) == Inf
+        @test NLLSModel.scaled_inverse_iteration(ls, :cholesky, ones(2))[1] == Inf
         # The start of inverse iteration is a fixed unit vector
         @test norm(NLLSModel.inverse_iteration_start(5)) ≈ 1
         @test NLLSModel.inverse_iteration_start(5) == NLLSModel.inverse_iteration_start(5)
@@ -239,8 +383,22 @@ fixture("recommender")
         # Each rule's sentence, with the feature values that decided it
         reason(f; kw...) = flat(f(recby(; kw...)))
         @test occursin("not residuals", reason(NLLSModel.formulation_reason; features=recfeatures(allresiduals=false)))
-        @test occursin("could not be factorized (NotPositiveDefinite, smallest diagonal entry -2.0)",
+        @test occursin("a diagonal entry that is not positive (the smallest is -2.0; the undamped solve returned NotPositiveDefinite)",
             reason(NLLSModel.formulation_reason; features=recfeatures(status=DampedLinearSolve.NotPositiveDefinite, condition=Inf, diag_min=-2.0)))
+        @test occursin("could not be factorized (Indefinite), undamped or with any scaled damping up to 1.0e-10",
+            reason(NLLSModel.formulation_reason; features=recfeatures(status=DampedLinearSolve.Indefinite, condition=Inf, ranktest=:nofactorization)))
+        deficient = recfeatures(condition=3e16, rank_t=2e-16)
+        @test occursin("Hessian, 3.0e16, is at least 1.0e12, so the rank of the Jacobian decides: along the Hessian's " *
+            "weakest direction the column-scaled Jacobian has norm 2.0e-16, below 1.0e-12, so J is numerically rank-deficient",
+            reason(NLLSModel.formulation_reason; features=deficient))
+        @test occursin("the undamped Hessian could not be factorized (NotPositiveDefinite) (the test used a scaled damping of 1.0e-14)",
+            reason(NLLSModel.formulation_reason; features=recfeatures(condition=Inf, status=DampedLinearSolve.NotPositiveDefinite, rank_t=0.0)))
+        @test occursin("has norm 2.0e-8, at least 1.0e-12, so J has full numerical rank, and the condition number of the " *
+            "column-scaled J is at least 5.0e7", reason(NLLSModel.formulation_reason; formulation=:jacobian, features=recfeatures(condition=1e15, rank_t=2e-8)))
+        @test occursin("could not be factorized (NotPositiveDefinite) (the test used a scaled damping of 1.0e-14), so the rank of the Jacobian decides: along",
+            reason(NLLSModel.formulation_reason; formulation=:jacobian, features=recfeatures(condition=Inf, status=DampedLinearSolve.NotPositiveDefinite, rank_t=2e-8)))
+        @test occursin("the undamped Hessian could not be factorized (NotPositiveDefinite), so the rank of the Jacobian would decide, but the Jacobian path cannot be built for this model (why not)",
+            reason(NLLSModel.formulation_reason; features=recfeatures(condition=Inf, status=DampedLinearSolve.NotPositiveDefinite, ranktest=:nojacobian), fallback="why not"))
         @test occursin("12.3, is below 1.0e12", reason(NLLSModel.formulation_reason; features=recfeatures(condition=12.345)))
         @test occursin("3.0e13, is at least 1.0e12", reason(NLLSModel.formulation_reason; formulation=:jacobian, features=recfeatures(condition=3e13)))
         @test occursin("cannot be built for this model (why not)", reason(NLLSModel.formulation_reason;

@@ -3,15 +3,21 @@ import BlockLinearSystems
 import DampedLinearSolve
 import OptimizationVariableInterface
 
-fixture("frontdoor", "optimization", "jacobianelimination", "nonsquaredcost", "adaptivecost")
+fixture("frontdoor", "optimization", "jacobianelimination", "nonsquaredcost", "adaptivecost", "jacobianproblems")
 
 # Features built by hand, for the rules: a well-conditioned, well-scaled dense system whose solve costs more than its
-# linearization, unless a keyword says otherwise
+# linearization, unless a keyword says otherwise. The rank test is consistent with the rest unless a keyword says
+# otherwise: not needed when the Hessian is well conditioned; otherwise not possible with a non-positive diagonal, and
+# run (undamped when the condition estimate is finite) with a full-rank reading
 function recfeatures(; nvariables=2, dimension=4, ncosts=3, nresiduals=6, allresiduals=true, hessiansystem=:dense,
         retained=0, eliminated=0, diag_min=1.0, diag_max=10.0, diagspread=diag_max / diag_min,
-        status=DampedLinearSolve.Success, condition=10.0, t_cost=1e-6, t_linearize=1e-5, t_solve=2e-5)
+        status=DampedLinearSolve.Success, condition=10.0,
+        ranktest=(!NLLSModel.needsranktest(allresiduals, status, condition) ? :notneeded : diag_min > 0 ? :ran : :nodiagonal),
+        rank_damping=(ranktest === :ran ? (isfinite(condition) ? 0.0 : 1e-14) : NaN),
+        rank_t=(ranktest === :ran ? 1e-6 : NaN), t_cost=1e-6, t_linearize=1e-5, t_solve=2e-5)
     return NLLSModel.RecommenderFeatures(nvariables, dimension, ncosts, nresiduals, allresiduals, hessiansystem, retained,
-        eliminated, diag_min, diag_max, diagspread, status, condition, t_cost, t_linearize, t_solve)
+        eliminated, diag_min, diag_max, diagspread, status, condition, ranktest, rank_damping, rank_t, t_cost, t_linearize,
+        t_solve)
 end
 
 # A linear least-squares model in one `Vector{Float64}` variable: r(x) = X x - y
@@ -88,10 +94,130 @@ const REC_MODELS = (
     (name = "ill-conditioned, sparse", make = () -> weakchain(60, 1e-14),
         kind = :sparse, formulation = :jacobian, linsolver = :qr),
     # A gauge freedom (no prior): rounding lets the factorization succeed, with a finite condition estimate near 1/eps,
-    # so the formulation rule sends it to the Jacobian path (measured; see the Status of RC in NLLSModel.jl-fixes.md)
+    # so the rank test of the Jacobian decides, and finds it rank-deficient (RC8)
     (name = "bundle adjustment, a gauge freedom", make = () -> (Random.seed!(3); optlandmark_problem(4, 20)),
-        kind = :schur_dense, formulation = :jacobian, linsolver = :qr),
+        kind = :schur_dense, formulation = :hessian, linsolver = :cholesky),
 )
+
+# A linear least-squares model r(x) = X x with X = Q₁ Diagonal(σ) Q₂ᵀ, Q₁ and Q₂ random with orthonormal columns: its
+# singular values are σ (before column scaling)
+function svdmodel(m, σ; seed=1)
+    rng = MersenneTwister(seed)
+    n = length(σ)
+    Q1 = Matrix(qr(randn(rng, m, n)).Q)[:, 1:n]
+    Q2 = Matrix(qr(randn(rng, n, n)).Q)
+    return linearmodel(Q1 * Diagonal(σ) * Q2', zeros(m), ones(n))
+end
+
+# A monomial fit of degree `deg` at `m` equally spaced points of [0, 1]: full rank, and badly conditioned
+monomialmodel(m, deg) = linearmodel([x^k for x in range(0, 1; length=m), k in 0:deg])
+
+# An unfixed adaptive kernel (variable 1) and the mean (variable 2) fitted to 200 samples of a mixture, at a point where
+# the Hessian is indefinite with a positive diagonal (scaled eigenvalues about -4.2, 0.27, 1.2 and 6.7): no damping on
+# the rank test's ladder factorizes it
+function indefinitemodel()
+    rng = MersenneTwister(1)
+    model = Model(Union{ContaminatedGaussian{Float64}, Float64}, SimpleResidual)
+    addvariable!(model, ContaminatedGaussian(1.0, 5.0, 0.8))
+    addvariable!(model, 2.0)
+    for _ in 1:200
+        addcost!(model, SimpleResidual(rand(rng) < 0.8 ? randn(rng) : 5 * randn(rng), 2))
+    end
+    return model
+end
+
+# A curve fit with outliers under a kernel with a second-order correction that is not zero (Geman-McClure)
+function gemanmcclurecurve()
+    plain = curvefit(; outliers=5)
+    k = GemanMcclure2oKernel(0.05)
+    model = Model(Vector{Float64}, TlRob{TlExp, typeof(k)})
+    addvariable!(model, plain.variables[1])
+    foreach(c -> addcost!(model, TlRob(c, k)), Iterators.flatten(values(plain.costs)))
+    return model
+end
+
+# A linear residual r(x) = X x - y on one variable of static size N, so that the Hessian path builds a static system
+struct StaticLinRes{N} <: NLLSModel.AbstractResidual
+    X::Matrix{Float64}
+    y::Vector{Float64}
+end
+NLLSModel.ndeps(::StaticLinRes) = static(1)
+NLLSModel.nres(r::StaticLinRes) = length(r.y)
+NLLSModel.varindices(::StaticLinRes) = 1
+NLLSModel.getvars(::StaticLinRes{N}, vars::AbstractVector) where N = (vars[1]::SVector{N, Float64},)
+NLLSModel.computeresidual(r::StaticLinRes, x) = r.X * x - r.y
+Base.eltype(::StaticLinRes) = Float64
+function staticlinearmodel(X)
+    N = size(X, 2)
+    model = Model(SVector{N, Float64}, StaticLinRes{N})
+    addvariable!(model, SVector{N, Float64}(ones(N)))
+    addcost!(model, StaticLinRes{N}(X, zeros(size(X, 1))))
+    return model
+end
+
+# The models of the rank test (RC8), what it should find, and the formulation rule that should fire. `damping` is the
+# scaled damping of the factorization the test used.
+const REC_RANK_MODELS = (
+    (name = "full rank, cond(J) 3e7, factorizes undamped", make = () -> svdmodel(40, exp10.(range(0, -7.5; length=10))),
+        rule = :F_illconditioned, ranktest = :ran, damping = 0.0),
+    (name = "full rank, a degree-14 monomial fit, does not factorize undamped", make = () -> monomialmodel(400, 14),
+        rule = :F_illconditioned, ranktest = :ran, damping = 1e-14),
+    (name = "a 7-dimensional null space, remainder to 1e-4", make = () -> svdmodel(60, [exp10.(range(0, -4; length=13)); zeros(7)]),
+        rule = :F_rankdeficient, ranktest = :ran, damping = 1e-14),
+    (name = "a 7-dimensional null space, remainder to 1e-6", make = () -> svdmodel(60, [exp10.(range(0, -6; length=13)); zeros(7)]),
+        rule = :F_rankdeficient, ranktest = :ran, damping = 1e-14),
+    (name = "full rank, cond(J) 3e7, static, factorizes undamped",
+        make = () -> staticlinearmodel(only(values(svdmodel(40, exp10.(range(0, -7.5; length=10))).costs))[1].X),
+        rule = :F_illconditioned, ranktest = :ran, damping = 0.0),
+    (name = "full rank, a degree-14 monomial fit, static, does not factorize undamped",
+        make = () -> staticlinearmodel([x^k for x in range(0, 1; length=400), k in 0:14]),
+        rule = :F_illconditioned, ranktest = :ran, damping = 1e-14),
+    (name = "a zero column", make = () -> linearmodel([1.0 0.0; 2.0 0.0]),
+        rule = :F_singular, ranktest = :nodiagonal, damping = NaN),
+    (name = "indefinite, an unfixed adaptive kernel", make = indefinitemodel,
+        rule = :F_singular, ranktest = :nofactorization, damping = NaN),
+)
+
+# The pieces of the rank test for a model, as `recommendoptimizer` builds them: the Hessian system linearized at the
+# current values (undamped, not yet solved), its diagonal, the Jacobian evaluated there and the permutation from the
+# Hessian's order to the Jacobian's columns
+function rankpieces(model; unfixed=nothing, kwargs...)
+    _, fdf!, x0, H = optimvars(model; unfixed, numthreads=static(1), kwargs...)
+    n = NLLSModel.unfixeddims(model, NLLSModel.convertunfixed(unfixed, model))
+    linsolver = NLLSModel.rule_linsolver(true, NLLSModel.hessiansystemkind(H))[1]
+    ls = isnothing(H) ? DampedLinearSolve.makehessiansystem(n, linsolver) : DampedLinearSolve.makehessiansystem(H, linsolver)
+    linearizehessian!(ls, fdf!, x0)
+    d = DampedLinearSolve.getdiag!(zeros(n), ls)
+    _, J, p = NLLSModel.rank_jacobian(model, NLLSModel.varorder(fdf!, model); unfixed, numthreads=static(1),
+        max_dense_bytes=NLLSModel.MAX_DENSE_BYTES)
+    return (; ls, linsolver, d, J, p, fdf!)
+end
+
+# ‖J D^-½ w‖² and wᵀ D^-½ H D^-½ w for a random unit `w` in the Hessian's order, with the permutation `p`
+function permutedproducts(pieces, p=pieces.p)
+    w = normalize(randn(MersenneTwister(4), length(pieces.d)))
+    v = zeros(size(pieces.J, 2))
+    v[p] .= w ./ sqrt.(pieces.d)
+    return norm(pieces.J * v)^2, DampedLinearSolve.quadform(DampedLinearSolve.getA(pieces.ls), w ./ sqrt.(pieces.d))
+end
+
+# The rank test's readings for a model, without and with the refinement step: the undamped direction when the Hessian
+# factorizes undamped, otherwise the first damping that does
+function rankreadings(model)
+    pc = rankpieces(model)
+    sqrtd = sqrt.(pc.d)
+    rho, w = NLLSModel.scaled_inverse_iteration(pc.ls, pc.linsolver, sqrtd)
+    for λ in NLLSModel.REC_RANK_DAMPINGS
+        isfinite(rho) && break
+        DampedLinearSolve.dampen!(pc.ls, λ, pc.d)
+        rho, w = NLLSModel.scaled_inverse_iteration(pc.ls, pc.linsolver, sqrtd)
+    end
+    return NLLSModel.rank_readings(pc.J, pc.p, sqrtd, w, pc.ls, pc.linsolver)
+end
+
+# The singular values of the column-scaled J, largest first
+scaledsvdvals(J) = (Jd = Matrix(J); svdvals(Jd ./ sqrt.(sum(abs2, Jd; dims=1))))
+scaledsigmamin(J) = last(scaledsvdvals(J))
 
 # The features that do not depend on timing
 untimed(f::NLLSModel.RecommenderFeatures) = Tuple(getfield(f, k) for k in fieldnames(NLLSModel.RecommenderFeatures) if !startswith(string(k), "t_"))
@@ -154,4 +280,12 @@ function printedcall(rec)
     options = positional[2]
     (options isa Expr && options.head === :call && options.args[1] === :OptimizationOptions) || return nothing
     return positional, keywords, Dict(a.args[1] => a.args[2] for a in options.args[2:end])
+end
+
+# Runs the call `show` prints on `model`, with SecondOrderOptimization (loaded by the frontdoor fixture), and returns its
+# result
+function runprintedcall(rec, model)
+    text = longform(rec)
+    ex = Meta.parse(text[first(findfirst("optimize!(model,", text)):end])
+    return Core.eval(@__MODULE__, :(let model = $model; $ex; end))
 end

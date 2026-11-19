@@ -31,7 +31,7 @@ import OptimizationVariableInterface:
 
 import FastNorm: sqnorm
 import SIRBSDispatch: sirbsdispatch
-using DampedLinearSolve: DampedLinearSolve, makehessiansystem, solve!, getdiag!, isfinitesystem, SolveStatus, Success
+using DampedLinearSolve: DampedLinearSolve, makehessiansystem, dampen!, solve!, getdiag!, isfinitesystem, SolveStatus, Success
 
 # Export NLLSModel public interface
 # Problem construction & evaluation

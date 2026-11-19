@@ -95,7 +95,9 @@ Also:
 
 `recommendoptimizer(model)` chooses the formulation, `reduction`, `storage`, linear solver and iterator by hand-written
 rules, from the model's structure and from one linearization and factorization of its Hessian at its current
-values (the conditioning and scaling of the Hessian, and how long a linearization and a solve take). Displayed, the
+values (the conditioning and scaling of the Hessian, and how long a linearization and a solve take; when the Hessian is
+ill-conditioned, the rank of the Jacobian, from one evaluation, tells a gauge freedom from a full-rank but
+ill-conditioned problem). Displayed, the
 recommendation explains each choice and prints the equivalent `optimize!(model, options; ...)` call, to copy and edit;
 `optimize!(model, rec)` runs it directly (other keywords go to `OptimizationOptions`). The rules' thresholds are starting
 values, not yet measured; see the "Linear Solvers & Sparsity" page of the docs for an example.
