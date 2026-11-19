@@ -164,6 +164,7 @@ function costgradhess!(linsystem::LinearSystemShared{F, V, N}, vars::AbstractVec
             n = n_
         end
     end
+    finish!(LinearSystem(linsystem, 1))
 
     return linsystem.costs[1]
 end

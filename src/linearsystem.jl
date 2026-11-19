@@ -219,10 +219,36 @@ function add!(dest::MultiVariateLSSchur_ls, src::MultiVariateLSSchur_ls)
 end
 add!(dest::LinearSystem, src::LinearSystem) = add!(dest.ls, src.ls)
 
+# The end of an evaluation: a single-variable system accumulated in its lower triangle (from the lazy product) is made
+# symmetric here, once. A full H (a user's computecostgradhess, the dynamic kernels) has added both triangles;
+# mirroring the lower one over the upper keeps the same values when H is symmetric.
+finish!(linsystem) = linsystem
+function finish!(linsystem::UniVariateLS)
+    A = getA(linsystem)
+    n = size(A, 1)
+    @inbounds for j in 2:n, i in 1:j-1
+        A[i, j] = A[j, i]
+    end
+    return linsystem
+end
+
 function updatesymlinearsystem!(linsystem::UniVariateLS, g, H, unusedargs...)
     # Update the blocks in the problem
-    getb(linsystem) .+= g
-    getA(linsystem) .+= H
+    addsys!(getb(linsystem), getA(linsystem), g, H)
+end
+# A full H (the dynamic kernels, a user's computecostgradhess): explicit loops, since the broadcast into an MMatrix
+# system is not vectorized
+function addsys!(b, A, g, H)
+    n = length(b)
+    @inbounds @simd for i in 1:n
+        b[i] += g[i]
+    end
+    @inbounds for j in 1:n
+        @simd for i in 1:n
+            A[i, j] += H[i, j]
+        end
+    end
+    return nothing
 end
 
 function updatesymA!(A, a, vars, varflags, blockindices)

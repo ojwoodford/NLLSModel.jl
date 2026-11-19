@@ -228,3 +228,68 @@ function gramgrad(J, r, dc, c2)
     end
     return g, H
 end
+
+# ---- The product returned lazily ----
+# dc * J'J + c2 * gu gu' of one cost, not formed: an `AbstractMatrix` whose entries are computed where they are read, so
+# every existing accumulation (broadcasts, BlockLinearSystems' `addblock!`) computes each entry as it adds it. A
+# single-variable system has methods of its own that add one triangle with `muladd` (`addsys!`).
+struct GramLazy{T, JT, GT} <: AbstractMatrix{T}
+    J::JT  # M × n: the adjoint of an SVector (one row), an SMatrix, or a Matrix
+    gu::GT # J' r, unweighted
+    dc::T
+    c2::T
+end
+GramLazy(J, gu, dc, c2) = (T = eltype(J); GramLazy{T, typeof(J), typeof(gu)}(J, gu, convert(T, dc), convert(T, c2)))
+Base.size(G::GramLazy) = (size(G.J, 2), size(G.J, 2))
+@inline function Base.getindex(G::GramLazy{T}, i::Int, j::Int) where T
+    J = G.J
+    s = zero(T)
+    @inbounds for k in 1:size(J, 1)
+        s = muladd(J[k, i], J[k, j], s)
+    end
+    return @inbounds muladd(G.c2 * G.gu[i], G.gu[j], G.dc * s)
+end
+
+# The lazy form for the Jacobians it covers; any other is formed as before
+gramgrad_lazy(J::Adjoint{<:Any, <:StaticVector}, r, dc, c2) = (gu = J' * r; (dc * gu, GramLazy(J, gu, dc, c2)))
+gramgrad_lazy(J::StaticMatrix, r, dc, c2) = (gu = J' * r; (dc * gu, GramLazy(J, gu, dc, c2)))
+gramgrad_lazy(J, r, dc, c2) = gramgrad(J, r, dc, c2)
+
+# One row's lazy product into a single-variable system: the lower triangle, each entry computed as it is added
+# (dc u[i] u[j] + c2 gu[i] gu[j]); the system is mirrored once per evaluation (`finish!`). These are methods of
+# `addsys!` rather than of `updatesymlinearsystem!`, so that the latter's method table is unchanged and a run-time
+# dispatch on it (the run-time-size autodiff path) stays fast.
+function addsys!(b, A, g, H::GramLazy{T, <:Adjoint}) where T
+    u = parent(H.J)
+    n = length(b)
+    @inbounds @simd for i in 1:n
+        b[i] += g[i]
+    end
+    @inbounds for j in 1:n
+        uj = H.dc * u[j]
+        gj = H.c2 * H.gu[j]
+        @simd for i in j:n
+            A[i, j] = muladd(u[i], uj, muladd(H.gu[i], gj, A[i, j]))
+        end
+    end
+end
+
+# Several rows into a single-variable system: the lower triangle, column j's weighted entries held while the column is added
+function addsys!(b, A, g, H::GramLazy{T, <:StaticMatrix}) where T
+    J = H.J
+    M, n = size(J)
+    @inbounds @simd for i in 1:n
+        b[i] += g[i]
+    end
+    @inbounds for j in 1:n
+        wj = ntuple(k -> H.dc * J[k, j], Val(M))
+        gj = H.c2 * H.gu[j]
+        @simd for i in j:n
+            s = muladd(H.gu[i], gj, A[i, j])
+            for k in 1:M
+                s = muladd(J[k, i], wj[k], s)
+            end
+            A[i, j] = s
+        end
+    end
+end

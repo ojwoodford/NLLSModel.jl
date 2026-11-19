@@ -112,7 +112,7 @@ function computerescostgradhess_static(varflags, kernel, res, jac, sqres)
     if varflags & 1 == 0
         # The kernel is not optimized. Differentiate w.r.t. the cost only
         cost, dc, d2c = robustifydcost(kernel, sqres)
-        g, H = gramgrad(jac, res, dc, gram_c2(dc, d2c, sqres))
+        g, H = gramgrad_lazy(jac, res, dc, gram_c2(dc, d2c, sqres))
         return 0.5 * Float64(cost), g, H
     end
 

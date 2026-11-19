@@ -402,6 +402,9 @@ Computes the scalar cost, gradient vector, and Hessian matrix for active variabl
 The same rules apply as for [`computeresjac`](@ref): returned arrays must not be shared with other residuals, and the
 code must be single-threaded. For an [`AbstractResidual`](@ref) the gradient and Hessian are computed from the Jacobian
 without BLAS; the arrays returned alias per-task buffers and are valid until the same task evaluates its next cost.
+Where the Jacobian is static, the Hessian returned is not an `Array` or `SArray` but a lazy `AbstractMatrix` that
+computes each entry when it is read; index it, or `collect` it, for a stored copy. A method of your own may return any
+`AbstractVector` gradient and `AbstractMatrix` Hessian, ordinary arrays included.
 """
 function computecostgradhess end
 
