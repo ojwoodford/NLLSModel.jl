@@ -99,7 +99,8 @@ Also:
 rules, from the model's structure and from one linearization and factorization of its Hessian at its current
 values (the conditioning and scaling of the Hessian, and how long a linearization and a solve take; when the Hessian is
 ill-conditioned, the rank of the Jacobian, from one evaluation, tells a gauge freedom from a full-rank but
-ill-conditioned problem). Displayed, the
+ill-conditioned problem; when it is well conditioned, dense and its costs each touch most of the variables, an estimate
+of the arithmetic may choose the Jacobian path with the normal equations formed from a dense Jacobian). Displayed, the
 recommendation explains each choice and prints the equivalent `optimize!(model, options; ...)` call, to copy and edit;
 `optimize!(model, rec)` runs it directly (other keywords go to `OptimizationOptions`). The rules' thresholds are starting
 values, not yet measured; see the "Linear Solvers & Sparsity" page of the docs for an example.

@@ -14,10 +14,47 @@ function recfeatures(; nvariables=2, dimension=4, ncosts=3, nresiduals=6, allres
         status=DampedLinearSolve.Success, condition=10.0,
         ranktest=(!NLLSModel.needsranktest(allresiduals, status, condition) ? :notneeded : diag_min > 0 ? :ran : :nodiagonal),
         rank_damping=(ranktest === :ran ? (isfinite(condition) ? 0.0 : 1e-14) : NaN),
-        rank_t=(ranktest === :ran ? 1e-6 : NaN), t_cost=1e-6, t_linearize=1e-5, t_solve=2e-5)
+        rank_t=(ranktest === :ran ? 1e-6 : NaN),
+        work_hessian=(allresiduals ? 100.0 : NaN), work_jacobian=(allresiduals ? 10.0 : NaN),
+        densejacobian=(all(NLLSModel.normalequations_tests(allresiduals, status, condition, hessiansystem, dimension,
+            work_hessian, work_jacobian)) ? :available : :notneeded),
+        t_cost=1e-6, t_linearize=1e-5, t_solve=2e-5)
     return NLLSModel.RecommenderFeatures(nvariables, dimension, ncosts, nresiduals, allresiduals, hessiansystem, retained,
-        eliminated, diag_min, diag_max, diagspread, status, condition, ranktest, rank_damping, rank_t, t_cost, t_linearize,
-        t_solve)
+        eliminated, diag_min, diag_max, diagspread, status, condition, ranktest, rank_damping, rank_t, work_hessian,
+        work_jacobian, densejacobian, t_cost, t_linearize, t_solve)
+end
+
+# N2: `nvars` Vector{Float64} variables of `dim` dimensions each, and `rows` scalar linear residuals on each variable (a
+# random, well-conditioned `X` per variable): with one variable, every cost touches every variable
+function scalarmodel(nvars, dim, rows; seed=7)
+    rng = MersenneTwister(seed)
+    model = Model(Vector{Float64}, LinearResidualDynamic)
+    for k in 1:nvars
+        addvariable!(model, randn(rng, dim))
+        X = randn(rng, rows, dim)
+        for i in 1:rows
+            addcost!(model, LinearResidualDynamic([randn(rng)], X[i:i, :], k))
+        end
+    end
+    return model
+end
+
+# N2: an unfixed adaptive kernel with a few samples of its mean, beside a dense block on which the normal equations from J
+# would cost less; well conditioned, but optimvars_nls refuses an unfixed adaptive kernel
+function adaptivedensemodel(; samples=200, dim=20, rows=400)
+    rng = MersenneTwister(1)
+    model = Model(Union{ContaminatedGaussian{Float64}, Float64, Vector{Float64}}, Union{SimpleResidual, LinearResidualDynamic})
+    addvariable!(model, ContaminatedGaussian(1.0, 5.0, 0.8))
+    addvariable!(model, 0.1)
+    addvariable!(model, randn(rng, dim))
+    for _ in 1:samples
+        addcost!(model, SimpleResidual(rand(rng) < 0.8 ? randn(rng) : 5 * randn(rng), 2))
+    end
+    X = randn(rng, rows, dim)
+    for i in 1:rows
+        addcost!(model, LinearResidualDynamic([randn(rng)], X[i:i, :], 3))
+    end
+    return model
 end
 
 # A linear least-squares model in one `Vector{Float64}` variable: r(x) = X x - y
@@ -259,8 +296,10 @@ end
 function recby(; features=recfeatures(), formulation=:hessian, reduction=:none, storage=:dense, linsolver=:cholesky,
         iterator=:levenbergmarquardt, unfixed=nothing, numthreads=static(Threads.nthreads()),
         max_dense_bytes=NLLSModel.MAX_DENSE_BYTES, fallback="",
-        rule_f=NLLSModel.rule_formulation(features)[2], rule_rs=(formulation === :jacobian ? :RS_jacobian : :RS_hessian),
-        rule_l=(formulation === :jacobian ? :L_jacobian : NLLSModel.rule_linsolver(features.allresiduals, features.hessiansystem)[2]),
+        rule_f=NLLSModel.rule_formulation(features)[2],
+        rule_rs=(rule_f === :F_normalequations ? :RS_jacobian_dense : formulation === :jacobian ? :RS_jacobian : :RS_hessian),
+        rule_l=(rule_f === :F_normalequations ? :L_jacobian_normal : formulation === :jacobian ? :L_jacobian :
+            NLLSModel.rule_linsolver(features.allresiduals, features.hessiansystem)[2]),
         rule_i=NLLSModel.rule_iterator(features)[2])
     rules = (formulation = rule_f, reduction = rule_rs, storage = rule_rs, linsolver = rule_l, iterator = rule_i)
     return NLLSModel.OptimizationRecommendation(formulation, reduction, storage, linsolver, iterator, unfixed, numthreads,

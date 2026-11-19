@@ -440,6 +440,144 @@ fixture("recommender")
         @test split(text) == fill("word", 40)
     end
 
+    # N2: the normal equations from the dense Jacobian (rule F's F_normalequations)
+    @testset "rule F, the normal equations (N2)" begin
+        # Features on which all six tests pass; each test is then failed alone, at its threshold where it has one
+        ok = (dimension=17, work_hessian=200.0, work_jacobian=100.0)
+        T(; kw...) = NLLSModel.normalequations_tests(recfeatures(; ok..., kw...))
+        F(; kw...) = NLLSModel.rule_formulation(recfeatures(; ok..., kw...))
+        @test all(T()) && F() == (:jacobian, :F_normalequations)
+        @test keys(T()) == (:residuals, :wellconditioned, :densesystem, :dimension, :work)
+        # 1: every cost a residual
+        @test !T(allresiduals=false).residuals && F(allresiduals=false) == (:hessian, :F_nonresidual)
+        # 2: well conditioned, at and just below the threshold; and the undamped solve must succeed
+        c = NLLSModel.REC_JACOBIAN_CONDITION
+        @test T(condition=prevfloat(c)).wellconditioned && F(condition=prevfloat(c)) == (:jacobian, :F_normalequations)
+        @test !T(condition=c).wellconditioned && F(condition=c) == (:jacobian, :F_illconditioned)
+        @test !T(status=DampedLinearSolve.NotPositiveDefinite, condition=Inf).wellconditioned
+        # 3: each other kind of system
+        for kind in (:static, :sparse, :schur_dense, :schur_sparse)
+            @test !T(hessiansystem=kind).densesystem
+            @test F(hessiansystem=kind) == (:hessian, :F_wellconditioned)
+        end
+        # 4: the dimension, 16 and 17
+        @test NLLSModel.MAX_STATIC_SYSTEM == 16
+        @test !T(dimension=16).dimension && F(dimension=16) == (:hessian, :F_wellconditioned)
+        @test T(dimension=17).dimension
+        # 5: the margin, equal and just below
+        m = NLLSModel.REC_NORMAL_MARGIN
+        @test T(work_hessian=m * 100.0).work && F(work_hessian=m * 100.0) == (:jacobian, :F_normalequations)
+        @test !T(work_hessian=prevfloat(m * 100.0)).work && F(work_hessian=prevfloat(m * 100.0)) == (:hessian, :F_wellconditioned)
+        @test !T(work_hessian=NaN, work_jacobian=NaN).work
+        # 6: the dense Jacobian, each value
+        @test F(densejacobian=:available) == (:jacobian, :F_normalequations)
+        for d in (:toolarge, :unavailable, :notneeded)
+            @test F(densejacobian=d) == (:hessian, :F_wellconditioned)
+        end
+        # the default features of the other tests do not pass test 4
+        @test !NLLSModel.normalequations_tests(recfeatures()).dimension && recfeatures().densejacobian === :notneeded
+    end
+
+    @testset "the normal equations' work estimates (N2)" begin
+        s = NLLSModel.REC_HESSIAN_SCATTER
+        W(model, unfixed=nothing) = NLLSModel.normalequations_work(model, NLLSModel.convertunfixed(unfixed, model))
+        # a single cost: 6 rows on 3 dimensions
+        one = linearmodel(randn(MersenneTwister(1), 6, 3))
+        @test W(one) == (9 * (6 + s), 6 * 9 / 2)
+        # several costs on overlapping variables: weakchain(3, ε) has three 2-row costs on one 2-vector each and two
+        # 2-row links on two 2-vectors each; M = 10, N = 6
+        chain = weakchain(3, 1.0)
+        @test W(chain) == (3 * 4 * (2 + s) + 2 * 16 * (2 + s), 10 * 36 / 2)
+        # a fixed variable's dimension does not count (the third): the link on 2 and 3 has two unfixed dimensions; its
+        # rows still count in M
+        @test W(chain, [1, 2]) == (2 * 4 * (2 + s) + 16 * (2 + s) + 4 * (2 + s), 10 * 16 / 2)
+        # a cost that is not a residual
+        @test all(isnan, W(nonresidualmodel()))
+    end
+
+    @testset "the normal equations fire: one 20-dimensional variable, 80 scalar residuals" begin
+        model = scalarmodel(1, 20, 80)
+        rec = NLLSModel.recommendoptimizer(model; numthreads=static(1))
+        f = rec.features
+        @test (rec.formulation, rec.reduction, rec.storage, rec.linsolver) == (:jacobian, :none, :dense, :cholesky)
+        @test (rec.rules.formulation, rec.rules.reduction, rec.rules.storage, rec.rules.linsolver) ==
+            (:F_normalequations, :RS_jacobian_dense, :RS_jacobian_dense, :L_jacobian_normal)
+        @test rec.iterator === NLLSModel.rule_iterator(f)[1]
+        @test f.densejacobian === :available && f.ranktest === :notneeded && rec.fallback == ""
+        @test f.work_hessian == 80 * 400 * (1 + NLLSModel.REC_HESSIAN_SCATTER) && f.work_jacobian == 80 * 400 / 2
+        @test all(NLLSModel.normalequations_tests(f))
+        # optimize!(model, rec) and the printed call, evaluated, reach the Hessian path's minimum
+        ch = NLLSModel.cost(first(optimize(model, OptimizationOptions(iterator=:levenbergmarquardt, maxiters=200); numthreads=static(1))))
+        m1 = deepcopy(model)
+        r1 = optimize!(m1, rec)
+        @test isconverged(r1)
+        @test NLLSModel.cost(m1) ≈ ch rtol=1e-8
+        m2 = deepcopy(model)
+        r2 = runprintedcall(rec, m2)
+        @test isconverged(r2)
+        @test NLLSModel.cost(m2) ≈ ch rtol=1e-8
+        text = flat(longform(rec))
+        @test occursin("the Jacobian path, forming the normal equations from J", text)
+        @test occursin("Cholesky of JᵀJ, formed from the Jacobian in one product", text)
+    end
+
+    @testset "the normal equations do not fire: $name" for (name, make, kw, densejacobian, rule) in (
+            ("16 dimensions (test 4)", () -> scalarmodel(1, 16, 80), (;), :notneeded, :F_wellconditioned),
+            ("a sparse model (test 3)", () -> first(chainproblem(60, 2, 2)), (;), :notneeded, :F_wellconditioned),
+            ("a small static variable (test 3)", () -> first(singleproblem(SVector{2, Float64}, 2, 1)), (;), :notneeded, :F_wellconditioned),
+            ("each cost on one of four variables (test 5)", () -> scalarmodel(4, 5, 20), (;), :notneeded, :F_wellconditioned),
+            ("ill-conditioned, 20 dimensions (test 2)", () -> linearmodel(scaledjacobian(20, 1 - 1e-13)), (;), :notneeded, :F_illconditioned),
+            ("the dense Jacobian does not fit max_dense_bytes", () -> scalarmodel(1, 20, 80), (; max_dense_bytes=8 * 40 * 20), :toolarge, :F_wellconditioned),
+            ("optimvars_nls refuses the model", adaptivedensemodel, (;), :unavailable, :F_wellconditioned))
+        model = make()
+        rec = NLLSModel.recommendoptimizer(model; numthreads=static(1), kw...)
+        f = rec.features
+        @test f.densejacobian === densejacobian
+        @test rec.rules.formulation === rule
+        @test rec.rules.linsolver !== :L_jacobian_normal && rec.rules.reduction !== :RS_jacobian_dense
+        @test all(NLLSModel.normalequations_tests(f)) == (densejacobian in (:toolarge, :unavailable))
+        text = flat(NLLSModel.formulation_reason(rec))
+        if densejacobian === :toolarge
+            @test f.hessiansystem === :dense && rec.storage === :dense # the Hessian, 3200 bytes, fits
+            @test occursin("the dense Jacobian, 12800 bytes, does not fit max_dense_bytes = 6400", text)
+        elseif densejacobian === :unavailable
+            @test occursin("adaptive", rec.fallback)
+            @test occursin("the dense Jacobian path cannot be built for this model ($(rec.fallback))", text)
+        else
+            @test !occursin("normal equations formed from the Jacobian would cost less", text)
+        end
+    end
+
+    @testset "show: every reason of the normal equations (N2)" begin
+        reason(f; kw...) = flat(f(recby(; kw...)))
+        fire = recfeatures(dimension=20, nresiduals=80, work_hessian=112000.0, work_jacobian=16000.0)
+        @test occursin("is below 1.0e12, the dimension, 20, is above the static system's 16, and building the dense " *
+            "Hessian cost by cost is estimated at 112000.0 multiply-adds against 16000.0 for one product JᵀJ of the 80×20 " *
+            "Jacobian, at least 2.0 times fewer: the Jacobian path, forming the normal equations from J",
+            reason(NLLSModel.formulation_reason; formulation=:jacobian, features=fire))
+        @test occursin("does not fit max_dense_bytes = 6400", reason(NLLSModel.formulation_reason; max_dense_bytes=6400,
+            features=recfeatures(dimension=20, nresiduals=80, work_hessian=112000.0, work_jacobian=16000.0, densejacobian=:toolarge)))
+        @test occursin("12800 bytes", reason(NLLSModel.formulation_reason;
+            features=recfeatures(dimension=20, nresiduals=80, work_hessian=112000.0, work_jacobian=16000.0, densejacobian=:toolarge)))
+        @test occursin("cannot be built for this model (why not)", reason(NLLSModel.formulation_reason; fallback="why not",
+            features=recfeatures(dimension=20, nresiduals=80, work_hessian=112000.0, work_jacobian=16000.0, densejacobian=:unavailable)))
+        @test occursin("Nothing is eliminated, and the Jacobian is stored dense, which the product JᵀJ needs",
+            reason(NLLSModel.reduction_reason; formulation=:jacobian, features=fire))
+        @test occursin("The 80×20 Jacobian is stored dense, with nothing eliminated",
+            reason(NLLSModel.storage_reason; formulation=:jacobian, features=fire))
+        @test occursin("Cholesky of JᵀJ, formed from the Jacobian in one product",
+            reason(NLLSModel.linsolver_reason; formulation=:jacobian, features=fire))
+        # the long form: every line within the width, the thresholds still starting values, the call as printed
+        rec = recby(; formulation=:jacobian, features=fire)
+        text = longform(rec)
+        @test all(line -> textwidth(line) <= 80, split(text, '\n'))
+        @test occursin("The thresholds are starting values", flat(text))
+        @test sprint(show, rec) == "OptimizationRecommendation(formulation = :jacobian, reduction = :none, storage = :dense, linsolver = :cholesky, iterator = :levenbergmarquardt)"
+        _, keywords, optkw = printedcall(rec)
+        @test keywords[:formulation] == QuoteNode(:jacobian) && keywords[:reduction] == QuoteNode(:none) && keywords[:storage] == QuoteNode(:dense)
+        @test optkw[:linsolver] == QuoteNode(:cholesky)
+    end
+
     @testset "keywords are passed on" begin
         model = posechain(8, 12)
         rec = NLLSModel.recommendoptimizer(model; unfixed=[2:8; 10:20], numthreads=1, max_dense_bytes=10^6)

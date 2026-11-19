@@ -20,6 +20,10 @@ const REC_RANK_DAMPINGS = (1e-14, 1e-12, 1e-10) # F: the scaled dampings tried, 
                                       # not factorize, to find the rank test's direction. Starting values, not measured.
 const REC_RANK_REFINEMENTS = 1        # F: refinement steps of that direction with products of the Jacobian. Starting
                                       # value, not measured.
+const REC_HESSIAN_SCATTER = 2.5       # F: the cost of one load-add-store into the Hessian, in multiply-adds, in the
+                                      # Hessian path's work estimate. Starting value, not measured.
+const REC_NORMAL_MARGIN = 2.0         # F: the normal equations from the dense Jacobian only when the Hessian path's work
+                                      # estimate is at least this many times theirs. Starting value, not measured.
 
 # What the recommender measured: the structure, and the probe of the Hessian system at the model's current values.
 # Times are in seconds.
@@ -42,6 +46,12 @@ struct RecommenderFeatures
                               # (the Jacobian path cannot be built for the model)
     rank_damping::Float64     # The scaled damping of the factorization the test used (0 undamped); NaN if it did not run
     rank_t::Float64           # ‖J D^-½ w‖ along the weakest direction w of the scaled Hessian; NaN if it did not run
+    work_hessian::Float64     # Multiply-adds to build the Hessian cost by cost, Σ n_c² (m_c + REC_HESSIAN_SCATTER); NaN
+                              # when a cost is not a residual
+    work_jacobian::Float64    # Multiply-adds of one product JᵀJ of the dense M×N Jacobian, M N² / 2; NaN likewise
+    densejacobian::Symbol     # The dense Jacobian path for the normal equations: :notneeded (tests 1-5 of
+                              # `normalequations_tests` do not all hold), :available, :toolarge (it does not fit
+                              # max_dense_bytes) or :unavailable (optimvars_nls threw; its message is the fallback)
     t_cost::Float64           # One cost evaluation
     t_linearize::Float64      # One linearization (zero! and fdf!)
     t_solve::Float64          # One undamped solve
@@ -60,7 +70,8 @@ struct OptimizationRecommendation{U, N}
     max_dense_bytes::Int
     features::RecommenderFeatures
     rules::NamedTuple{(:formulation, :reduction, :storage, :linsolver, :iterator), NTuple{5, Symbol}} # The rule that fired for each
-    fallback::String          # Why the Jacobian path could not be built, when F's fallback fired; otherwise empty
+    fallback::String          # Why the Jacobian path could not be built, when F's fallback fired or the dense Jacobian
+                              # of the normal equations is :unavailable; otherwise empty
 end
 
 # The Hessian path's system, from the prototype `optimvars` returned with `reduction = storage = :auto`
@@ -107,13 +118,71 @@ needsranktest(allresiduals::Bool, status::SolveStatus, condition::Real) =
     allresiduals && !(status == Success && condition < REC_JACOBIAN_CONDITION)
 needsranktest(f::RecommenderFeatures) = needsranktest(f.allresiduals, f.status, f.condition)
 
-# Rule F, the formulation: the Hessian path when the scaled Hessian is well conditioned. Otherwise the rank test of the
-# Jacobian decides: a numerically rank-deficient J (a gauge freedom) stays on the Hessian path, since factorizing J gains
-# nothing and damping handles it; a full-rank one goes to the Jacobian path, since forming JᵀJ squares its conditioning.
-# Where the test could not run, the Hessian path.
+# The work estimates of the normal-equations decision, in multiply-adds, summed over the costs with their unfixed
+# dimensions: building the Hessian cost by cost, Σ n_c² (m_c + REC_HESSIAN_SCATTER) (each cost's static kernel forms its
+# n_c × n_c block from m_c rows, then scatters it into the Hessian), and one product JᵀJ of the dense M×N Jacobian,
+# M N² / 2 (one triangle). `m_c` is a cost's residual rows, `n_c` the total dimension of its unfixed variables, M and N the
+# totals. Both NaN when a cost is not a residual. The arithmetic only: no threads, and no account of a cost whose Jacobian
+# block is mostly zeros.
+function normalequations_work(model::Model, unfixed)
+    all(v -> eltype(v) <: AbstractResidual, values(model.costs)) || return (NaN, NaN)
+    sizes = unfixedsizes(model, unfixed)
+    work_hessian, M = 0.0, 0
+    for vec in values(model.costs), c in vec
+        m = costrows(c)
+        vinds = varindices(c)
+        n = 0
+        for v in (vinds isa Integer ? (vinds,) : vinds)
+            n += sizes[v]
+        end
+        work_hessian += Float64(n)^2 * (m + REC_HESSIAN_SCATTER)
+        M += m
+    end
+    N = sum(sizes; init=0)
+    return (work_hessian, Float64(M) * Float64(N)^2 / 2)
+end
+
+# The tests of the normal-equations decision (the Jacobian path with the normal equations formed from a dense J), each
+# with whether it passed: every cost a residual; the Hessian well conditioned (the undamped solve succeeded and the
+# condition estimate is below REC_JACOBIAN_CONDITION, so no rank test); the Hessian path's system dense (not static,
+# sparse or eliminated); the dimension above the static system's; and the Hessian path's work at least REC_NORMAL_MARGIN
+# times the product's. The one function says both when the dense Jacobian is probed and when rule F reads the probe.
+normalequations_tests(allresiduals::Bool, status::SolveStatus, condition::Real, hessiansystem::Symbol, dimension::Integer,
+        work_hessian::Real, work_jacobian::Real) = (
+    residuals = allresiduals,
+    wellconditioned = status == Success && condition < REC_JACOBIAN_CONDITION,
+    densesystem = hessiansystem === :dense,
+    dimension = dimension > MAX_STATIC_SYSTEM,
+    work = work_hessian >= REC_NORMAL_MARGIN * work_jacobian,
+)
+normalequations_tests(f::RecommenderFeatures) = normalequations_tests(f.allresiduals, f.status, f.condition,
+    f.hessiansystem, f.dimension, f.work_hessian, f.work_jacobian)
+
+# Whether the dense Jacobian path can be built for the normal equations: it fits max_dense_bytes, and `optimvars_nls`
+# builds it without elimination and with dense storage. Returns (densejacobian, why not or "").
+function densejacobian_probe(model, m::Integer, n::Integer; unfixed, numthreads, max_dense_bytes)
+    densefits(m, n, max_dense_bytes) || return (:toolarge, "")
+    try
+        optimvars_nls(model; unfixed, numthreads, max_dense_bytes, reduction=:none, storage=:dense)
+    catch err
+        err isa ArgumentError || rethrow()
+        return (:unavailable, err.msg)
+    end
+    return (:available, "")
+end
+
+# Rule F, the formulation: the Hessian path when the scaled Hessian is well conditioned, unless the normal equations formed
+# from the dense Jacobian are estimated to cost REC_NORMAL_MARGIN times less (`normalequations_tests`) and that path can be
+# built: then the Jacobian path, with Cholesky of JᵀJ. Otherwise the rank test of the Jacobian decides: a numerically
+# rank-deficient J (a gauge freedom) stays on the Hessian path, since factorizing J gains nothing and damping handles it;
+# a full-rank one goes to the Jacobian path, since forming JᵀJ squares its conditioning. Where the test could not run, the
+# Hessian path.
 function rule_formulation(f::RecommenderFeatures)
     f.allresiduals || return (:hessian, :F_nonresidual)
-    needsranktest(f) || return (:hessian, :F_wellconditioned)
+    if !needsranktest(f)
+        all(normalequations_tests(f)) && f.densejacobian === :available && return (:jacobian, :F_normalequations)
+        return (:hessian, :F_wellconditioned)
+    end
     f.ranktest === :nojacobian && return (:hessian, :F_jacobian_unavailable)
     f.ranktest === :ran || return (:hessian, :F_singular)
     f.rank_t < REC_RANK_TOLERANCE && return (:hessian, :F_rankdeficient)
@@ -291,13 +360,25 @@ function recommendoptimizer(model::Model; unfixed=nothing, numthreads=StaticInt(
             varorder(fdf!, model); unfixed, numthreads, max_dense_bytes)
     end
 
+    # The dense Jacobian of the normal equations, exactly when rule F reads it
+    work_hessian, work_jacobian = normalequations_work(model, conv)
+    densejacobian = :notneeded
+    if all(normalequations_tests(allresiduals, status, condition, kind, n, work_hessian, work_jacobian))
+        densejacobian, fallback = densejacobian_probe(model, m, n; unfixed, numthreads, max_dense_bytes)
+    end
+
     features = RecommenderFeatures(nvariables, n, ncosts, m, allresiduals, kind, retained, eliminated,
-        diag_min, diag_max, diagspread, status, condition, ranktest, rank_damping, rank_t, t_cost, t_linearize, t_solve)
+        diag_min, diag_max, diagspread, status, condition, ranktest, rank_damping, rank_t, work_hessian, work_jacobian,
+        densejacobian, t_cost, t_linearize, t_solve)
 
     # The rules
     formulation, rule_f = rule_formulation(features)
     rule_rs = :RS_hessian
-    if formulation === :jacobian
+    if rule_f === :F_normalequations
+        # The normal equations, formed from the dense Jacobian without elimination
+        reduction, storage, rule_rs = :none, :dense, :RS_jacobian_dense
+        linsolver, rule_l = :cholesky, :L_jacobian_normal
+    elseif formulation === :jacobian
         # The Jacobian path as `:auto` builds it, from the prototype the rank test built
         reduction, storage = jacobianreductionstorage(J_auto)
         linsolver, rule_l = :qr, :L_jacobian
@@ -357,13 +438,31 @@ end
 rank_text(f::RecommenderFeatures) = "along the Hessian's weakest direction the column-scaled Jacobian has norm " *
     "$(fmtnum(f.rank_t)), $(f.rank_t < REC_RANK_TOLERANCE ? "below" : "at least") $(fmtnum(REC_RANK_TOLERANCE))"
 
+# The two work estimates of the normal-equations decision
+work_text(f::RecommenderFeatures) = "building the dense Hessian cost by cost is estimated at $(fmtnum(f.work_hessian)) " *
+    "multiply-adds against $(fmtnum(f.work_jacobian)) for one product JᵀJ of the $(f.nresiduals)×$(f.dimension) Jacobian"
+
+# Why the normal equations from the dense Jacobian were not chosen although its tests passed; "" otherwise
+function densejacobian_text(rec::OptimizationRecommendation)
+    f = rec.features
+    f.densejacobian === :toolarge && return " The normal equations formed from the Jacobian would cost less ($(work_text(f))), " *
+        "but the dense Jacobian, $(8 * f.nresiduals * f.dimension) bytes, does not fit max_dense_bytes = $(rec.max_dense_bytes)."
+    f.densejacobian === :unavailable && return " The normal equations formed from the Jacobian would cost less " *
+        "($(work_text(f))), but the dense Jacobian path cannot be built for this model ($(rec.fallback))."
+    return ""
+end
+
 function formulation_reason(rec::OptimizationRecommendation)
     f = rec.features
     rule = rec.rules.formulation
     rule === :F_nonresidual && return "Some costs are not residuals (AbstractResidual), so the model has no Jacobian: " *
         "the Hessian path is the only one."
     rule === :F_wellconditioned && return "Every cost is a residual, and $(condition_text(f)), is below " *
-        "$(fmtnum(REC_JACOBIAN_CONDITION)): the normal equations are accurate enough."
+        "$(fmtnum(REC_JACOBIAN_CONDITION)): the normal equations are accurate enough." * densejacobian_text(rec)
+    rule === :F_normalequations && return "Every cost is a residual, $(condition_text(f)), is below " *
+        "$(fmtnum(REC_JACOBIAN_CONDITION)), the dimension, $(f.dimension), is above the static system's " *
+        "$(MAX_STATIC_SYSTEM), and $(work_text(f)), at least $(fmtnum(REC_NORMAL_MARGIN)) times fewer: the Jacobian " *
+        "path, forming the normal equations from J."
     rule === :F_rankdeficient && return "Every cost is a residual, and $(illconditioned_text(f)), so the rank of the " *
         "Jacobian decides: $(rank_text(f)), so J is numerically rank-deficient (a gauge freedom, or a J whose own " *
         "condition number is beyond what Float64 resolves). Factorizing J would gain nothing, and damping handles it: the " *
@@ -384,6 +483,8 @@ end
 
 function reduction_reason(rec::OptimizationRecommendation)
     f = rec.features
+    rec.rules.reduction === :RS_jacobian_dense && return "Nothing is eliminated, and the Jacobian is stored dense, which " *
+        "the product JᵀJ needs."
     path = rec.rules.reduction === :RS_jacobian ? "Jacobian" : "Hessian"
     rec.reduction === :eliminate || return "What reduction = :auto builds on the $path path: no variables are eliminated " *
         (f.nvariables == 1 ? "(a single unfixed variable never is)." : "(no eliminable variables, or a structure that does not allow it).")
@@ -395,6 +496,8 @@ end
 
 function storage_reason(rec::OptimizationRecommendation)
     f = rec.features
+    rec.rules.storage === :RS_jacobian_dense && return "The $(f.nresiduals)×$(f.dimension) Jacobian is stored dense, " *
+        "with nothing eliminated, which the product JᵀJ needs."
     if rec.rules.storage === :RS_jacobian
         what = rec.reduction === :eliminate ? "the reduced system" : "the $(f.nresiduals)×$(f.dimension) Jacobian"
         return "What storage = :auto builds on the Jacobian path: $what is stored $(rec.storage)."
@@ -411,6 +514,7 @@ end
 function linsolver_reason(rec::OptimizationRecommendation)
     rule = rec.rules.linsolver
     rule === :L_jacobian && return "QR of the Jacobian, on the Jacobian path."
+    rule === :L_jacobian_normal && return "Cholesky of JᵀJ, formed from the Jacobian in one product."
     rule === :L_nonresidual && return "LDLᵀ: some costs are not residuals, so the Hessian can be indefinite."
     rule === :L_sparse && return "LDLᵀ, which linsolver = :auto uses for a sparse Hessian."
     rule === :L_schur && return "Cholesky of the reduced system (falling back to Bunch-Kaufman), which linsolver = :auto " *

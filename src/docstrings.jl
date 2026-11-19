@@ -495,22 +495,37 @@ The column-scaled `J D^-½` has unit columns, so `t` is an upper bound on its sm
 the Jacobian once, through [`optimvars_nls`](@ref) without elimination; the first such call compiles the Jacobian
 evaluators. Then:
 
-- **Formulation:** `:hessian` when the Hessian is well conditioned, or when a cost is not a residual. Otherwise the rank
+- **Formulation:** `:hessian` when the Hessian is well conditioned, or when a cost is not a residual, except for the
+  normal equations from the Jacobian, below. Otherwise the rank
   test decides: `J` is numerically rank-deficient when `t` is below $(REC_RANK_TOLERANCE) (a gauge freedom, for example),
   which factorizing `J` would not help and damping handles, so `:hessian`; otherwise `J` has full numerical rank, and
   `:jacobian`, since forming `JᵀJ` squares its conditioning. Where the test cannot run, `:hessian`: the Hessian has a
   diagonal entry that is not positive, no damping tried factorizes it (it is indefinite, say), or [`optimvars_nls`](@ref)
   cannot build the model (an unfixed adaptive kernel, for example).
-- **Reduction and storage:** what `:auto` builds, on the formulation's path.
+  *The normal equations from the Jacobian:* `:jacobian` with the normal equations formed from a dense Jacobian when every
+  cost is a residual, the Hessian is well conditioned (no rank test), the Hessian path's system is dense (not static,
+  sparse or eliminated), the dimension is above $(MAX_STATIC_SYSTEM), and building the Hessian cost by cost is estimated
+  to take at least $(REC_NORMAL_MARGIN) times the multiply-adds of one product `JᵀJ`: `Σ n_c² (m_c + $(REC_HESSIAN_SCATTER))`
+  over the costs (`m_c` residual rows, `n_c` unfixed dimensions; $(REC_HESSIAN_SCATTER) stands for one load-add-store into
+  the Hessian) against `M N² / 2` for the `M × N` Jacobian; and the dense Jacobian fits `max_dense_bytes` and
+  [`optimvars_nls`](@ref) builds it.
+- **Reduction and storage:** what `:auto` builds, on the formulation's path; for the normal equations from the Jacobian,
+  `reduction = :none` and `storage = :dense`, which the product needs.
 - **Linear solver:** on the Hessian path, `:cholesky` for a static, dense or eliminated system and `:ldl` for a sparse
   one (what `linsolver = :auto` uses), but `:ldl` whenever a cost is not a residual, since the Hessian can then be
-  indefinite; on the Jacobian path `:qr`.
+  indefinite; on the Jacobian path `:qr`, and `:cholesky` (of `JᵀJ`, formed from the Jacobian in one product) for the
+  normal equations from the Jacobian.
 - **Iterator:** `:dogleg` when the undamped solve succeeded, the condition estimate is below $(REC_DOGLEG_CONDITION), the
   diagonal's spread is below $(REC_DIAGSPREAD) and a solve takes at least as long as a linearization; otherwise
   `:levenbergmarquardt_dtd` when the spread is at least $(REC_DIAGSPREAD); otherwise `:levenbergmarquardt`.
 
-Every threshold is a starting value, not yet measured against benchmarks. The model's variables are not changed. A model
-whose cost, gradient or Hessian is not finite at its current values is an `ArgumentError`.
+Every threshold is a starting value, not yet measured against benchmarks ($(REC_HESSIAN_SCATTER) and $(REC_NORMAL_MARGIN)
+too). The model's variables are not changed. A model whose cost, gradient or Hessian is not finite at its current values
+is an `ArgumentError`.
+
+The two work estimates count arithmetic only: not threads (the Hessian is filled cost by cost on Polyester's threads, the
+product `JᵀJ` by BLAS), and not a cost whose Jacobian block is mostly zeros. The iterator's test of a solve against a
+linearization still reads the Hessian path's times.
 
 The rank test detects a null space of `J`; it is not an estimate of `J`'s condition number. Its known limits: a null
 space together with a remainder whose smallest scaled singular value is below about 1e-7 reads as full rank, and goes to
