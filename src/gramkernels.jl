@@ -270,6 +270,37 @@ end
 end
 @inline gramcostgradhess_lazy(cost, J, r, dc, c2) = (cost, gramgrad(J, r, dc, c2)...)
 
+# The Hessian of an adaptive residual whose kernel is optimized, not formed: kernel parameters first, then variables,
+#     [ Hkk     w gu' ]      Hkk = ½ ∂²ρ/∂θ²,  w = ∂²ρ/∂θ∂s,  gu = J'r
+#     [ gu w'   G     ]      G = dc J'J + c2 gu gu' (a GramLazy)
+# Each entry is computed where it is read; a multi-variable system reads the diagonal blocks and one of the cross blocks.
+struct AdaptiveLazy{T, NK, KT, WT, GT} <: AbstractMatrix{T}
+    Hkk::KT
+    w::WT
+    G::GT
+end
+Base.size(H::AdaptiveLazy{T, NK}) where {T, NK} = (n = NK + size(H.G, 1); (n, n))
+@inline function Base.getindex(H::AdaptiveLazy{T, NK}, i::Int, j::Int) where {T, NK}
+    if i <= NK
+        return j <= NK ? (@inbounds H.Hkk[i, j]) : (@inbounds H.w[i] * H.G.gu[j - NK])
+    end
+    return j <= NK ? (@inbounds H.G.gu[i - NK] * H.w[j]) : (@inbounds H.G[i - NK, j - NK])
+end
+@inline function adaptivelazy(Hkk, w, G)
+    T = eltype(Hkk)
+    return AdaptiveLazy{T, length(w), typeof(Hkk), typeof(w), typeof(G)}(Hkk, w, G)
+end
+# As gramcostgradhess_lazy, with the kernel blocks: the kernel without the rank-1 term chosen by c2's value
+@inline function adaptivecostgradhess_lazy(cost, gk, Hkk, w, J::Union{Adjoint{<:Any, <:StaticVector}, StaticMatrix}, r, dc, c2)
+    T = eltype(J)
+    gu = J' * r
+    g = vcat(gk, dc * gu)
+    if iszero(c2)
+        return cost, g, adaptivelazy(Hkk, w, GramLazy{T, typeof(J), typeof(gu), Nothing}(J, gu, convert(T, dc), nothing))
+    end
+    return cost, g, adaptivelazy(Hkk, w, GramLazy{T, typeof(J), typeof(gu), T}(J, gu, convert(T, dc), convert(T, c2)))
+end
+
 # One row's lazy product into a single-variable system: the lower triangle, each entry computed as it is added
 # (dc u[i] u[j] + c2 gu[i] gu[j]); the system is mirrored once per evaluation (`finish!`). These are methods of
 # `addsys!` rather than of `updatesymlinearsystem!`, so that the latter's method table is unchanged and a run-time
