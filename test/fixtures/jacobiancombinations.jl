@@ -6,7 +6,7 @@ fixture("jacobianelimination")
 
 # (reduction, storage) => (the Jacobian prototype, the linsolver values the optimizer accepts with it)
 const JACOBIAN_TABLE = Dict(
-    (:none, :dense) => (Matrix{Float64}, (:auto, :qr, :lsmr)),
+    (:none, :dense) => (Matrix{Float64}, (:auto, :qr, :cholesky, :ldl, :lsmr)),
     (:none, :sparse) => (SparseMatrixCSC{Float64, Int}, (:auto, :qr, :lsmr)),
     (:eliminate, :dense) => (SchurBlockJacobian{Float64, Matrix{Float64}}, (:auto, :qr, :cholesky, :ldl, :lsmr)),
     (:eliminate, :sparse) => (SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}, (:auto, :qr, :cholesky, :ldl, :lsmr)),

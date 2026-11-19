@@ -34,7 +34,7 @@ end
 const JACOBIAN_FORMULATION_DOC = """
 | `reduction` | `storage` | Jacobian prototype | `linsolver` |
 |:---|:---|:---|:---|
-| no elimination | dense | `Matrix{Float64}` | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
+| no elimination | dense | `Matrix{Float64}` | `:auto`, `:qr`; `:cholesky`, `:ldl` (the normal equations, formed from `J`); `:lsmr` (with Krylov.jl) |
 | no elimination | sparse | `SparseMatrixCSC{Float64, Int}` | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
 | elimination | dense | `SchurBlockJacobian{Float64, Matrix{Float64}}` | `:auto`, `:qr`, `:cholesky`, `:ldl`; `:lsmr` (with Krylov.jl) |
 | elimination | sparse | `SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}` | `:auto`, `:qr`, `:cholesky`, `:ldl`; `:lsmr` (with Krylov.jl) |

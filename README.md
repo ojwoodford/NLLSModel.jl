@@ -55,7 +55,9 @@ matrix the solver receives) and `max_dense_bytes`, and the threading floors `min
 `optimize!(model, options; formulation = :jacobian)` solves the same model from the residual vector and the Jacobian instead of
 the normal equations. Each step is a QR factorization of the Jacobian (dense, or SuiteSparse's sparse QR), or with
 elimination a QR of each eliminated variable's rows and a solve of the reduced problem, so `JᵀJ` is not formed (only the
-reduced system's normal equations, when `linsolver` asks for them) and the conditioning is that of `J`, not its square. Use it when the model is ill conditioned (the normal equations stall above
+reduced system's normal equations, when `linsolver` asks for them) and the conditioning is that of `J`, not its square.
+Without elimination and with a dense Jacobian, `linsolver = :cholesky` or `:ldl` instead forms the normal equations from
+`J` once per linearization: cheaper than QR when there are many more residuals than variables, but with the squared conditioning. Use it when the model is ill conditioned (the normal equations stall above
 the minimum).
 
 ```julia
@@ -66,7 +68,7 @@ What it supports, by the `reduction` and `storage` it ends up with and the `lins
 
 | `reduction` | `storage` | Jacobian prototype | `linsolver` |
 |:---|:---|:---|:---|
-| no elimination | dense | `Matrix{Float64}` | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
+| no elimination | dense | `Matrix{Float64}` | `:auto`, `:qr`; `:cholesky`, `:ldl` (the normal equations, formed from `J`); `:lsmr` (with Krylov.jl) |
 | no elimination | sparse | `SparseMatrixCSC{Float64, Int}` | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
 | elimination | dense | `SchurBlockJacobian{Float64, Matrix{Float64}}` | `:auto`, `:qr`, `:cholesky`, `:ldl`; `:lsmr` (with Krylov.jl) |
 | elimination | sparse | `SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}` | `:auto`, `:qr`, `:cholesky`, `:ldl`; `:lsmr` (with Krylov.jl) |

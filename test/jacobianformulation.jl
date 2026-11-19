@@ -287,10 +287,21 @@ fixture("frontdoor", "jacobianformulation", "jacobianproblems")
 
     @testset "a linsolver the optimizer rejects; gradient descent it accepts" begin
         model = curvefit()
-        # A linsolver not in the table: :cholesky with a plain Jacobian
+        # A linsolver not in the table: :cholesky or :ldl with a sparse Jacobian (a dense one takes them: the normal
+        # equations). That nothing is evaluated first is asserted by jacobiancombinations.jl, for every row of the table
         options = OptimizationOptions(iterator=:levenbergmarquardt, linsolver=:cholesky)
-        err = try optimize!(deepcopy(model), options; formulation=:jacobian, numthreads=static(1)); nothing catch e e end
-        @test err isa ArgumentError
+        for s in (:cholesky, :ldl)
+            err = try
+                optimize!(deepcopy(model), OptimizationOptions(iterator=:levenbergmarquardt, linsolver=s); formulation=:jacobian,
+                    storage=:sparse, reduction=:none, numthreads=static(1))
+                nothing
+            catch e
+                e
+            end
+            @test err isa ArgumentError && occursin("linsolver = :$s is not supported", err.msg)
+        end
+        # with a dense Jacobian it runs
+        @test optimize!(deepcopy(model), options; formulation=:jacobian, storage=:dense, numthreads=static(1)) isa OptimizationResult
         # It is fine for the Hessian formulation
         @test optimize!(deepcopy(model), options; numthreads=static(1)) isa OptimizationResult
         # Gradient descent is accepted on the Jacobian path (SecondOrderOptimization IT2), as on the Hessian one
@@ -304,6 +315,42 @@ fixture("frontdoor", "jacobianformulation", "jacobianproblems")
 
     # Z3: iterators that linearize at the first trial evaluate resjac! at a point that may then be rejected; with the optimizer's
     # current point being model.variables itself, that must not disturb it
+    # N1: the normal equations formed from a dense Jacobian (linsolver = :cholesky or :ldl, no elimination), against the
+    # Hessian path with the same solver: the same final cost, and both converged (rules.md 31)
+    @testset "the normal equations from J (:$s) reach the Hessian path's cost: $name" for s in (:cholesky, :ldl), (name, make) in (
+            ("curve fit, one Vector", () -> curvefit()),
+            ("rotation", () -> rotproblem()),
+            ("rotation, Vector, SVector, Vector", () -> posemodel()),
+            ("HuberKernel (IRLS), curve fit", () -> curvefit(huber=true, outliers=4)),
+            ("HuberKernel (IRLS), mixed variables", () -> posemodel(huber=true)),
+            ("Huber2oKernel (Triggs), curve fit", () -> curvefit(huber=:second, outliers=4)),
+            ("Huber2oKernel (Triggs), mixed variables", () -> posemodel(huber=:second)))
+        model = make()
+        options = OptimizationOptions(iterator=:levenbergmarquardt, linsolver=s, maxiters=200)
+        kw = (; storage=:dense, reduction=:none, numthreads=static(1))
+        @test optimvars_nls(model; kw...)[5] isa Matrix{Float64}
+        solved_hes, rh = optimize(model, options; kw...)
+        solved_jac, rj = optimize(model, options; formulation=:jacobian, kw...)
+        @test isconverged(rh) && isconverged(rj)
+        @test NLLSModel.cost(solved_jac) ≈ NLLSModel.cost(solved_hes) rtol=1e-8 atol=1e-12
+        @test NLLSModel.cost(solved_jac) ≈ rj.bestcost rtol=1e-12
+        @test rj.bestcost < rj.startcost
+    end
+
+    @testset "the normal equations from J (:$s): a single static variable" for s in (:cholesky, :ldl)
+        model, t = singleproblem(SVector{3, Float64}, 3, 7)
+        options = OptimizationOptions(iterator=:levenbergmarquardt, linsolver=s)
+        solved, rj = optimize(model, options; formulation=:jacobian)
+        solved_hes, rh = optimize(model, options)
+        @test isconverged(rj) && isconverged(rh)
+        @test solved.variables[1] ≈ t atol=1e-6
+        @test NLLSModel.cost(solved) ≈ NLLSModel.cost(solved_hes) rtol=1e-8 atol=1e-14
+        m2 = deepcopy(model)
+        r = optimize!(m2, options; formulation=:jacobian)
+        @test m2.variables[1] ≈ t atol=1e-6
+        @test NLLSModel.cost(m2) ≈ r.bestcost atol=1e-12
+    end
+
     @testset "rejected trials with $iterator reach the optimum of :hessian" for (iterator, expect_rejection) in ((:levenbergmarquardt, true), (:levenbergmarquardt_dtd, true), (:dogleg, true), (:newton, false))
         make() = (m = curvefit(outliers=2); m.variables[1] = [0.1, 6.0, -4.0]; m)
         options = OptimizationOptions(iterator=iterator, maxiters=300)

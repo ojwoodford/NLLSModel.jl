@@ -53,7 +53,8 @@ The second method, `optimize!(model, rec)`, takes every choice from an `Optimiza
 - `:hessian` (default): the Hessian (for residuals, the normal equations). Calls [`optimvars`](@ref), wraps the result in a `HessianObjective`, runs
   `SecondOrderOptimization.optimize!` (or `optimize` when the variable to optimize is immutable, a single variable of static
   size) and writes the solution back with [`syncvars!`](@ref).
-- `:jacobian`: the residual vector and the Jacobian (a `JacobianObjective`); the whole `JᵀJ` is never formed.
+- `:jacobian`: the residual vector and the Jacobian (a `JacobianObjective`); the whole `JᵀJ` is never formed, unless
+  `linsolver` is `:cholesky` or `:ldl` with a dense Jacobian and no elimination (the normal equations, formed from `J`).
   Calls [`optimvars_nls`](@ref) with the same keywords and hands its Jacobian prototype to the optimizer, which chooses the
   linear system from it; the table below. Each cost's kernel decides how its rows enter; there is no robust keyword. Every
   cost must be a non-adaptive `AbstractResidual`, with no unfixed adaptive kernel; errors from `optimvars_nls` are

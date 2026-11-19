@@ -66,6 +66,20 @@ fixture("frontdoor", "jacobianformulation", "jacobianproblems")
         end
     end
 
+    # N1: the normal equations from a dense Jacobian, with a threaded evaluation
+    @testset "the normal equations from J (:$s): the same result however many threads" for s in (:cholesky, :ldl)
+        model = posemodel(huber=true)
+        options = OptimizationOptions(iterator=:levenbergmarquardt, linsolver=s, maxiters=200)
+        kw = (; formulation=:jacobian, storage=:dense, reduction=:none, min_work=1)
+        a, ra = optimize(model, options; kw..., numthreads=static(1))
+        b, rb = optimize(model, options; kw..., numthreads=static(Threads.nthreads()))
+        h, rh = optimize(model, options; storage=:dense, reduction=:none, numthreads=static(Threads.nthreads()), min_work=1)
+        @test isconverged(ra) && isconverged(rb)
+        @test NLLSModel.cost(a) ≈ NLLSModel.cost(b) rtol=1e-10
+        @test samevars(a, b; atol=1e-8)
+        @test NLLSModel.cost(b) ≈ NLLSModel.cost(h) rtol=1e-8
+    end
+
     @testset "threads: the same result however many" begin
         model = posemodel()
         a, ra = optimize(model, JacobianOptions; formulation=:jacobian, numthreads=static(1), min_work=1)
