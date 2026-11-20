@@ -256,13 +256,14 @@ fixture("recommender")
             @test s1 == s2 == DampedLinearSolve.Success
             @test x1 == x2
         end
-        @testset "Jacobian path: $name" for (name, make, kw) in (
-                ("dense", () -> linearmodel(scaledjacobian(3, 1 - 1e-13)), (;)),
-                ("sparse", () -> weakchain(60, 1e-14), (;)),
-                ("eliminated, dense", () -> posechain(8, 12), (storage=:dense,)),
-                ("eliminated, sparse", () -> posechain(8, 12), (storage=:sparse,)))
+        # The solver `:auto` names for each kind: QR, but the normal equations (`:cholesky`) for a dense eliminated system
+        @testset "Jacobian path: $name" for (name, make, kw, explicit) in (
+                ("dense", () -> linearmodel(scaledjacobian(3, 1 - 1e-13)), (;), :qr),
+                ("sparse", () -> weakchain(60, 1e-14), (;), :qr),
+                ("eliminated, dense", () -> posechain(8, 12), (storage=:dense,), :cholesky),
+                ("eliminated, sparse", () -> posechain(8, 12), (storage=:sparse,), :qr))
             model = make()
-            s1, x1 = jacobianstep(model, :qr; kw...)
+            s1, x1 = jacobianstep(model, explicit; kw...)
             s2, x2 = jacobianstep(model, :auto; kw...)
             @test s1 == s2 == DampedLinearSolve.Success
             @test x1 == x2
