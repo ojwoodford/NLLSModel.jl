@@ -1,4 +1,5 @@
 using NLLSModel, Test, Static, StaticArrays, Random
+using OptimizationVariableInterface: update
 
 # Composite Simpson's rule for ∫₀ᴿ f(x) dx with `panels` (even) panels
 function simpson(f, R, panels)
@@ -33,3 +34,21 @@ end
 # Central differences, in BigFloat so that rounding plays no part (the kernels are generic in the type of `s`)
 fdiff1(f, x, h) = (f(x + h) - f(x - h)) / (2h)
 fdiff2(f, x, h) = (f(x + h) - 2 * f(x) + f(x - h)) / h^2
+
+# Squared norms at which the kernels' derivatives are checked (Huber's kink, at the width 1 used, is not one of them)
+const KERNEL_FD_COSTS = (0.01, 0.09, 0.49, 1.69, 4.0, 25.0)
+
+# The first and second derivative of robustify(kernel, s) in s, by central differences in BigFloat
+fdcost1(kernel, s) = fdiff1(Base.Fix1(robustify, kernel), big(s), big(1e-20) * max(s, 1))
+fdcost2(kernel, s) = fdiff2(Base.Fix1(robustify, kernel), big(s), big(1e-20) * max(s, 1))
+
+# The gradient and Hessian of robustify(update(kernel, x), s + x[end]) in x at 0, by central differences in BigFloat
+function fdkernel(kernel, s)
+    n = Int(dynamic(NLLSModel.nvars(kernel))) + 1
+    h = big(1e-20)
+    f(x) = robustify(update(kernel, x), s + x[end])
+    e(i) = [j == i ? h : zero(h) for j in 1:n]
+    g = [(f(e(i)) - f(-e(i))) / 2h for i in 1:n]
+    H = [(f(e(i) + e(j)) - f(e(i) - e(j)) - f(-e(i) + e(j)) + f(-e(i) - e(j))) / (4h^2) for i in 1:n, j in 1:n]
+    return g, H
+end

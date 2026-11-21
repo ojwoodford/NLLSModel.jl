@@ -1,7 +1,8 @@
 using NLLSModel, Test, Static, StaticArrays, Random
+using OptimizationVariableInterface: update
 
 include("fixtures/loader.jl")
-fixture("kernelconvention")
+fixture("adaptivecost", "kernelconvention")
 
 # The convention: ρ(s) = −2 log p(r), p a density over r ∈ ℝᵈ and s = ‖r‖²; an adaptive kernel returns it exactly
 @testset "kernelconvention.jl" begin
@@ -16,4 +17,57 @@ fixture("kernelconvention")
         @test_broken fitted[1] ≈ 1.0 rtol=0.03
         @test_broken fitted[2] ≈ 10.0 rtol=0.03
     end
+
+    # Each kernel's derivatives in s against central differences of robustify (in BigFloat, so that rounding plays no
+    # part: an absolute floor of 1e-30 covers a second derivative that is exactly zero)
+    @testset "robustifydcost against finite differences, $name" for (name, kernel, firstorder) in (
+            ("NoRobust", NoRobust(), false), ("Scaled", Scaled(Huber2oKernel(1.0), 2.0), false),
+            ("HuberKernel", HuberKernel(1.0), true), ("Huber2oKernel", Huber2oKernel(1.0), false),
+            ("GemanMcclureKernel", GemanMcclureKernel(0.6), true), ("GemanMcclure2oKernel", GemanMcclure2oKernel(0.6), false),
+            ("ContaminatedGaussian", cgkernel(0.6, 9.0, 0.7, 1), false))
+        @testset "s = $s" for s in KERNEL_FD_COSTS
+            c, d1, d2 = robustifydcost(kernel, s)
+            @test c ≈ robustify(kernel, s)
+            @test d1 ≈ fdcost1(kernel, s) rtol=1e-6
+            if firstorder
+                @test d2 === 0.0 # By design, not the difference
+            else
+                @test d2 ≈ fdcost2(kernel, s) rtol=1e-4 atol=1e-30
+            end
+        end
+    end
+
+    # The kernel's derivatives in its parameters and s against central differences of robustify(update(kernel, x), s + x[end])
+    @testset "robustifydkernel against finite differences, $name" for (name, kernel) in (
+            ("ContaminatedGaussian", cgkernel(0.6, 9.0, 0.7, 1)),)
+        @testset "s = $s" for s in KERNEL_FD_COSTS
+            c, g, H = robustifydkernel(kernel, s)
+            gfd, Hfd = fdkernel(kernel, s)
+            @test c ≈ robustify(kernel, s)
+            @test g ≈ gfd rtol=1e-5
+            @test H ≈ Hfd rtol=1e-3 atol=1e-5
+        end
+    end
+end
+
+@testset "adaptive kernel derivatives (finite differences)" begin
+    res = SimpleResidual(0.7, 2)
+    kernel = ContaminatedGaussian(0.5, 5.0, 0.4)
+    mean = 0.1
+    f(x) = NLLSModel.computecost(res, update(kernel, x, 1), mean + x[4])
+    n = 4
+    h = 1e-5
+    e(i) = SVector{4, Float64}(ntuple(j -> j == i ? 1.0 : 0.0, 4))
+    gfd = [(f(h * e(i)) - f(-h * e(i))) / 2h for i in 1:n]
+    Hfd = [(f(h * e(i) + h * e(j)) - f(h * e(i) - h * e(j)) - f(-h * e(i) + h * e(j)) + f(-h * e(i) - h * e(j))) / 4h^2 for i in 1:n, j in 1:n]
+    # Kernel parameters and variable both optimized
+    c, g, H = NLLSModel.computecostgradhess(static(3), res, kernel, mean)
+    @test c ≈ f(zeros(SVector{4, Float64}))
+    @test g ≈ gfd rtol=1e-5
+    @test H[1:3, 1:3] ≈ Hfd[1:3, 1:3] rtol=1e-3 atol=1e-5   # kernel-kernel block
+    @test H[1:3, 4] ≈ Hfd[1:3, 4] rtol=1e-3 atol=1e-5       # cross block
+    # Kernel only
+    c, g, H = NLLSModel.computecostgradhess(static(1), res, kernel, mean)
+    @test g ≈ gfd[1:3] rtol=1e-5
+    @test H ≈ Hfd[1:3, 1:3] rtol=1e-3 atol=1e-5
 end
