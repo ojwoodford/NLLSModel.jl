@@ -226,5 +226,9 @@ end
 computegradhesshelper(varflags, residual, vars, x) = computecost(residual, updatevars(vars, varflags, x)...)
 
 autorobustifydcost(kernel::AbstractRobustifier, cost) = computehessian(Base.Fix1(robustify, kernel), cost)
-autorobustifydkernel(kernel::AbstractAdaptiveRobustifier, cost::T) where T = computehessian(bindleadingargs(computerobustgradhesshelper, kernel, cost), zeros(SVector{nvars(kernel)+1, T}))
+# The Hessian is returned symmetric, (H + H')/2: ForwardDiff's is symmetric only to rounding
+function autorobustifydkernel(kernel::AbstractAdaptiveRobustifier, cost::T) where T
+    c, g, H = computehessian(bindleadingargs(computerobustgradhesshelper, kernel, cost), zeros(SVector{nvars(kernel)+1, T}))
+    return c, g, (H + H') / 2
+end
 computerobustgradhesshelper(kernel, cost, x) = robustify(update(kernel, x), cost+x[end])

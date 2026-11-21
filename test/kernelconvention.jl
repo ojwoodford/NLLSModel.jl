@@ -113,6 +113,7 @@ fixture("adaptivecost", "kernelconvention")
             @test c ≈ robustify(kernel, s)
             @test g ≈ gfd rtol=1e-5
             @test H ≈ Hfd rtol=1e-3 atol=1e-5
+            @test H == H'
         end
     end
 end
