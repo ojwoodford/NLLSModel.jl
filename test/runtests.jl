@@ -25,7 +25,7 @@ end
 # running on more than one thread. `integration`: the third-party solvers. The full check before a push: all groups on
 # one thread, then `threaded` on four.
 const TEST_GROUPS = (
-    serial = ["imports.jl", "publicapi.jl", "CostStruct.jl", "robust.jl", "dynamicvars.jl", "autodiff.jl", "nonsquaredcost.jl",
+    serial = ["imports.jl", "publicapi.jl", "CostStruct.jl", "robust.jl", "kernelconvention.jl", "dynamicvars.jl", "autodiff.jl", "nonsquaredcost.jl",
         "adaptivecost.jl", "gramkernels.jl", "problemapi.jl", "runtimeblocks.jl", "bigvariable.jl", "optimizeba.jl",
         "optimization.jl", "frontdoor.jl", "jacobiankernels.jl", "jacobianformulation.jl", "jacobiancontract.jl", "jacobianiterators.jl",
         "jacobianalloc.jl", "jacobianelimination.jl", "eliminablesizes.jl", "jacobiancombinations.jl", "NLPModel.jl", "nls_interface.jl",
