@@ -14,9 +14,13 @@ halflog2pi(::Type{T}, D) where T = T(D) * T(0.9189385332046727417803297364056176
     t = a - b
     pos = t >= 0
     e = exp(pos ? -t : t)
-    rho = -2 * ((pos ? a : b) + log1p(e))
-    gamma = pos ? inv(1 + e) : e / (1 + e)
-    return rho, gamma
+    return -2 * ((pos ? a : b) + log1p(e)), responsibility(pos, e)
+end
+# `γ` alone, from `t = a − b`, in the same form: `logistic(t)`
+@inline responsibility(pos::Bool, e) = pos ? inv(1 + e) : e / (1 + e)
+@inline function responsibility(t)
+    pos = t >= 0
+    return responsibility(pos, exp(pos ? -t : t))
 end
 
 struct ContaminatedGaussian{T<:Real, D} <: AbstractAdaptiveRobustifier
@@ -109,33 +113,4 @@ function robustifydkernel(kernel::GaussianPlusUniform{T, D}, cost) where {T, D}
     r_vs = p * iv
     r_ss = -p * iv * iv / 2
     return rho, SVector(r_u, r_v, r_s), SMatrix{3, 3}(r_uu, r_uv, r_us, r_uv, r_vv, r_vs, r_us, r_vs, r_ss)
-end
-
-function optimizekernel(kernel::ContaminatedGaussian{T, D}, squarederrors::Vector{T}, maxiters=10)::ContaminatedGaussian{T, D} where {T, D}
-    # Optimize the parameters of the kernel using Expectation-Maximization algorithm
-    totalsquarederror = sum(squarederrors)
-    oldparams = params(kernel)
-    for iter = 1:maxiters
-        sigma1 = T(0)
-        totalweight = T(0)
-        for err in squarederrors
-            # Expectation step - the first component's responsibility
-            w = last(rhoresponsibility(cgterms(kernel, err)...))
-            # Compute running totals for the Maximization step
-            sigma1 += w * err
-            totalweight += w
-        end
-        # Degenerate responsibilities (all in one component) leave the other component's scale undefined
-        if !(totalweight > 0 && totalweight < length(squarederrors))
-            break
-        end
-        # Complete the Maximization step (computing the optimal distribution parameters) by normalizing by the total weights
-        newparams = SVector(sqrt(sigma1 / totalweight), sqrt((totalsquarederror - sigma1) / (length(squarederrors) - totalweight)), totalweight / length(squarederrors))
-        kernel = ContaminatedGaussian(newparams..., static(D))
-        if isapprox(oldparams, newparams; rtol=1.e-6)
-            break
-        end
-        oldparams = newparams
-    end
-    return kernel
 end

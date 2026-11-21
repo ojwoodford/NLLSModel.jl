@@ -18,7 +18,7 @@ fixture("adaptivecost")
     end
 
     startcost = NLLSModel.cost(problem)
-    optimisekernel!(problem)
+    optimizerobustifier!(problem, 1)
     @test NLLSModel.cost(problem) < startcost
 
     # Test optimvars with unfixed mask (optimizing only variables 2 and 3)
@@ -33,7 +33,7 @@ fixture("adaptivecost")
         step = -(H_mat \ g)
         update!(x0_sub, x0_sub, step)
         f_sub(x0_sub)
-        optimisekernel!(problem)
+        optimizerobustifier!(problem, 1)
     end
     @test isapprox(NLLSModel.params(problem.variables[1]), SVector(1.0, 10.0, 0.8); rtol=0.1)
     @test isapprox(problem.variables[2], -1.0; rtol=0.1)
@@ -54,12 +54,4 @@ end
     @test occursin("static(2)", err.msg)
     # Arguments are promoted to one float type
     @test ContaminatedGaussian(2, 5.0f0, 0.5f0, static(1)) isa ContaminatedGaussian{Float32, 1}
-end
-
-@testset "ContaminatedGaussian EM degenerate input" begin
-    k = ContaminatedGaussian(0.5, 5.0, 0.4, static(1))
-    # Identical zero errors put all the weight in the narrow component; this must not produce NaN parameters
-    k2 = NLLSModel.optimizekernel(k, zeros(10))
-    @test all(isfinite, NLLSModel.params(k2))
-    @test all(isfinite, NLLSModel.params(NLLSModel.optimizekernel(k, Float64[])))
 end

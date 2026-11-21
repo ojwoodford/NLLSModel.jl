@@ -25,9 +25,6 @@ end
 # A ContaminatedGaussian for residuals of length d
 cgkernel(s1, s2, w, d) = ContaminatedGaussian(s1, s2, w, static(d))
 
-# The kernel fitted to squared residual norms `s`. Today's fit.
-fitkernel(kernel, s; maxiters=100) = NLLSModel.optimizekernel(kernel, s, maxiters)
-
 # `n` seeded residuals of length d, a fraction `w` from N(0, σ₁²I) and the rest from N(0, σ₂²I); their squared norms
 function mixturesqnorms(rng, n, d, s1, s2, w)
     return [sum(abs2, (rand(rng) < w ? s1 : s2) .* randn(rng, d)) for _ in 1:n]

@@ -5,7 +5,7 @@ fixture("publicapi")
 
 @testset "Public API" begin
     @test sort(names(NLLSModel)) == PUBLIC_NAMES
-    @test length(PUBLIC_NAMES) == 46
+    @test length(PUBLIC_NAMES) == 48
     @testset "docstring: $name" for name in PUBLIC_NAMES
         @test hasdocstring(NLLSModel, name)
     end

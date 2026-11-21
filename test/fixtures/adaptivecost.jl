@@ -12,11 +12,3 @@ NLLSModel.getvars(res::SimpleResidual, vars::Vector) = (vars[1]::NLLSModel.Conta
 NLLSModel.computeresidual(res::SimpleResidual, mean) = mean - res.data
 NLLSModel.computeresjac(varflags, res::SimpleResidual, mean) = mean - res.data, SVector(one(mean))'
 Base.eltype(::SimpleResidual) = Float64
-
-function optimisekernel!(problem, vars=problem.variables)
-    # Compute the squared errors
-    squarederrors = [NLLSModel.computeresidual(res, vars[res.varind]) ^ 2 for res in get(problem.costs, SimpleResidual)]
-    # Optimize the kernel parameters
-    vars[1] = NLLSModel.optimizekernel(vars[1], squarederrors)
-    return nothing
-end

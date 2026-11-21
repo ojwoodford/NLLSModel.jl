@@ -79,6 +79,8 @@ GemanMcclure2oKernel
 ContaminatedGaussian
 GaussianPlusUniform
 withlogvolume
+optimizerobustifier
+optimizerobustifier!
 ```
 
 ## NLPModels Integration

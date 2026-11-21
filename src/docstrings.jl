@@ -180,6 +180,51 @@ withlogvolume(kernel, log(250.0)) == GaussianPlusUniform(1.0, 0.9, static(2); vo
 withlogvolume
 
 """
+    optimizerobustifier(kernel, s[, logvolume]; maxiters = 10, rtol = 1e-6, wprior = (1.0, 1.0)) -> kernel
+
+Fit an adaptive kernel ([`ContaminatedGaussian`](@ref) or [`GaussianPlusUniform`](@ref)) to the squared residual norms
+`s` (`sᵢ = ‖rᵢ‖²`) by expectation-maximization, and return the fitted kernel, of the same type; `kernel` is the start.
+For a `GaussianPlusUniform`, `logvolume` (of the length of `s`) gives each residual's outlier log volume `log Aᵢ`;
+omitted, every residual uses the kernel's own, which the fitted kernel keeps.
+
+- `maxiters`: the most iterations.
+- `rtol`: stop when the kernel's parameters change by less than this, relatively.
+- `wprior = (α, β)`: a Beta prior on the first component's weight `w`, as pseudo-counts; both finite and at least 1.
+  `(1, 1)` is no prior.
+
+It also stops when the responsibilities are all in one component or a scale would not be finite and positive (all the
+inlier residuals zero, say), returning the kernel it has; an empty `s` returns `kernel`. It allocates nothing.
+
+# Example
+```julia
+using Static
+s = [0.1, 0.5, 2.0, 0.3, 80.0, 0.7, 1.2, 150.0]
+kernel = optimizerobustifier(ContaminatedGaussian(0.5, 5.0, 0.5, static(1)), s)
+```
+"""
+function optimizerobustifier end
+
+"""
+    optimizerobustifier!(model::Model, index; s = Float64[], logvolume = Float64[], maxiters = 10, rtol = 1e-6,
+                         wprior = (1.0, 1.0)) -> cost
+
+Fit the adaptive kernel `model.variables[index]` (a [`ContaminatedGaussian`](@ref) or a [`GaussianPlusUniform`](@ref))
+to the residuals that use it, at the model's current variables, with [`optimizerobustifier`](@ref); write it back, and
+return the model's new [`cost`](@ref). The residuals are the [`AbstractAdaptiveResidual`](@ref)s whose first variable
+is `index`; for a `GaussianPlusUniform` each residual's outlier log volume is that of the kernel its [`getvars`](@ref)
+hands over (see [`withlogvolume`](@ref)). A residual holding a fixed kernel through [`robustkernel`](@ref) is not
+visited. With no residual using the kernel, it is unchanged.
+
+`s` and `logvolume` are buffers, resized to the number of residuals: a caller who keeps them allocates nothing after
+the first call. The other keywords are those of `optimizerobustifier`.
+
+To alternate between fitting the kernel and optimizing the other variables, fix the kernel and fit it in the
+optimizer's callback, with `OptimizationOptions(callbackchangesstate = true)`:
+`callback = (cost, x, data, iteratedata) -> (optimizerobustifier!(model, index; s, logvolume), 0)`.
+"""
+function optimizerobustifier! end
+
+"""
     SimpleError2{V1, V2}(measurement, var1, var2)
 
 Two-variable residual computing `generatemeasurement(v1, v2) - measurement`.

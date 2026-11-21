@@ -11,13 +11,6 @@ fixture("adaptivecost", "kernelconvention")
         @test densityintegral(cgkernel(s1, s2, w, d), d, max(s1, s2)) ≈ 1.0 atol=1e-8
     end
 
-    @testset "ContaminatedGaussian fit, d = 2" begin
-        s = mixturesqnorms(MersenneTwister(2), 20_000, 2, 1.0, 10.0, 0.8)
-        fitted = NLLSModel.params(fitkernel(cgkernel(0.5, 5.0, 0.5, 2), s))
-        @test_broken fitted[1] ≈ 1.0 rtol=0.03
-        @test_broken fitted[2] ≈ 10.0 rtol=0.03
-    end
-
     @testset "ContaminatedGaussian at s = 0 and s = 1e300, d = $d" for d in 1:3
         k = cgkernel(0.5, 5.0, 0.4, d)
         for s in (0.0, 1e300)

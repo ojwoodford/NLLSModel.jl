@@ -54,7 +54,7 @@ export SimpleError2, SimpleError3, SimpleError4, generatemeasurement
 # Robust cost functions & interface
 export AbstractRobustifier, AbstractAdaptiveRobustifier
 export NoRobust, Scaled, HuberKernel, Huber2oKernel, GemanMcclureKernel, GemanMcclure2oKernel, ContaminatedGaussian
-export GaussianPlusUniform, withlogvolume
+export GaussianPlusUniform, withlogvolume, optimizerobustifier, optimizerobustifier!
 export robustkernel, robustify, robustifydcost, robustifydkernel
 
 # Exported abstract types
@@ -103,6 +103,7 @@ include("unroll.jl")
 include("linearsystem.jl")
 include("robust.jl")
 include("robustadaptive.jl")
+include("robustfit.jl")
 include("gramkernels.jl")
 include("residual.jl")
 include("autodiff.jl")
