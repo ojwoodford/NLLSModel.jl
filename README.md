@@ -12,7 +12,7 @@ Nonlinear Least Squares (NLLS) and factor-graph modeling in Julia.
 - **Factor-Graph Problem Representation**: Build bipartite variable-cost graphs with `Model`, `addvariable!`, and `addcost!`.
 - **Heterogeneous Variables & Manifolds**: Mix Euclidean `Float64`, `SVector`, `Vector`, and custom, non-Euclidean manifold types (via `OptimizationVariableInterface.jl`) in a single problem.
 - **Automatic & Analytic Derivatives**: Uses `ForwardDiff.jl` automatically on `computeresidual`, or user-defined analytic Jacobians via `computeresjac`.
-- **Robust M-Estimators**: Built-in `HuberKernel`, `GemanMcclureKernel`, `Scaled`, and adaptive `ContaminatedGaussian`.
+- **Robust M-Estimators**: Built-in `HuberKernel`, `GemanMcclureKernel`, `Scaled`, and the adaptive kernels `ContaminatedGaussian` and `GaussianPlusUniform`, whose parameters can be optimized jointly or fitted to the residuals with `optimizerobustifier!`.
 - **Block-Dense & Block-Sparse Linear Systems**: Uses `DenseBlockLinearSystem` and `SparseBlockLinearSystem` from `BlockLinearSystems.jl` for fast, zero-allocation Hessian assembly.
 - **One-Call Solving**: `optimize!(model, options)` solves a `Model` with `SecondOrderOptimization.jl` and writes the solution back into it (load `SecondOrderOptimization`).
 - **Optimizer-Agnostic Problem Interface**: For advanced use, extract `(f, fdf!, x0, H) = optimvars(problem; unfixed=unfixed, numthreads=numthreads)` for integration with other second order optimizers, such as `Optim.jl`.

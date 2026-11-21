@@ -44,14 +44,21 @@ AbstractAdaptiveResidual
 """
     AbstractRobustifier
 
-Abstract base type for M-estimator loss functions `rho(s)` where `s = ||r||^2`.
+Abstract base type for robust kernels `ρ(s)` of the squared residual norm `s = ‖r‖²`. A residual's cost is `0.5·ρ(s)`.
+The convention is `ρ(s) = −2 log p(r)`, with `p` a density over `r`; a fixed kernel may drop any constant term
+(`NoRobust` is `ρ(s) = s`). A kernel defines [`robustify`](@ref), and may define [`robustifydcost`](@ref) (otherwise
+computed by automatic differentiation).
 """
 AbstractRobustifier
 
 """
     AbstractAdaptiveRobustifier <: AbstractRobustifier
 
-Abstract base type for robustifiers whose shape parameters are optimized during solve.
+Abstract base type for robust kernels with parameters that can be optimized: a variable of the model, the first
+variable of an [`AbstractAdaptiveResidual`](@ref). An adaptive kernel returns `ρ(s) = −2 log p(r)` exactly, with every
+term that depends on its parameters or on the residual length `d`, which it carries (as `static(d)` in its
+constructor; [`addcost!`](@ref) checks it against `nres`). A density can exceed 1, so its cost can be negative. See
+[`ContaminatedGaussian`](@ref) and [`GaussianPlusUniform`](@ref).
 """
 AbstractAdaptiveRobustifier
 
@@ -130,13 +137,24 @@ kernel = GemanMcclure2oKernel(2.0)
 GemanMcclure2oKernel
 
 """
-    ContaminatedGaussian(s1, s2, w)
+    ContaminatedGaussian(s1, s2, w, d::StaticInt)
 
-Adaptive two-component Gaussian mixture robustifier with standard deviations `s1`, `s2` (`s2 > s1 > 0`) and inlier weight `w` in `(0, 1)`.
+Adaptive robust kernel for residuals of length `d`: a mixture of two zero-mean Gaussians of standard deviations `s1` and
+`s2`, with weights `w` and `1 − w`,
+
+`ρ(s) = −2 log(w N_d(s; s1) + (1 − w) N_d(s; s2))`, where `N_d(s; σ) = (2πσ²)^(−d/2) exp(−s/(2σ²))` and `s = ‖r‖²`.
+
+`s1`, `s2` and `w` are the kernel's variables (optimized as `log(1/s1)`, `log(1/s2)` and `logit(w)`); the arguments are
+promoted to one float type. The components are kept in the order given: the density is the same with `(s1, w)` and
+`(s2, 1 − w)` exchanged, so which is the narrow one is the caller's choice. Pass `d` as `static(d)`: it must equal `nres`
+of the residuals that use the kernel, which [`addcost!`](@ref) checks. As `ρ` is `−2 log p` exactly, a cost can be
+negative.
 
 # Example
 ```julia
+using Static
 kernel = ContaminatedGaussian(1.0, 10.0, 0.8, static(1))
+robustify(kernel, 0.5)
 ```
 """
 ContaminatedGaussian
@@ -427,9 +445,12 @@ Computes the robustified squared residual value and its first and second derivat
 function robustifydcost end
 
 """
-    robustifydkernel(kernel::AbstractAdaptiveRobustifier, squared_norm)
+    robustifydkernel(kernel::AbstractAdaptiveRobustifier, squared_norm) -> (rho, gradient, hessian)
 
-Computes derivatives of an adaptive robustifier with respect to both the squared residual norm and the kernel parameters.
+Computes `ρ(s)` and its derivatives with respect to the kernel's parameters followed by `s = ‖r‖²`: the gradient, an
+`SVector` of length `nvars(kernel) + 1`, and the Hessian, a symmetric `SMatrix` of that size, in the same order. The
+parameters are those `update(kernel, x)` steps (for the kernels here, logarithms and logits). Computed by automatic
+differentiation unless the kernel defines it.
 """
 function robustifydkernel end
 

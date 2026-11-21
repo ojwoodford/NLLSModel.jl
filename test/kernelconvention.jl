@@ -202,6 +202,11 @@ fixture("adaptivecost", "kernelconvention")
         end
     end
 
+    @testset "the docstring example of ContaminatedGaussian" begin
+        kernel = ContaminatedGaussian(1.0, 10.0, 0.8, static(1))
+        @test isfinite(robustify(kernel, 0.5))
+    end
+
     @testset "the docstring examples of GaussianPlusUniform and withlogvolume" begin
         kernel = GaussianPlusUniform(1.0, 0.9, static(2); volume = 100.0)
         @test isfinite(robustify(kernel, 0.5))

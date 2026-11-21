@@ -14,7 +14,7 @@ const PUBLIC_NAMES = sort([
 ])
 
 # Removed, not deprecated (rules.md 9)
-const REMOVED_NAMES = [:addresidual!, :isadditive]
+const REMOVED_NAMES = [:addresidual!, :isadditive, :optimizekernel]
 
 # Internal: still defined, no longer exported
 const INTERNAL_NAMES = [
