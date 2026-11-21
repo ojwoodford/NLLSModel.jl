@@ -56,6 +56,61 @@ function robustifydcost(kernel::ContaminatedGaussian, cost)
     return rho, 2 * (gamma * h1 + (1 - gamma) * h2), -2 * gamma * (1 - gamma) * dh * dh
 end
 
+struct GaussianPlusUniform{T<:Real, D} <: AbstractAdaptiveRobustifier
+    invsigma::ZeroToInfScalar{T}   # u = invsigma.logval = log(1/σ)
+    w::ZeroToOneScalar{T}          # the Gaussian's weight; v = w.logit
+    halfinvvar::T                  # exp(2u)/2
+    k::T                           # log(w) + D·u − (D/2)·log 2π
+    log1mw::T                      # log(1 − w)
+    logvolume::T                   # ℓ = log A, the outlier volume
+end
+function GaussianPlusUniform(invsigma::ZeroToInfScalar{T}, w::ZeroToOneScalar{T}, d::StaticInt, logvolume::Real) where T <: Real
+    D = kerneldimension(d)
+    u = invsigma.logval
+    return GaussianPlusUniform{T, D}(invsigma, w, exp(2 * u) / 2, log(w.val) + D * u - halflog2pi(T, D), log(w.comp), convert(T, logvolume))
+end
+GaussianPlusUniform(invsigma::ZeroToInfScalar, w::ZeroToOneScalar, d::Integer, logvolume::Real) = kerneldimension(d)
+function GaussianPlusUniform(sigma::Real, w::Real, d::Union{StaticInt, Integer}; volume::Real)
+    T = float(promote_type(typeof(sigma), typeof(w)))
+    kerneldimension(d)
+    isfinite(volume) && volume > 0 || throw(ArgumentError("The outlier volume of GaussianPlusUniform must be finite and positive (got volume = $volume)"))
+    return GaussianPlusUniform(ZeroToInfScalar{T}(inv(T(sigma))), ZeroToOneScalar{T}(T(w)), d, log(T(volume)))
+end
+nvars(::GaussianPlusUniform) = static(2)
+update(var::GaussianPlusUniform{T, D}, updatevec, start=1) where {T, D} = GaussianPlusUniform(update(var.invsigma, updatevec, start), update(var.w, updatevec, start+1), static(D), var.logvolume)
+params(var::GaussianPlusUniform) = SVector(1.0 / var.invsigma.val, var.w.val)
+kerneldim(::GaussianPlusUniform{T, D}) where {T, D} = D
+withlogvolume(kernel::GaussianPlusUniform{T, D}, logvolume::Real) where {T, D} =
+    GaussianPlusUniform{T, D}(kernel.invsigma, kernel.w, kernel.halfinvvar, kernel.k, kernel.log1mw, convert(T, logvolume))
+
+@inline gputerms(kernel::GaussianPlusUniform, cost) = (kernel.k - cost * kernel.halfinvvar, kernel.log1mw - kernel.logvolume)
+robustify(kernel::GaussianPlusUniform, cost) = first(rhoresponsibility(gputerms(kernel, cost)...))
+function robustifydcost(kernel::GaussianPlusUniform, cost)
+    rho, gamma = rhoresponsibility(gputerms(kernel, cost)...)
+    h = kernel.halfinvvar
+    return rho, 2 * gamma * h, -2 * gamma * (1 - gamma) * h * h
+end
+# The derivatives over (u, v, s): u = log(1/σ), v = logit(w), s = ‖r‖²
+function robustifydkernel(kernel::GaussianPlusUniform{T, D}, cost) where {T, D}
+    rho, gamma = rhoresponsibility(gputerms(kernel, cost)...)
+    iv = 2 * kernel.halfinvvar
+    q = cost * iv
+    p = gamma * (1 - gamma)
+    wv = kernel.w.val
+    Dq = D - q
+    pDq = p * Dq
+    r_u = -2 * gamma * Dq
+    r_v = -2 * (gamma - wv)
+    r_s = gamma * iv
+    r_uu = 4 * gamma * q - 2 * pDq * Dq
+    r_uv = -2 * pDq
+    r_vv = 2 * (kernel.w.val * kernel.w.comp - p)
+    r_us = (2 * gamma + pDq) * iv
+    r_vs = p * iv
+    r_ss = -p * iv * iv / 2
+    return rho, SVector(r_u, r_v, r_s), SMatrix{3, 3}(r_uu, r_uv, r_us, r_uv, r_vv, r_vs, r_us, r_vs, r_ss)
+end
+
 function optimizekernel(kernel::ContaminatedGaussian{T, D}, squarederrors::Vector{T}, maxiters=10)::ContaminatedGaussian{T, D} where {T, D}
     # Optimize the parameters of the kernel using Expectation-Maximization algorithm
     totalsquarederror = sum(squarederrors)

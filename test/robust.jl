@@ -40,4 +40,9 @@ fixture("robust")
     w = 0.7
     out = -2 .* log.((w / s1) * exp.(costs / (-2 * s1^2)) .+ ((1 - w) / s2) * exp.(costs / (-2 * s2^2))) .+ log(2π)
     testrobustifier(ContaminatedGaussian(s1, s2, w, static(1)), costs, out)
+
+    # Gaussian plus uniform (Adaptive kernel), d = 2: −2 log(w N₂(s; σ) + (1 − w)/A)
+    sigma, w, A = 0.8, 0.6, 30.0
+    out = -2 .* log.(w * exp.(costs / (-2 * sigma^2)) / (2π * sigma^2) .+ (1 - w) / A)
+    testrobustifier(GaussianPlusUniform(sigma, w, static(2); volume=A), costs, out)
 end

@@ -54,6 +54,7 @@ export SimpleError2, SimpleError3, SimpleError4, generatemeasurement
 # Robust cost functions & interface
 export AbstractRobustifier, AbstractAdaptiveRobustifier
 export NoRobust, Scaled, HuberKernel, Huber2oKernel, GemanMcclureKernel, GemanMcclure2oKernel, ContaminatedGaussian
+export GaussianPlusUniform, withlogvolume
 export robustkernel, robustify, robustifydcost, robustifydkernel
 
 # Exported abstract types

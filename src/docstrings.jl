@@ -142,6 +142,44 @@ kernel = ContaminatedGaussian(1.0, 10.0, 0.8, static(1))
 ContaminatedGaussian
 
 """
+    GaussianPlusUniform(sigma, w, d::StaticInt; volume)
+
+Adaptive robust kernel for residuals of length `d`: a Gaussian of standard deviation `sigma` and weight `w`, plus a
+uniform outlier density `(1 - w) / A` with `A = volume`,
+
+`ρ(s) = −2 log(w N_d(s; sigma) + (1 − w)/A)`, where `N_d(s; σ) = (2πσ²)^(−d/2) exp(−s/(2σ²))` and `s = ‖r‖²`.
+
+`sigma` and `w` are the kernel's variables (optimized as `log(1/sigma)` and `logit(w)`). The outlier volume `A` is
+supplied, finite and positive, and never optimized; a residual can hand over its own with [`withlogvolume`](@ref). The
+uniform term is not truncated to a region: the kernel sees only `s`. Pass `d` as `static(d)`: it must equal `nres` of the
+residuals that use the kernel, which [`addcost!`](@ref) checks. As `ρ` is `−2 log p` exactly, a cost can be negative.
+
+# Example
+```julia
+using Static
+kernel = GaussianPlusUniform(1.0, 0.9, static(2); volume = 100.0)
+robustify(kernel, 0.5)
+```
+"""
+GaussianPlusUniform
+
+"""
+    withlogvolume(kernel::GaussianPlusUniform, logvolume) -> GaussianPlusUniform
+
+The same kernel with the logarithm of its outlier volume replaced by `logvolume` (converted to the kernel's element
+type): a copy of the fields, of the same concrete type. A residual whose outliers have a volume of their own hands it
+over this way, from `getvars` (an adaptive kernel) or `robustkernel` (a fixed one).
+
+# Example
+```julia
+using Static
+kernel = GaussianPlusUniform(1.0, 0.9, static(2); volume = 100.0)
+withlogvolume(kernel, log(250.0)) == GaussianPlusUniform(1.0, 0.9, static(2); volume = 250.0) # true
+```
+"""
+withlogvolume
+
+"""
     SimpleError2{V1, V2}(measurement, var1, var2)
 
 Two-variable residual computing `generatemeasurement(v1, v2) - measurement`.

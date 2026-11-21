@@ -77,6 +77,8 @@ Huber2oKernel
 GemanMcclureKernel
 GemanMcclure2oKernel
 ContaminatedGaussian
+GaussianPlusUniform
+withlogvolume
 ```
 
 ## NLPModels Integration

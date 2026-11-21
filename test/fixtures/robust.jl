@@ -16,8 +16,8 @@ function testrobustifier(kernel, costs, expected, firstorder=false)
             c, dc, d2c = robustifydkernel(kernel, cost)
             c_, dc_, d2c_ = NLLSModel.autorobustifydkernel(kernel, cost)
             @test c ≈ c_
-            # @test dc ≈ dc_
-            # @test d2c ≈ d2c_
+            @test dc ≈ dc_
+            @test d2c ≈ d2c_
         end
     end
 end

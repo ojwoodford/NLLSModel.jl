@@ -4,13 +4,13 @@ using NLLSModel, Test
 # Adding or dropping an export is a visible change to this list.
 const PUBLIC_NAMES = sort([
     :AbstractAdaptiveResidual, :AbstractAdaptiveRobustifier, :AbstractCost, :AbstractResidual, :AbstractRobustifier,
-    :ContaminatedGaussian, :GemanMcclure2oKernel, :GemanMcclureKernel, :Huber2oKernel, :HuberKernel,
+    :ContaminatedGaussian, :GaussianPlusUniform, :GemanMcclure2oKernel, :GemanMcclureKernel, :Huber2oKernel, :HuberKernel,
     :Model, :NLLSModel, :NLLSNLSModel, :NLPLSModel, :NoRobust, :OptimizationRecommendation, :Scaled,
     :SimpleError2, :SimpleError3, :SimpleError4,
     :addcost!, :addvariable!, :computecost, :computecostgradhess, :computeresidual, :computeresjac,
     :cost, :flat_optimvars_nls, :generatemeasurement, :getvars, :islinear, :ndeps, :nres,
     :optimvars, :optimvars_nls, :recommendoptimizer, :robustify, :robustifydcost, :robustifydkernel, :robustkernel,
-    :subproblem, :subproblem!, :syncvars!, :varindices,
+    :subproblem, :subproblem!, :syncvars!, :varindices, :withlogvolume,
 ])
 
 # Removed, not deprecated (rules.md 9)

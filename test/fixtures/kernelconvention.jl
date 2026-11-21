@@ -99,3 +99,53 @@ function fdcostgradhess(res, kernel, var; withkernel=true, h=1e-5)
     H = [(f(e(i) + e(j)) - f(e(i) - e(j)) - f(-e(i) + e(j)) + f(-e(i) - e(j))) / 4h^2 for i in 1:n, j in 1:n]
     return f(z), g, H
 end
+
+# A GaussianPlusUniform for residuals of length d, with outlier volume A
+gpukernel(sigma, w, d; volume=50.0) = GaussianPlusUniform(sigma, w, static(d); volume)
+
+# An adaptive residual of length 2 on a run-time sized variable (a `Vector`), with a hand-written Jacobian in buffers it
+# owns, so that the Hessian path takes its run-time size (`Matrix` Jacobian) branch
+struct PairAdaptiveDynamic{K} <: NLLSModel.AbstractAdaptiveResidual
+    data::SVector{2, Float64}
+    jac::Matrix{Float64}
+end
+PairAdaptiveDynamic{K}(data) where K = PairAdaptiveDynamic{K}(data, zeros(2, 3))
+NLLSModel.ndeps(::PairAdaptiveDynamic) = static(2)
+NLLSModel.nres(::PairAdaptiveDynamic) = static(2)
+NLLSModel.varindices(::PairAdaptiveDynamic) = SVector(1, 2)
+NLLSModel.getvars(::PairAdaptiveDynamic{K}, vars::Vector) where K = (vars[1]::K, vars[2]::Vector{Float64})
+NLLSModel.computeresidual(r::PairAdaptiveDynamic, x) = SVector(x[1] * x[2], x[3]) - r.data
+function NLLSModel.computeresjac(varflags, r::PairAdaptiveDynamic, x)
+    r.jac[1, 1] = x[2]; r.jac[1, 2] = x[1]; r.jac[1, 3] = 0.0
+    r.jac[2, 1] = 0.0;  r.jac[2, 2] = 0.0;  r.jac[2, 3] = 1.0
+    return NLLSModel.computeresidual(r, x), r.jac
+end
+Base.eltype(::PairAdaptiveDynamic) = Float64
+
+# A residual of length 2 with its own outlier volume, handed to a fixed GaussianPlusUniform through robustkernel
+struct PairVolume{K} <: NLLSModel.AbstractResidual
+    data::SVector{2, Float64}
+    logvolume::Float64
+    kernel::K
+end
+NLLSModel.ndeps(::PairVolume) = static(1)
+NLLSModel.nres(::PairVolume) = static(2)
+NLLSModel.varindices(::PairVolume) = 1
+NLLSModel.getvars(::PairVolume, vars::Vector) = (vars[1]::SVector{2, Float64},)
+NLLSModel.computeresidual(r::PairVolume, x) = x - r.data
+NLLSModel.robustkernel(r::PairVolume) = withlogvolume(r.kernel, r.logvolume)
+Base.eltype(::PairVolume) = Float64
+
+# The evaluations whose allocations are measured (in a function, so that the measurement sees concrete types)
+costgradhess(varflags, res, kernel, var) = NLLSModel.computecostgradhess(varflags, res, kernel, var)
+
+# An adaptive residual of length N, r = x − data, x an SVector{N}
+struct VecAdaptive{N, K} <: NLLSModel.AbstractAdaptiveResidual
+    data::SVector{N, Float64}
+end
+NLLSModel.ndeps(::VecAdaptive) = static(2)
+NLLSModel.nres(::VecAdaptive{N}) where N = static(N)
+NLLSModel.varindices(::VecAdaptive) = SVector(1, 2)
+NLLSModel.getvars(::VecAdaptive{N, K}, vars::Vector) where {N, K} = (vars[1]::K, vars[2]::SVector{N, Float64})
+NLLSModel.computeresidual(r::VecAdaptive, x) = x - r.data
+Base.eltype(::VecAdaptive) = Float64
