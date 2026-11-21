@@ -43,7 +43,7 @@ mutable struct NLLSModelNLP{P, F, FDF, X0, H, VarsBuf, BSZ, HIdx, UInd} <: Abstr
 end
 
 function NLLSModel.NLPLSModel(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction::Symbol=:auto,
-        storage::Symbol=:auto, max_dense_bytes::Integer=NLLSModel.MAX_DENSE_BYTES, min_work::Integer=NLLSModel.MIN_WORK_PER_THREAD_NORMAL,
+        storage::Symbol=:auto, max_dense_bytes::Integer=NLLSModel.MAX_DENSE_BYTES, min_work::Integer=NLLSModel.MIN_WORK_PER_THREAD_HESSIAN,
         min_work_cost::Integer=NLLSModel.MIN_WORK_PER_THREAD_COST, name="NLPLSModel")
     # Never use the Schur path here: the model works on the full (non-reduced) system
     NLLSModel.check_reduction(reduction)
@@ -289,7 +289,7 @@ OptimizationVariableInterface.syncvars!(::Model, nlp::NLLSModelNLP, x::AbstractV
     NLLSModelNLS <: AbstractNLSModel{Float64, Vector{Float64}}
 
 Concrete adapter exposing an `NLLSModel.Model` as an `NLPModels.AbstractNLSModel`.
-Enables native tall NLS solvers such as `JSOSolvers.trunk` and `JSOSolvers.tron`.
+Enables native NLS solvers such as `JSOSolvers.trunk` and `JSOSolvers.tron`.
 Restricted to costs with a linear kernel (`NoRobust`, or `Scaled` with a finite non-negative height).
 """
 mutable struct NLLSModelNLS{P, L, F, RES, RESJAC, J} <: AbstractNLSModel{Float64, Vector{Float64}}
@@ -317,7 +317,7 @@ function NLLSModel.NLLSNLSModel(
     reduction::Symbol = :auto,
     storage::Symbol = :auto,
     max_dense_bytes::Integer = NLLSModel.MAX_DENSE_BYTES,
-    min_work::Integer = NLLSModel.MIN_WORK_PER_THREAD_TALL,
+    min_work::Integer = NLLSModel.MIN_WORK_PER_THREAD_JACOBIAN,
     min_work_cost::Integer = NLLSModel.MIN_WORK_PER_THREAD_COST,
     name::String = "NLLSNLSModel",
 )
@@ -326,7 +326,7 @@ function NLLSModel.NLLSNLSModel(
 
     islinear(flat) || NLLSModel.throw_nonlinear("NLLSNLSModel", problem)
 
-    M = flat.layout_tall.M
+    M = flat.layout_jacobian.M
     N = flat.layout.n
     nnzj = flat.J_proto isa SparseMatrixCSC ? length(flat.J_proto.nzval) : (M * N)
 

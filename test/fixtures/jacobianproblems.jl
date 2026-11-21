@@ -2,7 +2,9 @@ using NLLSModel, Test, Static, StaticArrays, Random, LinearAlgebra
 import OptimizationVariableInterface
 import OptimizationVariableInterface: nvars, update, update!, copyvars
 
-# Test problems shared by tallkernels.jl and tallformulation.jl. Needs Tgt from frontdoor.jl.
+fixture("frontdoor")
+
+# Test problems shared by jacobiankernels.jl and jacobianformulation.jl.
 
 # --- Test problems ---------------------------------------------------------------------------------------------------
 
@@ -86,7 +88,7 @@ end
 NLLSModel.ndeps(::TlAdapt) = static(2)
 NLLSModel.nres(::TlAdapt) = static(1)
 NLLSModel.varindices(r::TlAdapt) = r.varind
-NLLSModel.getvars(r::TlAdapt, vars::Vector) = (vars[r.varind[1]]::ContaminatedGaussian{Float64}, vars[r.varind[2]]::Float64)
+NLLSModel.getvars(r::TlAdapt, vars::Vector) = (vars[r.varind[1]]::ContaminatedGaussian{Float64, 1}, vars[r.varind[2]]::Float64)
 NLLSModel.computeresidual(::TlAdapt, x) = SVector(x - 1.0)
 Base.eltype(::TlAdapt) = Float64
 

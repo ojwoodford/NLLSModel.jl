@@ -22,7 +22,7 @@ import BlockLinearSystems:
     block, zero!, copy_structure,
     symmetrifyfull, symmetrifyfull!, sparse_with_map, copyto!,
     block_sparse_nnz, computestartindices,
-    SchurStructure, SchurBlockHessian, build_schur_pattern, sort_schur_blocks,
+    SchurStructure, SchurBlockHessian, build_schur_pattern,
     threadargs, fromthreadargs
 
 import OptimizationVariableInterface:
@@ -31,6 +31,7 @@ import OptimizationVariableInterface:
 
 import FastNorm: sqnorm
 import SIRBSDispatch: sirbsdispatch
+using DampedLinearSolve: DampedLinearSolve, makehessiansystem, dampen!, solve!, getdiag!, isfinitesystem, SolveStatus, Success
 
 # Export NLLSModel public interface
 # Problem construction & evaluation
@@ -38,6 +39,9 @@ export Model, NLPLSModel, NLLSNLSModel
 export addvariable!, addcost!, subproblem, subproblem!
 export cost, optimvars, optimvars_nls, flat_optimvars_nls, syncvars!
 export islinear
+
+# Choosing how to solve a model
+export recommendoptimizer, OptimizationRecommendation
 
 # Cost and residual types & definition interface
 export AbstractCost, AbstractResidual, AbstractAdaptiveResidual
@@ -50,6 +54,7 @@ export SimpleError2, SimpleError3, SimpleError4, generatemeasurement
 # Robust cost functions & interface
 export AbstractRobustifier, AbstractAdaptiveRobustifier
 export NoRobust, Scaled, HuberKernel, Huber2oKernel, GemanMcclureKernel, GemanMcclure2oKernel, ContaminatedGaussian
+export GaussianPlusUniform, withlogvolume, optimizerobustifier, optimizerobustifier!
 export robustkernel, robustify, robustifydcost, robustifydkernel
 
 # Exported abstract types
@@ -98,6 +103,7 @@ include("unroll.jl")
 include("linearsystem.jl")
 include("robust.jl")
 include("robustadaptive.jl")
+include("robustfit.jl")
 include("gramkernels.jl")
 include("residual.jl")
 include("autodiff.jl")
@@ -107,7 +113,8 @@ include("schurthreading.jl")
 include("keywords.jl")
 include("flatvars.jl")
 include("optimize.jl")
-include("tall_system.jl")
+include("jacobian_system.jl")
+include("recommender.jl")
 include("docstrings.jl")
 
 end # module NLLSModel

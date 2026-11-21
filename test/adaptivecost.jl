@@ -1,30 +1,13 @@
 using NLLSModel, Test, Static, StaticArrays, Random
 using OptimizationVariableInterface: update!, update
 
-struct SimpleResidual <: NLLSModel.AbstractAdaptiveResidual
-    data::Float64
-    varind::Int
-end
-NLLSModel.ndeps(::SimpleResidual) = static(2)
-NLLSModel.nres(::SimpleResidual) = static(1)
-NLLSModel.varindices(res::SimpleResidual) = SVector(1, res.varind)
-NLLSModel.getvars(res::SimpleResidual, vars::Vector) = (vars[1]::NLLSModel.ContaminatedGaussian{Float64}, vars[res.varind]::Float64)
-NLLSModel.computeresidual(res::SimpleResidual, mean) = mean - res.data
-NLLSModel.computeresjac(varflags, res::SimpleResidual, mean) = mean - res.data, SVector(one(mean))'
-Base.eltype(::SimpleResidual) = Float64
-
-function optimisekernel!(problem, vars=problem.variables)
-    # Compute the squared errors
-    squarederrors = [NLLSModel.computeresidual(res, vars[res.varind]) ^ 2 for res in get(problem.costs, SimpleResidual)]
-    # Optimize the kernel parameters
-    vars[1] = NLLSModel.optimizekernel(vars[1], squarederrors)
-    return nothing
-end
+include("fixtures/loader.jl")
+fixture("adaptivecost", "robustfit")
 
 @testset "adaptivecost.jl" begin
     # Create the problem
-    problem = Model(Union{NLLSModel.ContaminatedGaussian{Float64}, Float64}, SimpleResidual)
-    NLLSModel.addvariable!(problem, ContaminatedGaussian(0.5, 5.0, 0.4))
+    problem = Model(Union{NLLSModel.ContaminatedGaussian{Float64, 1}, Float64}, SimpleResidual)
+    NLLSModel.addvariable!(problem, ContaminatedGaussian(0.5, 5.0, 0.4, static(1)))
     NLLSModel.addvariable!(problem, 0.)
     NLLSModel.addvariable!(problem, 0.)
     Random.seed!(1)
@@ -35,7 +18,7 @@ end
     end
 
     startcost = NLLSModel.cost(problem)
-    optimisekernel!(problem)
+    optimizerobustifier!(problem, 1)
     @test NLLSModel.cost(problem) < startcost
 
     # Test optimvars with unfixed mask (optimizing only variables 2 and 3)
@@ -50,7 +33,7 @@ end
         step = -(H_mat \ g)
         update!(x0_sub, x0_sub, step)
         f_sub(x0_sub)
-        optimisekernel!(problem)
+        optimizerobustifier!(problem, 1)
     end
     @test isapprox(NLLSModel.params(problem.variables[1]), SVector(1.0, 10.0, 0.8); rtol=0.1)
     @test isapprox(problem.variables[2], -1.0; rtol=0.1)
@@ -58,37 +41,45 @@ end
 end
 
 @testset "ContaminatedGaussian construction" begin
-    @test NLLSModel.params(ContaminatedGaussian(2.0, 5.0, 0.9)) ≈ SVector(2.0, 5.0, 0.9)
-    # Parameters are reordered so the first Gaussian is the narrowest
-    @test NLLSModel.params(ContaminatedGaussian(5.0, 2.0, 0.1)) ≈ SVector(2.0, 5.0, 0.9)
+    @test NLLSModel.params(ContaminatedGaussian(2.0, 5.0, 0.9, static(1))) ≈ SVector(2.0, 5.0, 0.9)
+    # The parameters are kept in the order given, and the density is symmetric under exchanging the components
+    @test NLLSModel.params(ContaminatedGaussian(5.0, 2.0, 0.1, static(1))) ≈ SVector(5.0, 2.0, 0.1)
+    for d in 1:3, s in (0.0, 0.3, 4.0, 60.0)
+        @test robustify(ContaminatedGaussian(2.0, 5.0, 0.9, static(d)), s) ≈ robustify(ContaminatedGaussian(5.0, 2.0, 0.1, static(d)), s)
+    end
+    # d is a StaticInt of at least 1
+    @test_throws ArgumentError ContaminatedGaussian(2.0, 5.0, 0.9, 1)
+    @test_throws ArgumentError ContaminatedGaussian(2.0, 5.0, 0.9, static(0))
+    err = try ContaminatedGaussian(2.0, 5.0, 0.9, 2); nothing catch e e end
+    @test occursin("static(2)", err.msg)
+    # Arguments are promoted to one float type
+    @test ContaminatedGaussian(2, 5.0f0, 0.5f0, static(1)) isa ContaminatedGaussian{Float32, 1}
 end
 
-@testset "adaptive kernel derivatives (finite differences)" begin
-    res = SimpleResidual(0.7, 2)
-    kernel = ContaminatedGaussian(0.5, 5.0, 0.4)
-    mean = 0.1
-    f(x) = NLLSModel.computecost(res, update(kernel, x, 1), mean + x[4])
-    n = 4
-    h = 1e-5
-    e(i) = SVector{4, Float64}(ntuple(j -> j == i ? 1.0 : 0.0, 4))
-    gfd = [(f(h * e(i)) - f(-h * e(i))) / 2h for i in 1:n]
-    Hfd = [(f(h * e(i) + h * e(j)) - f(h * e(i) - h * e(j)) - f(-h * e(i) + h * e(j)) + f(-h * e(i) - h * e(j))) / 4h^2 for i in 1:n, j in 1:n]
-    # Kernel parameters and variable both optimized
-    c, g, H = NLLSModel.computecostgradhess(static(3), res, kernel, mean)
-    @test c ≈ f(zeros(SVector{4, Float64}))
-    @test g ≈ gfd rtol=1e-5
-    @test H[1:3, 1:3] ≈ Hfd[1:3, 1:3] rtol=1e-3 atol=1e-5   # kernel-kernel block
-    @test H[1:3, 4] ≈ Hfd[1:3, 4] rtol=1e-3 atol=1e-5       # cross block
-    # Kernel only
-    c, g, H = NLLSModel.computecostgradhess(static(1), res, kernel, mean)
-    @test g ≈ gfd[1:3] rtol=1e-5
-    @test H ≈ Hfd[1:3, 1:3] rtol=1e-3 atol=1e-5
+@testset "alternation from a callback, Hessian path, $(nameof(typeof(kernel))), $iterator, $nvar unfixed" for
+        kernel in (ContaminatedGaussian(0.5, 5.0, 0.5, static(2)), GaussianPlusUniform(0.5, 0.5, static(2); volume=1600.0)),
+        iterator in (:levenbergmarquardt, :dogleg), nvar in (2, 1)
+    model, truths = alternationmodel(kernel; nvar)
+    result, given, before, returned = alternate!(model, OptimizationOptions(; iterator, callbackchangesstate=true); formulation=:hessian)
+    @test isapprox(NLLSModel.params(model.variables[1]), alternationtruth(kernel); rtol=0.1)
+    for (i, m) in enumerate(truths)
+        @test isapprox(model.variables[i + 1], m; rtol=0.1)
+    end
+    @test !isempty(returned) && all(diff(returned) .<= 0) # The costs the callback returns never increase
+    @test given ≈ before rtol=1e-12 # At the callback the model holds the point the optimizer evaluated (to rounding: two sums)
 end
 
-@testset "ContaminatedGaussian EM degenerate input" begin
-    k = ContaminatedGaussian(0.5, 5.0, 0.4)
-    # Identical zero errors put all the weight in the narrow component; this must not produce NaN parameters
-    k2 = NLLSModel.optimizekernel(k, zeros(10))
-    @test all(isfinite, NLLSModel.params(k2))
-    @test all(isfinite, NLLSModel.params(NLLSModel.optimizekernel(k, Float64[])))
+@testset "a callback that changes the cost needs callbackchangesstate" begin
+    model, _ = alternationmodel(GaussianPlusUniform(0.5, 0.5, static(2); volume=1600.0))
+    err = try alternate!(model, OptimizationOptions(); formulation=:hessian); nothing catch e e end
+    @test err isa ArgumentError && occursin("callbackchangesstate", err.msg)
+end
+
+@testset "joint optimization of a GaussianPlusUniform and the variables, Hessian path" begin
+    model, truths = alternationmodel(GaussianPlusUniform(1.1, 0.75, static(2); volume=1600.0); start=SVector(0.1, -0.1))
+    result = optimize!(model, OptimizationOptions(maxiters=200); numthreads=static(1))
+    @test isapprox(NLLSModel.params(model.variables[1]), SVector(1.0, 0.8); rtol=0.1)
+    for (i, m) in enumerate(truths)
+        @test isapprox(model.variables[i + 1], m; rtol=0.1)
+    end
 end

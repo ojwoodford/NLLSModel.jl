@@ -112,22 +112,20 @@ function computerescostgradhess_static(varflags, kernel, res, jac, sqres)
     if varflags & 1 == 0
         # The kernel is not optimized. Differentiate w.r.t. the cost only
         cost, dc, d2c = robustifydcost(kernel, sqres)
-        g, H = gramgrad(jac, res, dc, gram_c2(dc, d2c, sqres))
-        return 0.5 * Float64(cost), g, H
+        return gramcostgradhess_lazy(0.5 * Float64(cost), jac, res, dc, gram_c2(dc, d2c, sqres))
     end
 
     # Differentiate w.r.t. the cost and kernel parameters
     cost, dc_, d2c_ = robustifydkernel(kernel, sqres)
     @inbounds dc = dc_[end]
     @inbounds d2c = d2c_[end,end]
-    g, H = gramgrad(jac, res, dc, gram_c2(dc, d2c, sqres))
-
-    # Compute the d^2/dkernel.dvariables block (from the unweighted gradient) and add on the kernel derivative blocks
+    # The kernel blocks: the kernel parameters' gradient and Hessian, and their mixed derivatives with the cost; the
+    # Hessian is returned lazily (AdaptiveLazy), with the d^2/dkernel.dvariables block computed from J'r where read
     kernelvarind = SR(1, nvars(kernel))
-    @inbounds dkdv = (jac' * res) * view(d2c_, kernelvarind, nvars(kernel)+1)'
-    @inbounds g = vcat(0.5 * view(dc_, kernelvarind), g)
-    @inbounds H = hcat(vcat(0.5 * view(d2c_, kernelvarind, kernelvarind), dkdv), vcat(dkdv', H))
-    return 0.5 * Float64(cost), g, H
+    @inbounds gk = 0.5 * SVector(view(dc_, kernelvarind))
+    @inbounds Hkk = 0.5 * SMatrix(view(d2c_, kernelvarind, kernelvarind))
+    @inbounds w = SVector(view(d2c_, kernelvarind, nvars(kernel)+1))
+    return adaptivecostgradhess_lazy(0.5 * Float64(cost), gk, Hkk, w, jac, res, dc, gram_c2(dc, d2c, sqres))
 end
 
 # Dynamic Jacobians: `gramgrad!` into per-task buffers (the kernel is evaluated before the products)

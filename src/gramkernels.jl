@@ -228,3 +228,114 @@ function gramgrad(J, r, dc, c2)
     end
     return g, H
 end
+
+# ---- The product returned lazily ----
+# dc * J'J + c2 * gu gu' of one cost, not formed: an `AbstractMatrix` whose entries are computed where they are read, so
+# every existing accumulation (broadcasts, BlockLinearSystems' `addblock!`) computes each entry as it adds it. A
+# single-variable system has methods of its own that add one triangle with `muladd` (`addsys!`).
+# `c2` is `nothing` when it is zero, and that kernel has no rank-1 term at all.
+struct GramLazy{T, JT, GT, CT <: Union{T, Nothing}} <: AbstractMatrix{T}
+    J::JT  # M × n: the adjoint of an SVector (one row), an SMatrix, or a Matrix
+    gu::GT # J' r, unweighted
+    dc::T
+    c2::CT
+end
+# The rank-1 term: column j's weight, and entry i of column j added to `a`
+@inline c2col(H::GramLazy{<:Any, <:Any, <:Any, Nothing}, j) = nothing
+@inline c2col(H::GramLazy, j) = @inbounds H.c2 * H.gu[j]
+@inline addc2(H, i, ::Nothing, a) = a
+@inline addc2(H, i, gj, a) = @inbounds muladd(H.gu[i], gj, a)
+Base.size(G::GramLazy) = (size(G.J, 2), size(G.J, 2))
+@inline function Base.getindex(G::GramLazy{T}, i::Int, j::Int) where T
+    J = G.J
+    s = zero(T)
+    @inbounds for k in 1:size(J, 1)
+        s = muladd(J[k, i], J[k, j], s)
+    end
+    return addc2(G, i, c2col(G, j), G.dc * s)
+end
+
+# The lazy form for the Jacobians it covers, returned with the cost as (cost, g, H); any other Jacobian is formed as
+# before. The kernel is chosen by c2's value: where the robust kernel returns a constant zero second derivative (no
+# kernel, a first-order one), constant propagation folds `iszero(c2)` and only the kernel without the rank-1 term is
+# compiled; otherwise the test is made per cost. Each arm returns its whole result, so a run-time choice is a small union
+# of isbits tuples, returned unboxed and split at `gradhesshelper!`'s barrier (a union inside one tuple would be boxed).
+@inline function gramcostgradhess_lazy(cost, J::Union{Adjoint{<:Any, <:StaticVector}, StaticMatrix}, r, dc, c2)
+    T = eltype(J)
+    gu = J' * r
+    if iszero(c2)
+        return cost, dc * gu, GramLazy{T, typeof(J), typeof(gu), Nothing}(J, gu, convert(T, dc), nothing)
+    end
+    return cost, dc * gu, GramLazy{T, typeof(J), typeof(gu), T}(J, gu, convert(T, dc), convert(T, c2))
+end
+@inline gramcostgradhess_lazy(cost, J, r, dc, c2) = (cost, gramgrad(J, r, dc, c2)...)
+
+# The Hessian of an adaptive residual whose kernel is optimized, not formed: kernel parameters first, then variables,
+#     [ Hkk     w gu' ]      Hkk = ½ ∂²ρ/∂θ²,  w = ∂²ρ/∂θ∂s,  gu = J'r
+#     [ gu w'   G     ]      G = dc J'J + c2 gu gu' (a GramLazy)
+# Each entry is computed where it is read; a multi-variable system reads the diagonal blocks and one of the cross blocks.
+struct AdaptiveLazy{T, NK, KT, WT, GT} <: AbstractMatrix{T}
+    Hkk::KT
+    w::WT
+    G::GT
+end
+Base.size(H::AdaptiveLazy{T, NK}) where {T, NK} = (n = NK + size(H.G, 1); (n, n))
+@inline function Base.getindex(H::AdaptiveLazy{T, NK}, i::Int, j::Int) where {T, NK}
+    if i <= NK
+        return j <= NK ? (@inbounds H.Hkk[i, j]) : (@inbounds H.w[i] * H.G.gu[j - NK])
+    end
+    return j <= NK ? (@inbounds H.G.gu[i - NK] * H.w[j]) : (@inbounds H.G[i - NK, j - NK])
+end
+@inline function adaptivelazy(Hkk, w, G)
+    T = eltype(Hkk)
+    return AdaptiveLazy{T, length(w), typeof(Hkk), typeof(w), typeof(G)}(Hkk, w, G)
+end
+# As gramcostgradhess_lazy, with the kernel blocks: the kernel without the rank-1 term chosen by c2's value
+@inline function adaptivecostgradhess_lazy(cost, gk, Hkk, w, J::Union{Adjoint{<:Any, <:StaticVector}, StaticMatrix}, r, dc, c2)
+    T = eltype(J)
+    gu = J' * r
+    g = vcat(gk, dc * gu)
+    if iszero(c2)
+        return cost, g, adaptivelazy(Hkk, w, GramLazy{T, typeof(J), typeof(gu), Nothing}(J, gu, convert(T, dc), nothing))
+    end
+    return cost, g, adaptivelazy(Hkk, w, GramLazy{T, typeof(J), typeof(gu), T}(J, gu, convert(T, dc), convert(T, c2)))
+end
+
+# One row's lazy product into a single-variable system: the lower triangle, each entry computed as it is added
+# (dc u[i] u[j] + c2 gu[i] gu[j]); the system is mirrored once per evaluation (`finish!`). These are methods of
+# `addsys!` rather than of `updatesymlinearsystem!`, so that the latter's method table is unchanged and a run-time
+# dispatch on it (the run-time-size autodiff path) stays fast.
+function addsys!(b, A, g, H::GramLazy{T, <:Adjoint}) where T
+    u = parent(H.J)
+    n = length(b)
+    @inbounds @simd for i in 1:n
+        b[i] += g[i]
+    end
+    @inbounds for j in 1:n
+        uj = H.dc * u[j]
+        gj = c2col(H, j)
+        @simd for i in j:n
+            A[i, j] = muladd(u[i], uj, addc2(H, i, gj, A[i, j]))
+        end
+    end
+end
+
+# Several rows into a single-variable system: the lower triangle, column j's weighted entries held while the column is added
+function addsys!(b, A, g, H::GramLazy{T, <:StaticMatrix}) where T
+    J = H.J
+    M, n = size(J)
+    @inbounds @simd for i in 1:n
+        b[i] += g[i]
+    end
+    @inbounds for j in 1:n
+        wj = ntuple(k -> H.dc * J[k, j], Val(M))
+        gj = c2col(H, j)
+        @simd for i in j:n
+            s = addc2(H, i, gj, A[i, j])
+            for k in 1:M
+                s = muladd(J[k, i], wj[k], s)
+            end
+            A[i, j] = s
+        end
+    end
+end

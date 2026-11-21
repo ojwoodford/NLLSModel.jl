@@ -1,44 +1,52 @@
 using Test
-using OptimizationVariableInterface: nvars, update, update!
 
-# Allocation checks (rules.md 21). `allocs_warm(f, args...)`: the bytes of one call of `f(args...)` after two warm calls,
-# measured in a function barrier so that `@allocated` sees concrete types. On Julia 1.10 a call on a value of
-# non-inferred type (a destructured `optimvars` result, a testset local) boxes, and `@allocated` would count that too.
-allocs_warm(f::F, args::Vararg{Any, N}) where {F, N} = (f(args...); f(args...); @allocated f(args...))
-# rules.md 21's 1.10 exception, as BlockLinearSystems' test/runtests.jl states it (the same name and bound): a threaded call
-# may allocate up to 2 048 bytes per thread on 1.10, nothing on later versions. `threaded`: whether the call took the
-# threaded path.
-threaded_allocs_ok(bytes, threaded=Threads.nthreads() > 1) =
-    bytes == 0 || (VERSION < v"1.11" && threaded && bytes <= 2048 * Threads.nthreads())
+# Each test file is included through `timed_include`, which logs its wall time and compile time in seconds
+# (`compile_time` is reported by `@timed` from Julia 1.11; NaN before) and keeps them for a table at the end.
+const FILE_TIMES = Tuple{String, Float64, Float64}[]
+function timed_include(f)
+    s = @timed include(f)
+    compile = hasproperty(s, :compile_time) ? s.compile_time : NaN
+    push!(FILE_TIMES, (f, s.time, compile))
+    @info f time = round(s.time; digits = 1) compile = round(compile; digits = 1)
+    return nothing
+end
 
-@testset "NLLSModel Tests" begin
-    include("imports.jl")
-    include("publicapi.jl")
-    include("CostStruct.jl")
-    include("robust.jl")
-    include("dynamicvars.jl")
-    include("autodiff.jl")
-    include("nonsquaredcost.jl")
-    include("adaptivecost.jl")
-    include("multithreading.jl")
-    include("gramkernels.jl")
-    include("problemapi.jl")
-    include("runtimeblocks.jl")
-    include("bigvariable.jl")
-    include("optimizeba.jl")
-    include("optimization.jl")
-    include("frontdoor.jl")
-    include("tallproblems.jl")
-    include("tallkernels.jl")
-    include("tallformulation.jl")
-    include("manyvariables.jl")
-    include("tallcontract.jl")
-    include("talliterators.jl")
-    include("tallalloc.jl")
-    include("tallelimination.jl")
-    include("eliminablesizes.jl")
-    include("tallcombinations.jl")
-    include("NLPModel.jl")
-    include("nls_interface.jl")
-    include("keywords.jl")
+function print_file_times()
+    println("\nSeconds per test file (Julia ", VERSION, ", ", Threads.nthreads(), " thread(s)): total, compile")
+    for (f, t, c) in FILE_TIMES
+        println(rpad(f, 40), lpad(round(t; digits = 1), 8), lpad(round(c; digits = 1), 8))
+    end
+    println(rpad("total", 40), lpad(round(sum(x -> x[2], FILE_TIMES; init = 0.0); digits = 1), 8),
+            lpad(round(sum(x -> x[3], FILE_TIMES; init = 0.0); digits = 1), 8))
+end
+
+# Test groups, chosen by name in ARGS (`Pkg.test(test_args = ["serial"])`, or ARGS set before including this file); all
+# of them when ARGS is empty. `threaded`: the tests whose behaviour depends on the thread count, the only ones that need
+# running on more than one thread. `integration`: the third-party solvers. The full check before a push: all groups on
+# one thread, then `threaded` on four.
+const TEST_GROUPS = (
+    serial = ["imports.jl", "publicapi.jl", "CostStruct.jl", "robust.jl", "kernelconvention.jl", "dynamicvars.jl", "autodiff.jl", "nonsquaredcost.jl",
+        "adaptivecost.jl", "robustfit.jl", "gramkernels.jl", "problemapi.jl", "runtimeblocks.jl", "bigvariable.jl", "optimizeba.jl",
+        "optimization.jl", "frontdoor.jl", "jacobiankernels.jl", "jacobianformulation.jl", "jacobiancontract.jl", "jacobianiterators.jl",
+        "jacobianalloc.jl", "jacobianelimination.jl", "eliminablesizes.jl", "jacobiancombinations.jl", "NLPModel.jl", "nls_interface.jl",
+        "keywords.jl", "recommender.jl"],
+    threaded = ["multithreading.jl", "gramkernels_threaded.jl", "runtimeblocks_threaded.jl", "optimization_threaded.jl",
+        "frontdoor_threaded.jl", "jacobianformulation_threaded.jl", "manyvariables.jl", "jacobianalloc_threaded.jl",
+        "jacobianelimination_threaded.jl", "eliminablesizes_threaded.jl", "nls_interface_threaded.jl", "keywords_threaded.jl"],
+    integration = ["nls_integration.jl"],
+)
+const SELECTED_GROUPS = isempty(ARGS) ? collect(keys(TEST_GROUPS)) : Symbol.(ARGS)
+for g in SELECTED_GROUPS
+    haskey(TEST_GROUPS, g) || error("unknown test group $g; the groups are $(join(keys(TEST_GROUPS), ", "))")
+end
+
+# The table is printed even when a test fails
+try
+@testset "NLLSModel Tests" verbose = true begin
+    for g in SELECTED_GROUPS, f in TEST_GROUPS[g]
+        timed_include(f)
+    end
+end
+finally
+    print_file_times()
 end

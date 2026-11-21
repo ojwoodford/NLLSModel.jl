@@ -21,13 +21,13 @@ end
 @inline computecost(vars::AbstractVector, cost::AbstractCost)::Float64 = computecost(cost, getvars(cost, vars)...)
 
 function gradhesshelper!(linsystem, cost::AbstractCost, vars, blockind, varflags::StaticInt)::Float64
-    # Compute the residual
-    c, g, H = computecostgradhess(varflags, cost, vars...)
-    
-    # Update the blocks in the problem
+    # Compute the cost, gradient and Hessian, and add them to the system. The result is handed over whole (a function
+    # barrier): where it is not inferred (run-time sizes), a union of possible result types split here costs a slow
+    # dispatch per cost, while one dispatch on the concrete tuple is cached.
+    return accumulate_costgradhess!(linsystem, computecostgradhess(varflags, cost, vars...), vars, varflags, blockind)
+end
+@inline function accumulate_costgradhess!(linsystem, (c, g, H), vars, varflags, blockind)
     updatesymlinearsystem!(linsystem, g, H, vars, varflags, blockind)
-
-    # Return the cost
     return c
 end
 function gradhesshelper!(linsystem, cost::AbstractCost, vars, blockind, varflags::StaticInt{0})::Float64
@@ -55,6 +55,8 @@ end
 # Compute the variable flags indicating which variables are unfixed (i.e. to be optimized)
 computevarflags(blockind) = mapreduce((ind, val) -> (val != 0) << ind, |, SR(0, length(blockind)-1), blockind)
 
+# One cost into the system. A single-variable system may hold only its lower triangle until `finish!` (called once per
+# evaluation by `costgradhess_nozero!`), so anything that reads the system after adding single costs calls it first.
 function costgradhess!(linsystem, vars::AbstractVector, cost::AbstractCost)
     # Determine which variables are free
     blockind = getoffsets(cost, linsystem)
@@ -64,7 +66,9 @@ function costgradhess!(linsystem, vars::AbstractVector, cost::AbstractCost)
 end
 
 function costgradhess_nozero!(linsystem, vars::AbstractVector, costs::CostStruct)::Float64
-    return sum(bindleadingargs(costgradhess!, linsystem, vars), costs; init=0.0)
+    c = sum(bindleadingargs(costgradhess!, linsystem, vars), costs; init=0.0)
+    finish!(linsystem)
+    return c
 end
 
 function costgradhess!(linsystem, vars::AbstractVector, costs::CostStruct)::Float64

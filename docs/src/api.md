@@ -21,13 +21,25 @@ islinear
 
 ## Solving a Model
 
-With `using SecondOrderOptimization`, a package extension adds two methods to its functions:
+With `using SecondOrderOptimization`, a package extension adds methods to its functions:
 
-- `optimize!(model::Model, options = OptimizationOptions(); formulation = :normal, callback, workspace, unfixed, numthreads, reduction = :auto, storage = :auto, max_dense_bytes, min_work, min_work_cost) -> result` solves the model and writes the solution into `model.variables`. `formulation = :tall` solves from the residual and the Jacobian (see the home page).
+- `optimize!(model::Model, options = OptimizationOptions(); formulation = :hessian, callback, workspace, unfixed, numthreads, reduction = :auto, storage = :auto, max_dense_bytes, min_work, min_work_cost) -> result` solves the model and writes the solution into `model.variables`. `formulation = :jacobian` solves from the residual and the Jacobian (see the home page).
 - `optimize(model::Model, options = OptimizationOptions(); kwargs...) -> (model_copy, result)` does the same on a copy.
+- `optimize!(model::Model, rec::OptimizationRecommendation; callback, workspace, min_work, min_work_cost, options...) -> result`
+  solves the model as a recommendation from [`recommendoptimizer`](@ref) says; the other keywords go to
+  `OptimizationOptions`. `optimize(model, rec; kwargs...)` does the same on a copy.
 
 The keywords after `workspace` are the set every entry point takes, described under [`optimvars`](@ref) and in
 [Linear Solvers & Sparsity](@ref). For custom outer loops use [`optimvars`](@ref) and `HessianObjective` directly.
+
+## Choosing How to Solve
+
+See [Choosing a Configuration Automatically](@ref).
+
+```@docs
+recommendoptimizer
+OptimizationRecommendation
+```
 
 ## Cost & Residual Interface
 
@@ -65,6 +77,10 @@ Huber2oKernel
 GemanMcclureKernel
 GemanMcclure2oKernel
 ContaminatedGaussian
+GaussianPlusUniform
+withlogvolume
+optimizerobustifier
+optimizerobustifier!
 ```
 
 ## NLPModels Integration

@@ -52,7 +52,65 @@ the system that is left (the reduced system, after elimination).
 optimize!(problem, options; reduction = :eliminate, storage = :sparse)
 ```
 
-The same keywords, with the same rule, apply to `formulation = :tall` (the residual and the Jacobian). There the
+The same keywords, with the same rule, apply to `formulation = :jacobian` (the residual and the Jacobian). There the
 eliminated variables are eliminated by QR of their rows of the Jacobian, so `JᵀJ` is not formed for them: the prototype
 handed to the optimizer is a `SchurBlockJacobian`, and `storage` chooses the storage of the reduced system the same way.
-The tall path also needs each eliminated variable to be in at least one cost.
+The Jacobian path also needs each eliminated variable to be in at least one cost.
+
+## Choosing a Configuration Automatically
+
+[`recommendoptimizer`](@ref) chooses the formulation, `reduction`, `storage`, linear solver and iterator for a model by
+hand-written rules, from the model's structure and from one linearization and factorization of its Hessian at
+the model's current values. That probe measures the spread of the Hessian's diagonal, a lower bound on the condition
+number of the Jacobi-scaled Hessian, and how long a cost evaluation, a linearization and a solve take. When the Hessian is
+ill-conditioned, or cannot be factorized undamped, it also evaluates the Jacobian once and tests its rank along the
+Hessian's weakest direction: a rank-deficient Jacobian (a gauge freedom, say) keeps the Hessian path, where damping
+handles it, and a full-rank one goes to the Jacobian path, which does not square its conditioning. `reduction` and
+`storage` are what `:auto` builds; the other three choices follow the rules in its docstring. Every threshold in them is a
+starting value, not yet measured.
+
+The result, an [`OptimizationRecommendation`](@ref), explains itself when displayed. For a 2D pose chain of 30 poses with
+40 eliminable landmarks, at its starting values:
+
+```
+julia> rec = recommendoptimizer(model)
+OptimizationRecommendation for 70 unfixed variables of total dimension 170, 130
+costs and 290 residual rows, at the model's current values:
+  formulation = :hessian
+      Every cost is a residual, and the condition estimate of the Jacobi-scaled
+      Hessian, 118000.0, is below 1.0e12: the normal equations are accurate
+      enough.
+  reduction   = :eliminate
+      What reduction = :auto builds on the Hessian path: 80 of the 170
+      dimensions are eliminated (the Schur complement), leaving a reduced system
+      of 90.
+  storage     = :sparse
+      What storage = :auto builds: the 90×90 reduced system is stored sparse,
+      from the predicted fill of its Cholesky factor.
+  linsolver   = :cholesky
+      Cholesky of the reduced system (falling back to Bunch-Kaufman), which
+      linsolver = :auto uses for the Schur complement.
+  iterator    = :dogleg
+      The undamped solve succeeded, the condition estimate of the Jacobi-scaled
+      Hessian, 118000.0, is below 1.0e8, the diagonal's spread (largest /
+      smallest), 38.7, is below 1.0e6, and a solve costs at least a
+      linearization: dogleg, which does not solve again after a rejected step.
+Measured once each, after a warm-up call: a cost evaluation 3.71 μs, a
+linearization 12.8 μs, an undamped solve 43.4 μs. The thresholds are starting
+values, not measured.
+
+The same choices, by hand (with SecondOrderOptimization loaded):
+  optimize!(model,
+      OptimizationOptions(iterator = :dogleg,
+          linsolver = :cholesky);
+      formulation = :hessian, reduction = :eliminate, storage = :sparse)
+```
+
+There are two ways to use it, with `using SecondOrderOptimization`:
+
+- `optimize!(model, rec)` runs the recommendation. Other keywords (`maxiters`, `maxtime`, the tolerances) go to
+  `OptimizationOptions`; a keyword the recommendation sets is an `ArgumentError`.
+- Copy the printed call and change it as needed. The options are then fixed in the code, which also saves the one
+  dynamic dispatch of building them from the recommendation's values.
+
+A recommendation holds for the model and the values it was made from: it is not checked again when it is used.

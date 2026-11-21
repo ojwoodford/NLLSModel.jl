@@ -3,193 +3,13 @@ using NLLSModel
 using NLPModels
 using Static, StaticArrays, SparseArrays, LinearAlgebra
 import OptimizationVariableInterface: nvars, update, update!, syncvars!, ZeroToInfScalar
-import JSOSolvers
-import LeastSquaresOptim
+
+include("fixtures/loader.jl")
+fixture("nls_interface")
 
 # ---------------------------------------------------------------------------
 # Test Residual Definitions
 # ---------------------------------------------------------------------------
-
-struct TestRosenbrock1 <: AbstractResidual end
-NLLSModel.ndeps(::TestRosenbrock1) = static(1)
-NLLSModel.nres(::TestRosenbrock1) = static(1)
-NLLSModel.varindices(::TestRosenbrock1) = SVector(1)
-NLLSModel.getvars(::TestRosenbrock1, vars::AbstractVector) = (vars[1]::SVector{2, Float64},)
-NLLSModel.computeresidual(::TestRosenbrock1, x) = SVector(1.0 - x[1])
-Base.eltype(::TestRosenbrock1) = Float64
-
-struct TestRosenbrock2 <: AbstractResidual end
-NLLSModel.ndeps(::TestRosenbrock2) = static(1)
-NLLSModel.nres(::TestRosenbrock2) = static(1)
-NLLSModel.varindices(::TestRosenbrock2) = SVector(1)
-NLLSModel.getvars(::TestRosenbrock2, vars::AbstractVector) = (vars[1]::SVector{2, Float64},)
-NLLSModel.computeresidual(::TestRosenbrock2, x) = SVector(10.0 * (x[2] - x[1]^2))
-Base.eltype(::TestRosenbrock2) = Float64
-
-# Multi-dimensional residual (nres = 2)
-struct MultiDimRes <: AbstractResidual end
-NLLSModel.ndeps(::MultiDimRes) = static(1)
-NLLSModel.nres(::MultiDimRes) = static(2)
-NLLSModel.varindices(::MultiDimRes) = SVector(1)
-NLLSModel.getvars(::MultiDimRes, vars::AbstractVector) = (vars[1]::SVector{2, Float64},)
-NLLSModel.computeresidual(::MultiDimRes, x) = SVector(x[1] - 2.0, 2.0 * x[2] - 4.0)
-Base.eltype(::MultiDimRes) = Float64
-
-# Scalar varindices (ndeps = 1, returning Int)
-struct ScalarVarIndRes <: AbstractResidual end
-NLLSModel.ndeps(::ScalarVarIndRes) = static(1)
-NLLSModel.nres(::ScalarVarIndRes) = static(1)
-NLLSModel.varindices(::ScalarVarIndRes) = 1
-NLLSModel.getvars(::ScalarVarIndRes, vars::AbstractVector) = (vars[1]::Float64,)
-NLLSModel.computeresidual(::ScalarVarIndRes, x) = SVector(x - 3.0)
-Base.eltype(::ScalarVarIndRes) = Float64
-
-# Pair difference residual
-struct TestPairDiff <: AbstractResidual
-    i::Int
-    j::Int
-    val::Float64
-end
-TestPairDiff(i, j) = TestPairDiff(i, j, 1.0)
-NLLSModel.ndeps(::TestPairDiff) = static(2)
-NLLSModel.nres(::TestPairDiff) = static(1)
-NLLSModel.varindices(r::TestPairDiff) = SVector(r.i, r.j)
-NLLSModel.getvars(r::TestPairDiff, vars::AbstractVector) = (vars[r.i]::SVector{1, Float64}, vars[r.j]::SVector{1, Float64})
-NLLSModel.computeresidual(r::TestPairDiff, xi, xj) = SVector(xi[1] - xj[1] - r.val)
-Base.eltype(::TestPairDiff) = Float64
-
-# Dynamic vector residual
-struct DynamicRes <: AbstractResidual
-    dim::Int
-end
-NLLSModel.ndeps(::DynamicRes) = static(1)
-NLLSModel.nres(d::DynamicRes) = d.dim
-NLLSModel.varindices(::DynamicRes) = SVector(1)
-NLLSModel.getvars(::DynamicRes, vars::AbstractVector) = (vars[1]::Vector{Float64},)
-NLLSModel.computeresidual(d::DynamicRes, x) = x .- 2.0
-Base.eltype(::DynamicRes) = Float64
-
-# Non-finite producing residual
-struct NonFiniteRes <: AbstractResidual
-    mode::Symbol
-end
-NLLSModel.ndeps(::NonFiniteRes) = static(1)
-NLLSModel.nres(::NonFiniteRes) = static(1)
-NLLSModel.varindices(::NonFiniteRes) = SVector(1)
-NLLSModel.getvars(::NonFiniteRes, vars::AbstractVector) = (vars[1]::SVector{1, Float64},)
-function NLLSModel.computeresidual(r::NonFiniteRes, x)
-    if r.mode === :overflow
-        return SVector(1e200 * x[1])
-    elseif r.mode === :nan
-        return SVector(NaN * x[1])
-    else
-        return SVector(Inf * x[1])
-    end
-end
-Base.eltype(::NonFiniteRes) = Float64
-
-# Generic wrapper to attach any robustifier to any residual
-# Variables for the flat-vector check: a Euclidean AbstractVector of our own (counting its updates), a rotation (an
-# angle wrapped to (-π, π], so its update is not addition), and an AbstractVector that cannot be rebuilt from its values
-const EUCLID_UPDATES = Ref(0)
-struct EuclidVec <: AbstractVector{Float64}
-    data::Vector{Float64}
-end
-Base.size(v::EuclidVec) = size(v.data)
-Base.getindex(v::EuclidVec, i::Int) = v.data[i]
-update(v::EuclidVec, δ, start=1) = (EUCLID_UPDATES[] += 1; EuclidVec(v.data .+ view(δ, start:start+length(v)-1)))
-struct WrappedAngle <: AbstractVector{Float64}
-    θ::Float64
-end
-WrappedAngle(x::AbstractVector) = WrappedAngle(x[1])
-Base.size(::WrappedAngle) = (1,)
-Base.getindex(v::WrappedAngle, i::Int) = v.θ
-update(v::WrappedAngle, δ, start=1) = WrappedAngle(rem2pi(v.θ + δ[start], RoundNearest))
-struct UnbuildableVec <: AbstractVector{Float64}
-    data::Vector{Float64}
-    tag::Int
-end
-Base.size(v::UnbuildableVec) = size(v.data)
-Base.getindex(v::UnbuildableVec, i::Int) = v.data[i]
-# A unit 4-vector with 3 degrees of freedom, stored in ambient coordinates: longer than its nvars (AN4)
-struct AmbientVec <: AbstractVector{Float64}
-    data::SVector{4, Float64}
-end
-AmbientVec(x::AbstractVector) = AmbientVec(normalize(SVector{4, Float64}(x)))
-Base.size(::AmbientVec) = (4,)
-Base.getindex(v::AmbientVec, i::Int) = v.data[i]
-nvars(::AmbientVec) = static(3)
-update(v::AmbientVec, δ, start=1) = AmbientVec(v.data + SVector(δ[start], δ[start+1], δ[start+2], 0.0))
-struct EuclidRes <: AbstractResidual
-    i::Int
-end
-NLLSModel.ndeps(::EuclidRes) = static(1)
-NLLSModel.nres(::EuclidRes) = static(1)
-NLLSModel.varindices(r::EuclidRes) = r.i
-NLLSModel.getvars(r::EuclidRes, vars::AbstractVector) = (vars[r.i],)
-NLLSModel.computeresidual(::EuclidRes, x) = SVector(sum(x))
-Base.eltype(::EuclidRes) = Float64
-struct AngleRes <: AbstractResidual
-    i::Int
-end
-NLLSModel.ndeps(::AngleRes) = static(1)
-NLLSModel.nres(::AngleRes) = static(1)
-NLLSModel.varindices(r::AngleRes) = r.i
-NLLSModel.getvars(r::AngleRes, vars::AbstractVector) = (vars[r.i]::WrappedAngle,)
-NLLSModel.computeresidual(::AngleRes, x) = SVector(x.θ)
-Base.eltype(::AngleRes) = Float64
-
-struct RobustWrapper{R<:AbstractResidual, K<:AbstractRobustifier} <: AbstractResidual
-    res::R
-    kernel::K
-end
-NLLSModel.ndeps(r::RobustWrapper) = ndeps(r.res)
-NLLSModel.nres(r::RobustWrapper) = nres(r.res)
-NLLSModel.varindices(r::RobustWrapper) = varindices(r.res)
-NLLSModel.getvars(r::RobustWrapper, vars::AbstractVector) = getvars(r.res, vars)
-NLLSModel.computeresidual(r::RobustWrapper, args...) = computeresidual(r.res, args...)
-NLLSModel.robustkernel(r::RobustWrapper) = r.kernel
-Base.eltype(r::RobustWrapper) = eltype(r.res)
-
-# Kernel for testing clamp and domain error
-struct MockClampingKernel <: AbstractRobustifier
-    target_dc::Float64
-end
-NLLSModel.robustify(k::MockClampingKernel, s) = s
-NLLSModel.robustifydcost(k::MockClampingKernel, s) = (s, k.target_dc, 0.0)
-
-struct ZeroWeightKernel <: AbstractRobustifier end
-NLLSModel.robustify(::ZeroWeightKernel, s) = 15.0
-NLLSModel.robustifydcost(::ZeroWeightKernel, s) = (15.0, 0.0, 0.0)
-
-# Adaptive residual definition for test
-struct TestAdaptiveRes <: AbstractAdaptiveResidual
-    varind::SVector{2, Int}
-end
-NLLSModel.ndeps(::TestAdaptiveRes) = static(2)
-NLLSModel.nres(::TestAdaptiveRes) = static(1)
-NLLSModel.varindices(r::TestAdaptiveRes) = r.varind
-NLLSModel.getvars(r::TestAdaptiveRes, vars::Vector) = (vars[r.varind[1]]::ContaminatedGaussian{Float64}, vars[r.varind[2]]::Float64)
-NLLSModel.computeresidual(::TestAdaptiveRes, x) = SVector(x - 1.0)
-Base.eltype(::TestAdaptiveRes) = Float64
-
-# Finite difference helper
-function finite_diff_jac(res!, x, M; h=1e-7)
-    N = length(x)
-    J = Matrix{Float64}(undef, M, N)
-    r_plus = Vector{Float64}(undef, M)
-    r_minus = Vector{Float64}(undef, M)
-    x_pert = copy(x)
-    for j in 1:N
-        x_pert[j] = x[j] + h
-        res!(r_plus, x_pert)
-        x_pert[j] = x[j] - h
-        res!(r_minus, x_pert)
-        x_pert[j] = x[j]
-        J[:, j] .= (r_plus .- r_minus) ./ (2 * h)
-    end
-    return J
-end
 
 # ---------------------------------------------------------------------------
 # Test Suites
@@ -205,10 +25,10 @@ end
         addcost!(prob, TestRosenbrock2())
 
         flat = flat_optimvars_nls(prob)
-        r = zeros(flat.layout_tall.M)
+        r = zeros(flat.layout_jacobian.M)
         J = copy(flat.J_proto)
         c = flat.resjac!(r, J, flat.x0)
-        J_fd = finite_diff_jac(flat.res!, flat.x0, flat.layout_tall.M)
+        J_fd = finite_diff_jac(flat.res!, flat.x0, flat.layout_jacobian.M)
         @test isapprox(J, J_fd, atol=1e-5)
         @test isapprox(c, 0.5 * dot(r, r); atol=1e-12)
         @test isapprox(c, flat.f(flat.x0); atol=1e-12)
@@ -272,14 +92,14 @@ end
         H_norm = zeros(2, 2)
         c_norm = fdf!_norm(g_norm, H_norm, x0_norm)
 
-        f_tall, res!_tall, resjac!_tall, x0_tall, J_proto = optimvars_nls(prob1, numthreads=static(1))
-        r_tall = zeros(2)
-        J_tall = copy(J_proto)
-        c_tall = resjac!_tall(r_tall, J_tall, x0_tall)
+        f_jac, res!_jac, resjac!_jac, x0_jac, J_proto = optimvars_nls(prob1, numthreads=static(1))
+        r_jac = zeros(2)
+        J_jac = copy(J_proto)
+        c_jac = resjac!_jac(r_jac, J_jac, x0_jac)
 
-        @test isapprox(J_tall' * r_tall, g_norm; atol=1e-12)
-        @test isapprox(J_tall' * J_tall, H_norm; atol=1e-12)
-        @test isapprox(c_tall, c_norm; atol=1e-12)
+        @test isapprox(J_jac' * r_jac, g_norm; atol=1e-12)
+        @test isapprox(J_jac' * J_jac, H_norm; atol=1e-12)
+        @test isapprox(c_jac, c_norm; atol=1e-12)
 
         # A first-order kernel (zero second derivative): IRLS
         prob2 = Model(Float64, RobustWrapper{ScalarVarIndRes, HuberKernel{Float64, Static.False}})
@@ -293,9 +113,9 @@ end
         _, _, resjac2, _, J_proto2 = optimvars_nls(prob2, numthreads=static(1))
         r2 = zeros(1)
         J2 = copy(J_proto2)
-        c_tall2 = resjac2(r2, J2, x02)
+        c_jac2 = resjac2(r2, J2, x02)
         @test isapprox(J2' * r2, g2; atol=1e-12)
-        @test isapprox(c_tall2, c2; atol=1e-12)
+        @test isapprox(c_jac2, c2; atol=1e-12)
 
         # A second-order kernel: IRLS with the Triggs correction, across scales
         for scale in [1e-3, 1.0, 1e3]
@@ -310,11 +130,11 @@ end
             _, _, resjac3, _, J_proto3 = optimvars_nls(prob3, numthreads=static(1))
             r3 = zeros(1)
             J3 = copy(J_proto3)
-            c_tall3 = resjac3(r3, J3, x03)
+            c_jac3 = resjac3(r3, J3, x03)
 
             @test isapprox(J3' * r3, g3; atol=1e-9 * scale)
             @test isapprox(J3' * J3, H3; atol=1e-9 * scale)
-            @test isapprox(c_tall3, c3; atol=1e-9 * scale^2)
+            @test isapprox(c_jac3, c3; atol=1e-9 * scale^2)
         end
     end
 
@@ -386,34 +206,9 @@ end
         @test_throws DomainError flat_domain.resjac!(r_dom, J_dom, flat_domain.x0)
     end
 
-    @testset "6.1.6 Multithreading Consistency" begin
-        # 100 costs
-        prob = Model(SVector{1, Float64}, TestPairDiff)
-        for i in 1:101
-            addvariable!(prob, SVector(Float64(i)))
-        end
-        for i in 1:100
-            addcost!(prob, TestPairDiff(i, i + 1, 0.5))
-        end
-
-        f1, res1, resjac1, x01, J_proto1 = optimvars_nls(prob, numthreads=static(1))
-        r1 = zeros(100)
-        J1 = copy(J_proto1)
-        c1 = resjac1(r1, J1, x01)
-
-        f4, res4, resjac4, x04, J_proto4 = optimvars_nls(prob, numthreads=static(4), min_work=10)
-        r4 = zeros(100)
-        J4 = copy(J_proto4)
-        c4 = resjac4(r4, J4, x04)
-
-        @test r1 == r4
-        @test J1 == J4
-        @test isapprox(c1, c4; atol=1e-12)
-    end
-
     @testset "6.1.7 Fixed AbstractAdaptiveResidual Support" begin
-        prob = Model(Union{ContaminatedGaussian{Float64}, Float64}, TestAdaptiveRes)
-        kernel = ContaminatedGaussian(1.0, 5.0, 0.8)
+        prob = Model(Union{ContaminatedGaussian{Float64, 1}, Float64}, TestAdaptiveRes)
+        kernel = ContaminatedGaussian(1.0, 5.0, 0.8, static(1))
         addvariable!(prob, kernel) # var 1 = adaptive kernel
         addvariable!(prob, 2.0)    # var 2 = value
 
@@ -516,91 +311,6 @@ end
     end
 end
 
-@testset "NLS Interface - NLPModels (NLLSNLSModel) & JSOSolvers" begin
-    prob = Model(SVector{2, Float64}, Union{TestRosenbrock1, TestRosenbrock2})
-    addvariable!(prob, SVector(-1.2, 1.0))
-    addcost!(prob, TestRosenbrock1())
-    addcost!(prob, TestRosenbrock2())
-
-    nls = NLLSNLSModel(prob; name="RosenbrockNLS")
-    @test nls isa AbstractNLSModel
-    @test get_nvar(nls.meta) == 2
-    @test get_nequ(nls.nls_meta) == 2
-    @test get_x0(nls.meta) == [-1.2, 1.0]
-
-    # NLPModels methods
-    x0 = copy(nls.meta.x0)
-    F = zeros(2)
-    residual!(nls, x0, F)
-    @test isapprox(F, [2.2, -4.4]; atol=1e-12)
-
-    rows = zeros(Int, 4)
-    cols = zeros(Int, 4)
-    jac_structure_residual!(nls, rows, cols)
-    @test rows == [1, 2, 1, 2]
-    @test cols == [1, 1, 2, 2]
-
-    vals = zeros(4)
-    jac_coord_residual!(nls, x0, vals)
-    @test isapprox(vals, [-1.0, 24.0, 0.0, 10.0]; atol=1e-12)
-
-    Jv = zeros(2)
-    jprod_residual!(nls, x0, [1.0, 0.5], Jv)
-    @test isapprox(Jv, [-1.0, 29.0]; atol=1e-12)
-
-    Jtv = zeros(2)
-    jtprod_residual!(nls, x0, [1.0, 0.5], Jtv)
-    @test isapprox(Jtv, [11.0, 5.0]; atol=1e-12)
-
-    c = obj(nls, x0)
-    @test isapprox(c, 12.1; atol=1e-12)
-
-    g = zeros(2)
-    grad!(nls, x0, g)
-    @test isapprox(g, [-107.8, -44.0]; atol=1e-12)
-
-    # Interleaved cache test
-    reset!(nls)
-    @test !nls.res_valid
-    @test !nls.jac_valid
-    residual!(nls, x0, F)
-    @test nls.res_valid
-    @test !nls.jac_valid
-    jac_coord_residual!(nls, x0, vals)
-    @test nls.res_valid
-    @test nls.jac_valid
-    c_cached = obj(nls, x0)
-    @test isapprox(c_cached, 12.1; atol=1e-12)
-
-    # Solve with JSOSolvers.trunk
-    reset!(nls)
-    stats_trunk = JSOSolvers.trunk(nls)
-    @test stats_trunk.status == :first_order
-    @test isapprox(stats_trunk.solution, [1.0, 1.0]; atol=1e-4)
-
-    # Solve with JSOSolvers.tron
-    reset!(nls)
-    stats_tron = JSOSolvers.tron(nls)
-    @test stats_tron.status == :first_order
-    @test isapprox(stats_tron.solution, [1.0, 1.0]; atol=1e-4)
-
-    # syncvars! round-trip
-    syncvars!(nls, stats_trunk.solution)
-    @test isapprox(prob.variables[1], SVector(1.0, 1.0); atol=1e-4)
-end
-
-# A residual that counts its evaluations (AN3)
-const NLS_EVALS = Ref(0)
-struct CountedNLS{C} <: AbstractResidual
-    c::C
-end
-NLLSModel.ndeps(r::CountedNLS) = NLLSModel.ndeps(r.c)
-NLLSModel.nres(r::CountedNLS) = NLLSModel.nres(r.c)
-NLLSModel.varindices(r::CountedNLS) = NLLSModel.varindices(r.c)
-NLLSModel.getvars(r::CountedNLS, vars::AbstractVector) = NLLSModel.getvars(r.c, vars)
-NLLSModel.computeresidual(r::CountedNLS, args...) = (NLS_EVALS[] += 1; NLLSModel.computeresidual(r.c, args...))
-Base.eltype(::CountedNLS) = Float64
-
 @testset "NLS Interface - objgrad! evaluates each residual once (AN3)" begin
     prob = Model(SVector{2, Float64}, Union{CountedNLS{TestRosenbrock1}, CountedNLS{TestRosenbrock2}})
     addvariable!(prob, SVector(-1.2, 1.0))
@@ -627,54 +337,3 @@ Base.eltype(::CountedNLS) = Float64
     @test objgrad!(nls, x, g2)[1] == c && g2 == grad!(fresh, x, g)
 end
 
-@testset "NLS Interface - nls_callbacks & LeastSquaresOptim" begin
-    # 1. Dense problem
-    prob_dense = Model(SVector{2, Float64}, Union{TestRosenbrock1, TestRosenbrock2})
-    addvariable!(prob_dense, SVector(-1.2, 1.0))
-    addcost!(prob_dense, TestRosenbrock1())
-    addcost!(prob_dense, TestRosenbrock2())
-
-    cb = NLLSModel.nls_callbacks(prob_dense)
-    @test cb.nequ == 2
-    @test cb.nvar == 2
-
-    # Cache verification: jac! writes into J, subsequent res! at same x reuses cache
-    J_test = copy(cb.J0)
-    cb.jac!(J_test, cb.x0)
-    r_test = zeros(2)
-    cb.res!(r_test, cb.x0)
-    @test isapprox(r_test, [2.2, -4.4]; atol=1e-12)
-
-    lsp_dense = LeastSquaresOptim.LeastSquaresProblem(
-        x = cb.x0,
-        y = cb.r0,
-        f! = cb.res!,
-        g! = cb.jac!,
-        J = cb.J0,
-    )
-    res_dense = LeastSquaresOptim.optimize!(lsp_dense, LeastSquaresOptim.LevenbergMarquardt())
-    @test res_dense.converged
-    @test isapprox(res_dense.minimizer, [1.0, 1.0]; atol=1e-4)
-
-    # 2. Sparse problem with Scaled linear kernel
-    prob_sp = Model(SVector{1, Float64}, RobustWrapper{TestPairDiff, Scaled{Float64, NoRobust}})
-    for i in 1:6
-        addvariable!(prob_sp, SVector(Float64(i)))
-    end
-    for i in 1:5
-        addcost!(prob_sp, RobustWrapper(TestPairDiff(i, i + 1, 1.0), Scaled(NoRobust(), 2.0)))
-    end
-
-    cb_sp = NLLSModel.nls_callbacks(prob_sp; storage=:sparse)
-    @test cb_sp.J0 isa SparseMatrixCSC
-
-    lsp_sp = LeastSquaresOptim.LeastSquaresProblem(
-        x = cb_sp.x0,
-        y = cb_sp.r0,
-        f! = cb_sp.res!,
-        g! = cb_sp.jac!,
-        J = cb_sp.J0,
-    )
-    res_sp = LeastSquaresOptim.optimize!(lsp_sp, LeastSquaresOptim.LevenbergMarquardt())
-    @test res_sp.converged
-end

@@ -1,44 +1,7 @@
 using Test, Static, StaticArrays, SparseArrays, LinearAlgebra, NLLSModel
 
-myfun(x) = x * x * x
-NLLSModel.computecost(::StaticInt, ::AbstractVector, x::Float64) = myfun(x)
-NLLSModel.computecost(::AbstractVector, x::Float64) = myfun(x)
-
-struct MTTestScalarRes <: NLLSModel.AbstractResidual
-    val::Float64
-    ind::Int
-end
-NLLSModel.ndeps(::MTTestScalarRes) = static(1)
-NLLSModel.nres(::MTTestScalarRes) = 1
-NLLSModel.varindices(res::MTTestScalarRes) = res.ind
-NLLSModel.getvars(res::MTTestScalarRes, vars::AbstractVector) = (vars[res.ind]::Float64,)
-NLLSModel.computeresidual(res::MTTestScalarRes, x) = x - res.val
-Base.eltype(::MTTestScalarRes) = Float64
-
-struct MTTestPairRes <: NLLSModel.AbstractResidual
-    val::Float64
-    i::Int
-    j::Int
-end
-NLLSModel.ndeps(::MTTestPairRes) = static(2)
-NLLSModel.nres(::MTTestPairRes) = static(1)
-NLLSModel.varindices(res::MTTestPairRes) = SVector(res.i, res.j)
-NLLSModel.getvars(res::MTTestPairRes, vars::AbstractVector) = (vars[res.i]::Float64, vars[res.j]::Float64)
-NLLSModel.computeresidual(res::MTTestPairRes, x, y) = SVector(x - y - res.val)
-Base.eltype(::MTTestPairRes) = Float64
-
-struct MTTestDynamicRes <: NLLSModel.AbstractResidual
-    y::Float64
-    X::Vector{Float64}
-end
-NLLSModel.ndeps(::MTTestDynamicRes) = static(1)
-NLLSModel.nres(::MTTestDynamicRes) = static(1)
-NLLSModel.varindices(::MTTestDynamicRes) = 1
-NLLSModel.getvars(::MTTestDynamicRes, vars::AbstractVector) = (vars[1]::Vector{Float64},)
-NLLSModel.computeresidual(res::MTTestDynamicRes, w) = dot(res.X, w) - res.y
-Base.eltype(::MTTestDynamicRes) = Float64
-
-alloc_ephemeral(ls, ind) = @allocated NLLSModel.LinearSystem(ls, ind)
+include("fixtures/loader.jl")
+fixture("allocations", "multithreading")
 
 @testset "multithreading.jl" begin
     # chunk_indices: chunks are contiguous, cover 1:len exactly, and differ in size by at most 1
@@ -263,17 +226,17 @@ alloc_ephemeral(ls, ind) = @allocated NLLSModel.LinearSystem(ls, ind)
 
     # Threshold-based decision: a linearization estimate below twice the per-thread floor stays single-threaded; at
     # exactly twice the default floor it shares two copies
-    @test isa(NLLSModel.sharedlinearsystem(ls_static_single, NLLSModel.workestimates(prob_static, nothing).normal, static(4), NLLSModel.costsplit(prob_static.costs)), NLLSModel.LinearSystem)
+    @test isa(NLLSModel.sharedlinearsystem(ls_static_single, NLLSModel.workestimates(prob_static, nothing).hessianfill, static(4), NLLSModel.costsplit(prob_static.costs)), NLLSModel.LinearSystem)
     prob_large = Model(Float64, MTTestScalarRes)
     addvariable!(prob_large, 2.0)
-    for k in 1:NLLSModel.MIN_WORK_PER_THREAD_NORMAL
+    for k in 1:NLLSModel.MIN_WORK_PER_THREAD_HESSIAN
         addcost!(prob_large, MTTestScalarRes(k * 0.001, 1))
     end
     ls_large_single = NLLSModel.LinearSystem{NLLSModel.UniVariateLSstatic_x{1}, NLLSModel.UniVariateLSstatic_ls{1, 1}}((1,), ())
-    @test NLLSModel.workestimates(prob_large, nothing).normal == 2 * NLLSModel.MIN_WORK_PER_THREAD_NORMAL # m = 1, n = 1 per cost
-    shared_large = NLLSModel.sharedlinearsystem(ls_large_single, NLLSModel.workestimates(prob_large, nothing).normal, static(4), NLLSModel.costsplit(prob_large.costs))
+    @test NLLSModel.workestimates(prob_large, nothing).hessianfill == 2 * NLLSModel.MIN_WORK_PER_THREAD_HESSIAN # m = 1, n = 1 per cost
+    shared_large = NLLSModel.sharedlinearsystem(ls_large_single, NLLSModel.workestimates(prob_large, nothing).hessianfill, static(4), NLLSModel.costsplit(prob_large.costs))
     @test shared_large isa NLLSModel.LinearSystemShared && length(shared_large.ls) == 2
-    @test NLLSModel.sharedlinearsystem(ls_large_single, NLLSModel.workestimates(prob_large, nothing).normal - 1, static(4), NLLSModel.costsplit(prob_large.costs)) isa NLLSModel.LinearSystem
+    @test NLLSModel.sharedlinearsystem(ls_large_single, NLLSModel.workestimates(prob_large, nothing).hessianfill - 1, static(4), NLLSModel.costsplit(prob_large.costs)) isa NLLSModel.LinearSystem
     f_ls, fdf_ls!, x0_ls, _ = optimvars(deepcopy(prob_large); numthreads=static(1))
     f_lm, fdf_lm!, x0_lm, _ = optimvars(deepcopy(prob_large); numthreads=static(4))
     @test f_ls(x0_ls) ≈ f_lm(x0_lm)
@@ -287,92 +250,6 @@ alloc_ephemeral(ls, ind) = @allocated NLLSModel.LinearSystem(ls, ind)
 end
 
 # ---- W1: three work estimates, one per kind of work, from the unfixed variables' dimensions ----
-
-# Bundle-adjustment shape: 2 rows on a 9-dimensional camera and a 3-dimensional point (12 columns)
-struct WBARes <: NLLSModel.AbstractResidual
-    meas::SVector{2, Float64}
-    cam::Int
-    pt::Int
-end
-NLLSModel.ndeps(::WBARes) = static(2)
-NLLSModel.nres(::WBARes) = static(2)
-NLLSModel.varindices(r::WBARes) = SVector(r.cam, r.pt)
-NLLSModel.getvars(r::WBARes, vars::AbstractVector) = (vars[r.cam]::SVector{9, Float64}, vars[r.pt]::SVector{3, Float64})
-const WBA_EVALS = Threads.Atomic{Int}(0) # residual evaluations, for counting how often a cost is linearized
-function NLLSModel.computeresidual(r::WBARes, c, p)
-    Threads.atomic_add!(WBA_EVALS, 1)
-    return SVector(c[1] * p[1] + sin(c[5]) * p[2] + c[9] * p[3]^2, c[2] * p[2] - c[3] * p[1] + c[7]) - r.meas
-end
-Base.eltype(::WBARes) = Float64
-
-function wbaproblem(ncams, npts)
-    p = Model(Union{SVector{9, Float64}, SVector{3, Float64}}, WBARes)
-    for i in 1:ncams
-        addvariable!(p, SVector{9, Float64}(ntuple(k -> 0.1 * i + 0.01 * k, 9)))
-    end
-    for j in 1:npts
-        addvariable!(p, SVector(0.3 * j, -0.2 * j, 1.0 + 0.05 * j))
-    end
-    for i in 1:ncams, j in 1:npts
-        addcost!(p, WBARes(SVector(0.1 * i - 0.02 * j, 0.05 * j), i, ncams + j))
-    end
-    return p
-end
-
-# Procrustes shape: d rows on one rotation of d(d-1)/2 parameters
-struct WProcRes{D} <: NLLSModel.AbstractResidual
-    a::Vector{Float64}
-    b::Vector{Float64}
-end
-NLLSModel.ndeps(::WProcRes) = static(1)
-NLLSModel.nres(::WProcRes{D}) where D = static(D)
-NLLSModel.varindices(::WProcRes) = 1
-NLLSModel.getvars(::WProcRes, vars::AbstractVector) = (vars[1]::Vector{Float64},)
-function wrotate(x, b, d)
-    W = zeros(eltype(x), d, d); k = 1
-    for j in 1:d, i in j+1:d
-        W[i, j] = x[k]; W[j, i] = -x[k]; k += 1
-    end
-    return b .+ W * b .+ 0.5 .* (W * (W * b))
-end
-NLLSModel.computeresidual(r::WProcRes{D}, x) where D = r.a .- wrotate(x, r.b, D)
-Base.eltype(::WProcRes) = Float64
-
-function wprocrustes(d, npts)
-    p = Model(Vector{Float64}, WProcRes{d})
-    addvariable!(p, [0.01 * sin(k) for k in 1:d * (d - 1) ÷ 2])
-    for k in 1:npts
-        b = [cos(k + i) for i in 1:d]
-        addcost!(p, WProcRes{d}(b .+ 0.01 .* sin.(1:d), b))
-    end
-    return p
-end
-
-# Dynamic variables of different lengths; a run-time residual length
-struct WDynRes <: NLLSModel.AbstractResidual
-    meas::Vector{Float64}
-    i::Int
-    j::Int
-end
-NLLSModel.ndeps(::WDynRes) = static(2)
-NLLSModel.nres(r::WDynRes) = length(r.meas)
-NLLSModel.varindices(r::WDynRes) = SVector(r.i, r.j)
-NLLSModel.getvars(r::WDynRes, vars::AbstractVector) = (vars[r.i]::Vector{Float64}, vars[r.j]::Vector{Float64})
-NLLSModel.computeresidual(r::WDynRes, a, b) = [sum(a) * (1 + 0.1k) - b[mod1(k, length(b))]^2 - r.meas[k] for k in eachindex(r.meas)]
-Base.eltype(::WDynRes) = Float64
-
-function wdynproblem()
-    p = Model(Vector{Float64}, WDynRes)
-    addvariable!(p, [0.1, 0.2])            # 2
-    addvariable!(p, [0.3, -0.1, 0.4])      # 3
-    addvariable!(p, collect(0.1:0.1:0.5))  # 5
-    addcost!(p, WDynRes([0.1, 0.2, 0.3, 0.4], 1, 2)) # m = 4, n = 5
-    addcost!(p, WDynRes([0.5], 2, 3))                # m = 1, n = 8
-    addcost!(p, WDynRes([0.1, -0.1], 1, 3))          # m = 2, n = 7
-    return p
-end
-
-wtuple(w) = (w.cost, w.tall, w.normal)
 
 @testset "W1 work estimates" begin
     @testset "known models" begin
@@ -390,26 +267,26 @@ wtuple(w) = (w.cost, w.tall, w.normal)
         f, fdf!, _, _ = optimvars(ba; numthreads=static(4))
         @test f.work == NLLSModel.workestimates(ba, nothing).cost
         _, res!, resjac!, _, _ = optimvars_nls(ba; numthreads=static(4))
-        @test res!.layout.work == resjac!.layout.work == NLLSModel.workestimates(ba, nothing).tall
+        @test res!.layout.work == resjac!.layout.work == NLLSModel.workestimates(ba, nothing).jacobianfill
         _, res!, _, _, _ = optimvars_nls(dy; numthreads=static(4), unfixed=[1, 3])
-        @test res!.layout.work == NLLSModel.workestimates(dy, [1, 3]).tall
+        @test res!.layout.work == NLLSModel.workestimates(dy, [1, 3]).jacobianfill
         # A general cost counts as m = 1 with a Hessian, and the standalone cost estimate needs no variables
         @test NLLSModel.costestimate(ba.costs) == NLLSModel.workestimates(ba, nothing).cost
     end
 
-    @testset "fixing a variable lowers tall and linearization by exactly its columns" begin
+    @testset "fixing a variable lowers the Jacobian and Hessian estimates by exactly its columns" begin
         ba = wbaproblem(3, 10)
         all_ = NLLSModel.workestimates(ba, nothing)
         mask = trues(length(ba.variables)); mask[1] = false # camera 1, on 10 costs: n goes from 12 to 3
         fixed = NLLSModel.workestimates(ba, mask)
         @test fixed.cost == all_.cost
-        @test all_.tall - fixed.tall == 10 * 2 * 9
-        @test all_.normal - fixed.normal == 10 * 2 * (12 * 13 - 3 * 4)
+        @test all_.jacobianfill - fixed.jacobianfill == 10 * 2 * 9
+        @test all_.hessianfill - fixed.hessianfill == 10 * 2 * (12 * 13 - 3 * 4)
         dy = wdynproblem() # fix the 5-vector, on costs 2 (n 8 -> 3) and 3 (n 7 -> 2)
         a, b = NLLSModel.workestimates(dy, nothing), NLLSModel.workestimates(dy, [1, 2])
         @test a.cost == b.cost
-        @test a.tall - b.tall == 1 * 5 + 2 * 5
-        @test a.normal - b.normal == 1 * (8 * 9 - 3 * 4) + 2 * (7 * 8 - 2 * 3)
+        @test a.jacobianfill - b.jacobianfill == 1 * 5 + 2 * 5
+        @test a.hessianfill - b.hessianfill == 1 * (8 * 9 - 3 * 4) + 2 * (7 * 8 - 2 * 3)
     end
 
     # The one rule: one thread below twice the floor, work ÷ floor between, numthreads above, every thread at floor 0
@@ -424,7 +301,7 @@ wtuple(w) = (w.cost, w.tall, w.normal)
         @test NLLSModel.threadcount(10^9, 1, 8, 3) == 3 && NLLSModel.threadcount(10^9, 0, 8, 2) == 2
         @test NLLSModel.threadcount(10^9, 0, 8, 1) == 1 && NLLSModel.threadcount(10^9, 0, 8, 0) == 1
         @test NLLSModel.threadcount(10^9, 1, 2, 5) == 2 # numthreads still bounds it
-        @test NLLSModel.normalthreads(10^9, 1, 8, 3) == 3 && NLLSModel.normalthreads(10^9, 1, 8, 10) == 4
+        @test NLLSModel.hessianthreads(10^9, 1, 8, 3) == 3 && NLLSModel.hessianthreads(10^9, 1, 8, 10) == 4
         # costsplit: the largest number of costs of one type
         mixed = Model(Float64, Union{MTTestScalarRes, MTTestPairRes})
         foreach(_ -> addvariable!(mixed, 1.0), 1:3)
@@ -448,30 +325,30 @@ wtuple(w) = (w.cost, w.tall, w.normal)
     end
 
     # Each kind of work decides on its own estimate, by the same rule: floors set for exactly 2 of 8 threads give 2
-    # per-thread copies of the linear system, 2 chunks of the tall fill and a 2-way cost sum. The normal fill uses at most
-    # MAX_THREADS_NORMAL threads.
+    # per-thread copies of the linear system, 2 chunks of the Jacobian fill and a 2-way cost sum. The Hessian fill uses at most
+    # MAX_THREADS_HESSIAN threads.
     @testset "each kind of work uses the rule on its own estimate" begin
-        ba = wbaproblem(3, 10) # cost 60, tall 780, linearization 9360
+        ba = wbaproblem(3, 10) # cost 60, Jacobian 780, linearization 9360
         w = NLLSModel.workestimates(ba, nothing)
-        @test w.cost < w.tall < w.normal
-        counts(Fcost, Flin, Ftall) = begin
+        @test w.cost < w.jacobianfill < w.hessianfill
+        counts(Fcost, Flin, Fjac) = begin
             f, fdf!, _, _ = optimvars(ba; numthreads=static(8), min_work=Flin, min_work_cost=Fcost)
-            _, res!, resjac!, _, _ = optimvars_nls(ba; numthreads=static(8), min_work=Ftall)
+            _, res!, resjac!, _, _ = optimvars_nls(ba; numthreads=static(8), min_work=Fjac)
             @test res!.nthreads == resjac!.nthreads
             copies = fdf!.linsystem isa NLLSModel.LinearSystemShared ? length(fdf!.linsystem.ls) : 1
             (f.nthreads, copies, res!.nthreads)
         end
-        @test counts(w.cost ÷ 2, w.normal ÷ 2, w.tall ÷ 2) == (2, 2, 2)
-        @test NLLSModel.MAX_THREADS_NORMAL == 4
-        @test counts(w.cost ÷ 3, w.normal ÷ 3, w.tall ÷ 4) == (3, 3, 4)
-        @test counts(w.cost ÷ 5, w.normal ÷ 5, w.tall ÷ 5) == (5, 4, 5) # The normal fill is capped
-        @test counts(w.cost, w.normal, w.tall) == (1, 1, 1) # Below twice the floor
+        @test counts(w.cost ÷ 2, w.hessianfill ÷ 2, w.jacobianfill ÷ 2) == (2, 2, 2)
+        @test NLLSModel.MAX_THREADS_HESSIAN == 4
+        @test counts(w.cost ÷ 3, w.hessianfill ÷ 3, w.jacobianfill ÷ 4) == (3, 3, 4)
+        @test counts(w.cost ÷ 5, w.hessianfill ÷ 5, w.jacobianfill ÷ 5) == (5, 4, 5) # The Hessian fill is capped
+        @test counts(w.cost, w.hessianfill, w.jacobianfill) == (1, 1, 1) # Below twice the floor
         @test counts(1, 1, 1) == (8, 4, 8) && counts(0, 0, 0) == (8, 4, 8)
         @test counts(10^9, 10^9, 10^9) == (1, 1, 1)
         # One floor in each unit gives a different count for each kind of work
         @test counts(30, 30, 30) == (2, 4, 8)
         @test counts(400, 400, 400) == (1, 4, 1)
-        @test NLLSModel.normalthreads(10^9, 1, 8, 10^6) == 4 && NLLSModel.normalthreads(10^9, 1, 3, 10^6) == 3 && NLLSModel.normalthreads(299, 100, 8, 10^6) == 2
+        @test NLLSModel.hessianthreads(10^9, 1, 8, 10^6) == 4 && NLLSModel.hessianthreads(10^9, 1, 3, 10^6) == 3 && NLLSModel.hessianthreads(299, 100, 8, 10^6) == 2
         # numthreads bounds it
         f, fdf!, _, _ = optimvars(ba; numthreads=static(3), min_work=1, min_work_cost=1)
         @test f.nthreads == 3 && length(fdf!.linsystem.ls) == 3
@@ -485,29 +362,29 @@ wtuple(w) = (w.cost, w.tall, w.normal)
             ("single variable", wdynproblem, 3), ("dynamic", wdynproblem, nothing))
         p = make()
         w = NLLSModel.workestimates(p, isnothing(unfixed) ? nothing : unfixed)
-        evalnormal(nt) = begin
+        evalhessian(nt) = begin
             m = deepcopy(p)
-            f, fdf!, x, H = optimvars(m; unfixed, numthreads=static(nt), min_work=w.normal ÷ 2, min_work_cost=max(1, w.cost ÷ 2))
+            f, fdf!, x, H = optimvars(m; unfixed, numthreads=static(nt), min_work=w.hessianfill ÷ 2, min_work_cost=max(1, w.cost ÷ 2))
             n = Int(sum(v -> dynamic(NLLSModel.nvars(v)), unfixed === nothing ? m.variables : [m.variables[unfixed]]))
             g = H isa AbstractMatrix ? zero(H[:, 1]) : zeros(n)
             Hb = H === nothing ? zeros(n, n) : deepcopy(H)
             c = fdf!(g, Hb, x)
             (f(x), c, Vector(g), Matrix(Hb)), (fdf!.linsystem isa NLLSModel.LinearSystemShared ? length(fdf!.linsystem.ls) : 1)
         end
-        evaltall(nt) = begin
+        evaljacobian(nt) = begin
             m = deepcopy(p)
-            f, res!, resjac!, x, J = optimvars_nls(m; unfixed, numthreads=static(nt), min_work=w.tall ÷ 2, min_work_cost=max(1, w.cost ÷ 2))
+            f, res!, resjac!, x, J = optimvars_nls(m; unfixed, numthreads=static(nt), min_work=w.jacobianfill ÷ 2, min_work_cost=max(1, w.cost ÷ 2))
             r = zeros(resjac!.layout.M)
             c = resjac!(r, J, x)
             (f(x), c, copy(r), Matrix(J)), resjac!.nthreads
         end
-        (s, _), (t, copies) = evalnormal(1), evalnormal(8)
+        (s, _), (t, copies) = evalhessian(1), evalhessian(8)
         @test copies == 2
         @test t[1] ≈ s[1] rtol=1e-13
         @test t[2] ≈ s[2] rtol=1e-13
         @test t[3] ≈ s[3] rtol=1e-12
         @test t[4] ≈ s[4] rtol=1e-12
-        (s, _), (t, chunks) = evaltall(1), evaltall(8)
+        (s, _), (t, chunks) = evaljacobian(1), evaljacobian(8)
         @test chunks == 2
         @test t[3] == s[3] && t[4] == s[4]
         @test t[1] ≈ s[1] rtol=1e-13
@@ -518,8 +395,8 @@ wtuple(w) = (w.cost, w.tall, w.normal)
         pr = wprocrustes(26, 20)
         # The old estimate (residual length times number of variables squared) was 26 * 20 * 1^2 = 520, below the default
         # floor of 10 000, so this did not thread; the linearization estimate is 26 * 325 * 326 * 20.
-        @test 26 * 20 * 1^2 < NLLSModel.MIN_WORK_PER_THREAD_NORMAL
-        @test NLLSModel.workestimates(pr, nothing).normal >= NLLSModel.MIN_WORK_PER_THREAD_NORMAL
+        @test 26 * 20 * 1^2 < NLLSModel.MIN_WORK_PER_THREAD_HESSIAN
+        @test NLLSModel.workestimates(pr, nothing).hessianfill >= NLLSModel.MIN_WORK_PER_THREAD_HESSIAN
         _, fdf!, _, _ = optimvars(pr; numthreads=static(4))
         @test fdf!.linsystem isa NLLSModel.LinearSystemShared
     end
@@ -527,7 +404,7 @@ wtuple(w) = (w.cost, w.tall, w.normal)
     # The same numbers with and without threading, forcing each way with a floor of 0 and a very large floor. The
     # residual and Jacobian rows are written by one task each, so they are equal; sums over tasks are equal to rounding.
     @testset "same results threaded and not: $name" for (name, make) in (("bundle adjustment", () -> wbaproblem(3, 10)), ("Procrustes d = 26", () -> wprocrustes(26, 20)), ("dynamic", wdynproblem))
-        evalnormal(nt, floor) = begin
+        evalhessian(nt, floor) = begin
             p = make()
             f, fdf!, x, H = optimvars(p; numthreads=static(nt), min_work=floor, min_work_cost=floor)
             n = Int(sum(v -> dynamic(NLLSModel.nvars(v)), p.variables))
@@ -535,25 +412,25 @@ wtuple(w) = (w.cost, w.tall, w.normal)
             c = fdf!(g, Hb, x)
             (f(x), c, copy(g), Matrix(Hb))
         end
-        evaltall(nt, floor) = begin
+        evaljacobian(nt, floor) = begin
             p = make()
             f, res!, resjac!, x, J = optimvars_nls(p; numthreads=static(nt), min_work=floor)
             r = zeros(resjac!.layout.M)
             c = resjac!(r, J, x)
             (f(x), c, copy(r), Matrix(J))
         end
-        serial, forced = evalnormal(1, 10^12), evalnormal(4, 0)
+        serial, forced = evalhessian(1, 10^12), evalhessian(4, 0)
         @test forced[1] ≈ serial[1] rtol=1e-13
         @test forced[2] ≈ serial[2] rtol=1e-13
         @test forced[3] ≈ serial[3] rtol=1e-12
         @test forced[4] ≈ serial[4] rtol=1e-12
-        @test evalnormal(4, 10^12) == serial # a very large floor forces one thread: bit-identical
-        serial, forced = evaltall(1, 10^12), evaltall(4, 0)
+        @test evalhessian(4, 10^12) == serial # a very large floor forces one thread: bit-identical
+        serial, forced = evaljacobian(1, 10^12), evaljacobian(4, 0)
         @test forced[3] == serial[3] && forced[4] == serial[4]
         @test forced[2] ≈ serial[2] rtol=1e-13
         # A very large floor makes the fill serial: bit-identical. The cost function f threads on its own estimate at the
         # default cost floor, whatever min_work is, so its sum may differ in the last bits.
-        onethread = evaltall(4, 10^12)
+        onethread = evaljacobian(4, 10^12)
         @test onethread[2:4] == serial[2:4]
         @test onethread[1] ≈ serial[1] rtol=1e-13
     end

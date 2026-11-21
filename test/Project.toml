@@ -1,5 +1,6 @@
 [deps]
 BlockLinearSystems = "a7d4e89f-9c3b-4d0e-8f5a-5b8c7d1e4f28"
+DampedLinearSolve = "d0bc3897-303a-4c2a-8def-9d5e444f89b8"
 JSOSolvers = "10dff2fc-5484-5881-a0e0-c90441020f8a"
 Krylov = "ba0b0d4f-ebba-5204-a429-3ac8c609bfb7"
 LeastSquaresOptim = "0fc2ff8b-aaa3-5acd-a817-1944a5e08891"
@@ -15,5 +16,6 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [sources]
+DampedLinearSolve = {url = "https://github.com/ojwoodford/DampedLinearSolve.jl", rev = "main"}
 NLLSModel = {path = ".."}
 SecondOrderOptimization = {url = "https://github.com/ojwoodford/SecondOrderOptimization.jl", rev = "main"}

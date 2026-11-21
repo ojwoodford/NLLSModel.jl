@@ -1,7 +1,8 @@
 # Threaded linearization of Schur problems without whole-system copies.
 #
 # Each eliminated variable owns its block of E and its coupling blocks of C, and every cost touches at most
-# one of them. If each thread is given whole eliminated variables (all costs that involve them), threads write disjoint parts of
+# one of them: BlockLinearSystems' `addblock!` documents that calls for pairs involving different eliminated blocks write
+# disjoint storage. If each thread is given whole eliminated variables (all costs that involve them), threads write disjoint parts of
 # `E_data`, `C_data` and the eliminated part of the gradient, so those are shared. Only `R` (retained-retained blocks)
 # and the retained part of the gradient can be written by several threads, so only those are per-thread copies, and
 # only they need summing afterwards.
@@ -71,17 +72,18 @@ function build_schur_thread_plan!(problem::Model, blockindices, nrblocks::Intege
     return SchurThreadPlan(collect(map(length, vecs)), owned, tail)
 end
 
-# Per-thread buffer for the threaded Schur linearization: own R and gradient; E and C are shared at evaluation time.
+# Per-thread buffer for the threaded Schur linearization: own R and gradient; E and C are those of the system it is made
+# from, and at evaluation time those of the system being filled.
 function schur_thread_buffer(ls::MultiVariateLSSchur_ls)
     A = ls.A
     R_copy = A.R isa Matrix ? similar(A.R) : copy_structure(A.R)
-    return MultiVariateLSSchur_ls(SchurBlockHessian(A.structure, R_copy, Float64[], Float64[]), zeros(Float64, length(ls.b)))
+    return MultiVariateLSSchur_ls(SchurBlockHessian(R_copy, A), zeros(Float64, length(ls.b)))
 end
 
-# Like `sharedlinearsystem`, but the extra buffers carry no E and C storage
-# One buffer per thread of `normalthreads`
-function sharedschurlinearsystem(ls::LinearSystem, work::Integer, numthreads::StaticInt, costsplit::Integer, min_work=MIN_WORK_PER_THREAD_NORMAL)
-    n = normalthreads(work, min_work, dynamic(numthreads), costsplit)
+# Like `sharedlinearsystem`, but the extra buffers have no E and C storage of their own
+# One buffer per thread of `hessianthreads`
+function sharedschurlinearsystem(ls::LinearSystem, work::Integer, numthreads::StaticInt, costsplit::Integer, min_work=MIN_WORK_PER_THREAD_HESSIAN)
+    n = hessianthreads(work, min_work, dynamic(numthreads), costsplit)
     n == 1 && return ls
     return sharedschurlinearsystem(ls, static(n))
 end
@@ -120,7 +122,7 @@ function schur_thread_task!(args::SchurThreadArgs{LinearSystemShared{F, V, N}}, 
         MultiVariateLSSchur_ls(H, g)
     else
         buf = linsystem.ls[t]
-        MultiVariateLSSchur_ls(SchurBlockHessian(H.structure, buf.A.R, H.E_data, H.C_data), buf.b)
+        MultiVariateLSSchur_ls(SchurBlockHessian(buf.A.R, H), buf.b)
     end
     zero_schur_R!(ls_t.A.R)
     fill!(ls_t.b, 0.0)

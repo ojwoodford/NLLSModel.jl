@@ -3,118 +3,11 @@ using SecondOrderOptimization
 import BlockLinearSystems
 import OptimizationVariableInterface
 
+include("fixtures/loader.jl")
+fixture("frontdoor", "optimization", "recommender")
+
 # The front door: optimize!(model, options) and optimize(model, options) (the extension), and the `reduction` and `storage`
-# keywords of optimvars. Needs optlandmark_problem from optimization.jl.
-
-# Pins a variable of any type to a target (nonlinear, with its minimum at the target)
-struct Tgt{V} <: NLLSModel.AbstractResidual
-    t::V
-    i::Int
-end
-NLLSModel.ndeps(::Tgt) = static(1)
-NLLSModel.nres(::Tgt{<:StaticVector{N}}) where N = static(N)
-NLLSModel.nres(r::Tgt{<:Vector}) = length(r.t)
-NLLSModel.varindices(r::Tgt) = r.i
-NLLSModel.getvars(r::Tgt{V}, vars::AbstractVector) where V = (vars[r.i]::V,)
-NLLSModel.computeresidual(r::Tgt, x) = (x .+ 0.1 .* x .^ 3) .- (r.t .+ 0.1 .* r.t .^ 3)
-Base.eltype(::Tgt) = Float64
-
-# Links two vectors of equal length: a - b = d
-struct Lnk <: NLLSModel.AbstractResidual
-    d::Vector{Float64}
-    i::Int
-    j::Int
-end
-NLLSModel.ndeps(::Lnk) = static(2)
-NLLSModel.nres(r::Lnk) = length(r.d)
-NLLSModel.varindices(r::Lnk) = SVector(r.i, r.j)
-NLLSModel.getvars(r::Lnk, vars::AbstractVector) = (vars[r.i]::Vector{Float64}, vars[r.j]::Vector{Float64})
-NLLSModel.computeresidual(r::Lnk, a, b) = a .- b .- r.d
-Base.eltype(::Lnk) = Float64
-
-const FDOptions = OptimizationOptions(iterator=:levenbergmarquardt, maxiters=100)
-
-# One variable of type `V`, started away from its target
-function singleproblem(V, n, seed)
-    rng = MersenneTwister(seed)
-    t = V(randn(rng, n))
-    model = Model(V, Tgt{V})
-    addvariable!(model, V(t .+ 0.3 .* randn(rng, n)))
-    addcost!(model, Tgt(t, 1))
-    return model, t
-end
-
-# A chain of `n` vectors of dimension `d`, each pinned to its target and linked to its neighbour
-function chainproblem(n, d, seed)
-    rng = MersenneTwister(seed)
-    targets = [randn(rng, d) for _ in 1:n]
-    model = Model(Vector{Float64}, Union{Tgt{Vector{Float64}}, Lnk})
-    for k in 1:n
-        addvariable!(model, targets[k] .+ 0.3 .* randn(rng, d))
-    end
-    for k in 1:n
-        addcost!(model, Tgt(targets[k], k))
-    end
-    for k in 1:n-1
-        addcost!(model, Lnk(targets[k] .- targets[k+1], k, k+1))
-    end
-    return model, targets
-end
-
-# Vectors of 3, 1, 2 dimensions and static 2-vectors, in an order that block_sizes_indices has to re-sort. Pairs (1, 4) and
-# (3, 7) are linked, and no linked pair is split by any `unfixed` below, so every unfixed variable has its target as optimum.
-function mixedproblem()
-    rng = MersenneTwister(11)
-    sizes = [3, 2, 1, 3, 2, 2, 1]
-    isstatic = [false, true, false, false, true, false, false]
-    targets = Any[isstatic[k] ? SVector{2, Float64}(randn(rng, 2)) : randn(rng, sizes[k]) for k in 1:7]
-    model = Model(Union{Vector{Float64}, SVector{2, Float64}}, Union{Tgt{Vector{Float64}}, Tgt{SVector{2, Float64}}, Lnk})
-    for k in 1:7
-        addvariable!(model, targets[k] .+ 0.3 .* (isstatic[k] ? SVector{2, Float64}(randn(rng, 2)) : randn(rng, sizes[k])))
-    end
-    for k in 1:7
-        addcost!(model, Tgt(targets[k], k))
-    end
-    addcost!(model, Lnk(targets[1] .- targets[4], 1, 4))
-    addcost!(model, Lnk(targets[3] .- targets[7], 3, 7))
-    return model, targets
-end
-
-# Pins a variable to a target linearly, with a hand-written Jacobian that allocates nothing (ForwardDiff on `Tgt` allocates
-# for 16 or more dimensions and for a Vector), so an allocation test sees only the linear system's own. A dynamic one
-# returns arrays it owns.
-struct LinTgt{V, R, J} <: NLLSModel.AbstractResidual
-    t::V
-    r::R
-    J::J
-end
-LinTgt(t::StaticVector{N}) where N = LinTgt(t, nothing, nothing)
-LinTgt(t::Vector{Float64}) = LinTgt(t, similar(t), Matrix{Float64}(I, length(t), length(t)))
-NLLSModel.ndeps(::LinTgt) = static(1)
-NLLSModel.nres(::LinTgt{<:StaticVector{N}}) where N = static(N)
-NLLSModel.nres(r::LinTgt{<:Vector}) = length(r.t)
-NLLSModel.varindices(::LinTgt) = 1
-NLLSModel.getvars(::LinTgt{V}, vars::AbstractVector) where V = (vars[1]::V,)
-NLLSModel.computeresidual(r::LinTgt, x) = x - r.t
-NLLSModel.computeresjac(::StaticInt{1}, r::LinTgt{<:StaticVector{N}}, x) where N = (x - r.t, SMatrix{N, N, Float64}(I))
-NLLSModel.computeresjac(::StaticInt{1}, r::LinTgt{<:Vector}, x) = (r.r .= x .- r.t; (r.r, r.J))
-Base.eltype(::LinTgt) = Float64
-
-# Four costs, so that a shared system has a cost for each of up to four threads
-function linsingleproblem(V, n, seed; ncosts=4)
-    rng = MersenneTwister(seed)
-    t = V(randn(rng, n))
-    model = Model(V, typeof(LinTgt(t)))
-    addvariable!(model, V(t .+ 0.3 .* randn(rng, n)))
-    foreach(_ -> addcost!(model, LinTgt(V(t .+ 0.01 .* randn(rng, n)))), 1:ncosts)
-    return model
-end
-
-# Allocation of one fdf! call, after a warm-up call (in a function, so the measurement sees concrete types)
-singlefdf_allocs(fdf!, g, H, x) = (fdf!(g, H, x); @allocated fdf!(g, H, x))
-
-landmarkvec(v) = v isa OptLandmark ? v.p : v
-issolved(model, targets, which=eachindex(targets); atol=1e-6) = all(k -> isapprox(model.variables[k], targets[k]; atol=atol), which)
+# keywords of optimvars; optimize!(model, rec) and optimize(model, rec) for a recommendation (RC5).
 
 @testset "frontdoor.jl" begin
     @testset "variables hold the solution: $name" for (name, V, n) in (("static 1", SVector{1, Float64}, 1), ("static 16", SVector{16, Float64}, 16), ("static 17", SVector{17, Float64}, 17), ("dynamic Vector", Vector{Float64}, 17), ("short Vector", Vector{Float64}, 3))
@@ -222,7 +115,7 @@ issolved(model, targets, which=eachindex(targets); atol=1e-6) = all(k -> isappro
         @test issolved(model, targets)
     end
 
-    # AN5: a workspace with elimination on the normal path. Each call builds a new Schur structure, so whether a second
+    # AN5: a workspace with elimination on the Hessian path. Each call builds a new Schur structure, so whether a second
     # call reuses the workspace is not tested (see the fixes file, "To decide").
     @testset "a workspace with elimination, storage = :$storage" for storage in (:dense, :sparse)
         Random.seed!(11)
@@ -245,37 +138,6 @@ issolved(model, targets, which=eachindex(targets); atol=1e-6) = all(k -> isappro
         @test NLLSModel.MAX_STATIC_SYSTEM == 16
         @test NLLSModel.usesstaticsystem(x0) == isstatic
         @test (typeof(fdf!.linsystem.ls) <: NLLSModel.UniVariateLSstatic_ls) == isstatic
-    end
-
-    # For one variable, the H that optimvars returns has the types of the linear system's own storage, so buffers built
-    # from it (H by deepcopy, g by `zero(H[:, 1])`) take fdf!'s direct-write branch: the costs accumulate straight into
-    # them, with no internal accumulation and no copy. Other buffer types take the fallback, with the same result.
-    @testset "single-variable prototype: $name" for (name, V, n, nt) in (
-            ("static 3", SVector{3, Float64}, 3, 1), ("static 16", SVector{16, Float64}, 16, 1),
-            ("static 3, shared", SVector{3, Float64}, 3, 4), ("static 17", SVector{17, Float64}, 17, 1),
-            ("dynamic 3", Vector{Float64}, 3, 1), ("dynamic 3, shared", Vector{Float64}, 3, 4))
-        model = linsingleproblem(V, n, 11)
-        _, fdf!, x0, H = optimvars(model; numthreads=static(nt), min_work=0) # min_work=0: share the system when nt > 1
-        @test (fdf!.linsystem isa NLLSModel.LinearSystemShared) == (nt > 1)
-        isstatic = V <: StaticVector && n <= 16
-        @test H isa (isstatic ? MMatrix{n, n, Float64, n * n} : Matrix{Float64})
-        @test size(H) == (n, n)
-        @test all(iszero, H)
-        Hd = deepcopy(H)
-        gd = zero(H[:, 1])
-        @test gd isa (isstatic ? MVector{n, Float64} : Vector{Float64})
-        internal = NLLSModel.getA(fdf!.linsystem)
-        fill!(internal, 7.0)
-        c = fdf!(gd, Hd, x0)
-        @test all(==(7.0), internal) # The direct branch never touches the internal storage
-        @test singlefdf_allocs(fdf!, gd, Hd, x0) == 0 # Threaded too, when the suite runs on several threads
-        # The fallback: buffers of another type than the system's
-        gf, Hf = isstatic ? (zeros(n), zeros(n, n)) : (view(zeros(n), :), view(zeros(n, n), :, :))
-        cf = fdf!(gf, Hf, x0)
-        @test !all(==(7.0), internal) # The fallback accumulates internally, then copies
-        @test cf == c
-        @test gf == gd
-        @test Hf == Hd
     end
 
     @testset "reduction and storage" begin
@@ -339,7 +201,7 @@ issolved(model, targets, which=eachindex(targets); atol=1e-6) = all(k -> isappro
         end
 
         # max_dense_bytes: :auto stores a dense matrix above the cap sparse instead, :dense throws there
-        @testset "max_dense_bytes on the normal path" begin
+        @testset "max_dense_bytes on the Hessian path" begin
             small, _ = chainproblem(5, 2, 9) # A dense 10×10 Hessian is 800 bytes
             Hof(model; kw...) = optimvars(model; numthreads=static(1), kw...)[4]
             @test Hof(small; max_dense_bytes=800) === nothing
@@ -367,6 +229,70 @@ issolved(model, targets, which=eachindex(targets); atol=1e-6) = all(k -> isappro
             @test_throws MethodError optimvars(ba; numthreads=static(1), linsolver=:schur)
             @test_throws MethodError optimvars(plain; numthreads=static(1), linsolver=:cholesky)
             @test_throws MethodError optimize!(deepcopy(plain), FDOptions; linsolver=:schur)
+        end
+    end
+
+    # RC5: a recommendation runs as the call it prints
+    @testset "optimize!(model, rec) is the printed call: $(spec.name)" for spec in REC_MODELS
+        model = spec.make()
+        rec = NLLSModel.recommendoptimizer(model; numthreads=static(1))
+        a, b = deepcopy(model), deepcopy(model)
+        r1 = optimize!(a, rec)
+        call = Meta.parse(let text = longform(rec); text[first(findfirst("optimize!(model,", text)):end] end)
+        r2 = Core.eval(Main, :(let model = $b; $call; end))
+        @test r1 isa OptimizationResult
+        @test r1.iterator === r2.iterator === rec.iterator
+        @test r1.niterations == r2.niterations
+        @test r1.bestcost === r2.bestcost
+        @test a.variables == b.variables
+        @test r1.niterations > 0 && r1.bestcost <= r1.startcost
+        # The non-mutating form
+        c, r3 = optimize(model, rec)
+        @test model.variables == spec.make().variables # Unchanged
+        @test r3.bestcost === r1.bestcost && c.variables == a.variables
+    end
+
+    @testset "optimize!(model, rec): with unfixed, the printed call" begin
+        model = posechain(8, 12)
+        unfixed = [2:8; 10:20]
+        rec = NLLSModel.recommendoptimizer(model; unfixed, numthreads=static(1), max_dense_bytes=10^6)
+        a, b = deepcopy(model), deepcopy(model)
+        r1 = optimize!(a, rec)
+        call = Meta.parse(let text = longform(rec); text[first(findfirst("optimize!(model,", text)):end] end)
+        r2 = Core.eval(Main, :(let model = $b, unfixed = $unfixed; $call; end))
+        @test (r1.iterator, r1.niterations, r1.bestcost) === (r2.iterator, r2.niterations, r2.bestcost)
+        @test a.variables == b.variables
+        @test a.variables[1] == model.variables[1] && a.variables[9] == model.variables[9] # Fixed
+    end
+
+    @testset "optimize!(model, rec): keywords" begin
+        model = posechain(8, 12)
+        rec = NLLSModel.recommendoptimizer(model; numthreads=static(1))
+        # Each keyword the recommendation owns is refused, naming it, before anything runs
+        for (name, value) in ((:iterator, :dogleg), (:linsolver, :ldl), (:formulation, :jacobian), (:reduction, :none),
+                (:storage, :sparse), (:unfixed, 1), (:numthreads, 1), (:max_dense_bytes, 10^6))
+            m = deepcopy(model)
+            err = try optimize!(m, rec; name => value); nothing catch e e end
+            @test err isa ArgumentError && startswith(err.msg, "$name is set by the recommendation")
+            @test occursin("optimize!(model, options; ...)", err.msg)
+            @test m.variables == model.variables
+            @test_throws ArgumentError optimize(model, rec; name => value)
+        end
+        # A forwarded keyword takes effect
+        @test optimize!(deepcopy(model), rec; maxiters=1).niterations == 1
+        @test optimize(model, rec; maxiters=1)[2].niterations == 1
+        # callback, workspace, min_work and min_work_cost are passed on
+        calls = Ref(0)
+        cb(cost, args...) = (calls[] += 1; (cost, 0))
+        optimize!(deepcopy(model), rec; callback=cb, min_work=0, min_work_cost=0)
+        @test calls[] > 0
+        # An unknown keyword is an error
+        @test_throws MethodError optimize!(deepcopy(model), rec; maxiter=1)
+    end
+
+    @testset "OptimizationOptions takes every choice the rules can make" begin
+        for iterator in (:dogleg, :levenbergmarquardt_dtd, :levenbergmarquardt), linsolver in (:cholesky, :ldl, :qr)
+            @test OptimizationOptions(; iterator, linsolver) isa OptimizationOptions
         end
     end
 end

@@ -1,0 +1,14 @@
+using NLLSModel, Test, Static, StaticArrays, Random, LinearAlgebra
+using SecondOrderOptimization
+
+include("fixtures/loader.jl")
+fixture("jacobianformulation", "jacobianproblems")
+
+# Z2: formulation = :jacobian with every iterator the optimizer's Jacobian path accepts.
+
+@testset "jacobianiterators.jl" begin
+    @testset "same optimum as :hessian with $iterator, $name" for iterator in (:levenbergmarquardt_dtd, :dogleg, :newton), (name, make) in (("curve fit", () -> curvefit(outliers=2)), ("Huber", () -> curvefit(huber=true, outliers=4)), ("Huber2o", () -> curvefit(huber=:second, outliers=4)), ("mixed variables", () -> posemodel()))
+        ok, ct, cn = sameoptimum(make(), OptimizationOptions(iterator=iterator, maxiters=300))
+        @test ok
+    end
+end

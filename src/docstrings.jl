@@ -44,14 +44,21 @@ AbstractAdaptiveResidual
 """
     AbstractRobustifier
 
-Abstract base type for M-estimator loss functions `rho(s)` where `s = ||r||^2`.
+Abstract base type for robust kernels `ρ(s)` of the squared residual norm `s = ‖r‖²`. A residual's cost is `0.5·ρ(s)`.
+The convention is `ρ(s) = −2 log p(r)`, with `p` a density over `r`; a fixed kernel may drop any constant term
+(`NoRobust` is `ρ(s) = s`). A kernel defines [`robustify`](@ref), and may define [`robustifydcost`](@ref) (otherwise
+computed by automatic differentiation).
 """
 AbstractRobustifier
 
 """
     AbstractAdaptiveRobustifier <: AbstractRobustifier
 
-Abstract base type for robustifiers whose shape parameters are optimized during solve.
+Abstract base type for robust kernels with parameters that can be optimized: a variable of the model, the first
+variable of an [`AbstractAdaptiveResidual`](@ref). An adaptive kernel returns `ρ(s) = −2 log p(r)` exactly, with every
+term that depends on its parameters or on the residual length `d`, which it carries (as `static(d)` in its
+constructor; [`addcost!`](@ref) checks it against `nres`). A density can exceed 1, so its cost can be negative. See
+[`ContaminatedGaussian`](@ref) and [`GaussianPlusUniform`](@ref).
 """
 AbstractAdaptiveRobustifier
 
@@ -130,16 +137,110 @@ kernel = GemanMcclure2oKernel(2.0)
 GemanMcclure2oKernel
 
 """
-    ContaminatedGaussian(s1, s2, w)
+    ContaminatedGaussian(s1, s2, w, d::StaticInt)
 
-Adaptive two-component Gaussian mixture robustifier with standard deviations `s1`, `s2` (`s2 > s1 > 0`) and inlier weight `w` in `(0, 1)`.
+Adaptive robust kernel for residuals of length `d`: a mixture of two zero-mean Gaussians of standard deviations `s1` and
+`s2`, with weights `w` and `1 − w`,
+
+`ρ(s) = −2 log(w N_d(s; s1) + (1 − w) N_d(s; s2))`, where `N_d(s; σ) = (2πσ²)^(−d/2) exp(−s/(2σ²))` and `s = ‖r‖²`.
+
+`s1`, `s2` and `w` are the kernel's variables (optimized as `log(1/s1)`, `log(1/s2)` and `logit(w)`); the arguments are
+promoted to one float type. The components are kept in the order given: the density is the same with `(s1, w)` and
+`(s2, 1 − w)` exchanged, so which is the narrow one is the caller's choice. Pass `d` as `static(d)`: it must equal `nres`
+of the residuals that use the kernel, which [`addcost!`](@ref) checks. As `ρ` is `−2 log p` exactly, a cost can be
+negative.
 
 # Example
 ```julia
-kernel = ContaminatedGaussian(1.0, 10.0, 0.8)
+using Static
+kernel = ContaminatedGaussian(1.0, 10.0, 0.8, static(1))
+robustify(kernel, 0.5)
 ```
 """
 ContaminatedGaussian
+
+"""
+    GaussianPlusUniform(sigma, w, d::StaticInt; volume)
+
+Adaptive robust kernel for residuals of length `d`: a Gaussian of standard deviation `sigma` and weight `w`, plus a
+uniform outlier density `(1 - w) / A` with `A = volume`,
+
+`ρ(s) = −2 log(w N_d(s; sigma) + (1 − w)/A)`, where `N_d(s; σ) = (2πσ²)^(−d/2) exp(−s/(2σ²))` and `s = ‖r‖²`.
+
+`sigma` and `w` are the kernel's variables (optimized as `log(1/sigma)` and `logit(w)`). The outlier volume `A` is
+supplied, finite and positive, and never optimized; a residual can hand over its own with [`withlogvolume`](@ref). The
+uniform term is not truncated to a region: the kernel sees only `s`. Pass `d` as `static(d)`: it must equal `nres` of the
+residuals that use the kernel, which [`addcost!`](@ref) checks. As `ρ` is `−2 log p` exactly, a cost can be negative.
+
+# Example
+```julia
+using Static
+kernel = GaussianPlusUniform(1.0, 0.9, static(2); volume = 100.0)
+robustify(kernel, 0.5)
+```
+"""
+GaussianPlusUniform
+
+"""
+    withlogvolume(kernel::GaussianPlusUniform, logvolume) -> GaussianPlusUniform
+
+The same kernel with the logarithm of its outlier volume replaced by `logvolume` (converted to the kernel's element
+type): a copy of the fields, of the same concrete type. A residual whose outliers have a volume of their own hands it
+over this way, from `getvars` (an adaptive kernel) or `robustkernel` (a fixed one).
+
+# Example
+```julia
+using Static
+kernel = GaussianPlusUniform(1.0, 0.9, static(2); volume = 100.0)
+withlogvolume(kernel, log(250.0)) == GaussianPlusUniform(1.0, 0.9, static(2); volume = 250.0) # true
+```
+"""
+withlogvolume
+
+"""
+    optimizerobustifier(kernel, s[, logvolume]; maxiters = 10, rtol = 1e-6, wprior = (1.0, 1.0)) -> kernel
+
+Fit an adaptive kernel ([`ContaminatedGaussian`](@ref) or [`GaussianPlusUniform`](@ref)) to the squared residual norms
+`s` (`sᵢ = ‖rᵢ‖²`) by expectation-maximization, and return the fitted kernel, of the same type; `kernel` is the start.
+For a `GaussianPlusUniform`, `logvolume` (of the length of `s`) gives each residual's outlier log volume `log Aᵢ`;
+omitted, every residual uses the kernel's own, which the fitted kernel keeps.
+
+- `maxiters`: the most iterations.
+- `rtol`: stop when the kernel's parameters change by less than this, relatively.
+- `wprior = (α, β)`: a Beta prior on the first component's weight `w`, as pseudo-counts; both finite and at least 1.
+  `(1, 1)` is no prior.
+
+It also stops when the responsibilities are all in one component or a scale would not be finite and positive (all the
+inlier residuals zero, say), returning the kernel it has; an empty `s` returns `kernel`. It allocates nothing.
+
+# Example
+```julia
+using Static
+s = [0.1, 0.5, 2.0, 0.3, 80.0, 0.7, 1.2, 150.0]
+kernel = optimizerobustifier(ContaminatedGaussian(0.5, 5.0, 0.5, static(1)), s)
+```
+"""
+function optimizerobustifier end
+
+"""
+    optimizerobustifier!(model::Model, index; s = Float64[], logvolume = Float64[], maxiters = 10, rtol = 1e-6,
+                         wprior = (1.0, 1.0)) -> cost
+
+Fit the adaptive kernel `model.variables[index]` (a [`ContaminatedGaussian`](@ref) or a [`GaussianPlusUniform`](@ref))
+to the residuals that use it, at the model's current variables, with [`optimizerobustifier`](@ref); write it back, and
+return the model's new [`cost`](@ref). The residuals are the [`AbstractAdaptiveResidual`](@ref)s whose first variable
+is `index`; for a `GaussianPlusUniform` each residual's outlier log volume is that of the kernel its [`getvars`](@ref)
+hands over (see [`withlogvolume`](@ref)). A residual holding a fixed kernel through [`robustkernel`](@ref) is not
+visited. With no residual using the kernel, it is unchanged.
+
+`s` and `logvolume` are buffers, resized to the number of residuals: a caller who keeps them allocates nothing after
+the first call. The other keywords are those of `optimizerobustifier`.
+
+To alternate between fitting the kernel and optimizing the other variables, fix the kernel and fit it in the
+optimizer's callback, with `OptimizationOptions(callbackchangesstate = true)`:
+`callback = (cost, x, data, iteratedata) -> (optimizerobustifier!(model, index; s, logvolume), 0)`.
+"""
+function optimizerobustifier! end
 
 """
     SimpleError2{V1, V2}(measurement, var1, var2)
@@ -193,7 +294,7 @@ addcost!(problem, my_residual)
 addcost!
 
 """
-    optimvars(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, min_work=$MIN_WORK_PER_THREAD_NORMAL, min_work_cost=$MIN_WORK_PER_THREAD_COST) -> (f, fdf!, x0, H)
+    optimvars(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, min_work=$MIN_WORK_PER_THREAD_HESSIAN, min_work_cost=$MIN_WORK_PER_THREAD_COST) -> (f, fdf!, x0, H)
 
 The normal way to solve a `Model` is `optimize!(model, options)` (needs `using SecondOrderOptimization`); `optimvars` is the
 advanced route, for custom outer loops, reusing a workspace, or other solvers.
@@ -344,9 +445,12 @@ Computes the robustified squared residual value and its first and second derivat
 function robustifydcost end
 
 """
-    robustifydkernel(kernel::AbstractAdaptiveRobustifier, squared_norm)
+    robustifydkernel(kernel::AbstractAdaptiveRobustifier, squared_norm) -> (rho, gradient, hessian)
 
-Computes derivatives of an adaptive robustifier with respect to both the squared residual norm and the kernel parameters.
+Computes `ρ(s)` and its derivatives with respect to the kernel's parameters followed by `s = ‖r‖²`: the gradient, an
+`SVector` of length `nvars(kernel) + 1`, and the Hessian, a symmetric `SMatrix` of that size, in the same order. The
+parameters are those `update(kernel, x)` steps (for the kernels here, logarithms and logits). Computed by automatic
+differentiation unless the kernel defines it.
 """
 function robustifydkernel end
 
@@ -402,11 +506,14 @@ Computes the scalar cost, gradient vector, and Hessian matrix for active variabl
 The same rules apply as for [`computeresjac`](@ref): returned arrays must not be shared with other residuals, and the
 code must be single-threaded. For an [`AbstractResidual`](@ref) the gradient and Hessian are computed from the Jacobian
 without BLAS; the arrays returned alias per-task buffers and are valid until the same task evaluates its next cost.
+Where the Jacobian is static, the Hessian returned is not an `Array` or `SArray` but a lazy `AbstractMatrix` that
+computes each entry when it is read; index it, or `collect` it, for a stored copy. A method of your own may return any
+`AbstractVector` gradient and `AbstractMatrix` Hessian, ordinary arrays included.
 """
 function computecostgradhess end
 
 """
-    NLPLSModel(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, min_work=$MIN_WORK_PER_THREAD_NORMAL, min_work_cost=$MIN_WORK_PER_THREAD_COST, name="NLPLSModel")
+    NLPLSModel(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, min_work=$MIN_WORK_PER_THREAD_HESSIAN, min_work_cost=$MIN_WORK_PER_THREAD_COST, name="NLPLSModel")
 
 Wraps a [`Model`](@ref) as an `NLPModels.AbstractNLPModel` for use with general
 nonlinear programming solvers such as `JSOSolvers`, `Ipopt`, and `Optim`.
@@ -437,7 +544,7 @@ $KEYWORDS_DOC"""
 NLPLSModel
 
 """
-    NLLSNLSModel(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work=$MIN_WORK_PER_THREAD_TALL, min_work_cost=$MIN_WORK_PER_THREAD_COST, name="NLLSNLSModel")
+    NLLSNLSModel(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work=$MIN_WORK_PER_THREAD_JACOBIAN, min_work_cost=$MIN_WORK_PER_THREAD_COST, name="NLLSNLSModel")
 
 Wraps a [`Model`](@ref) as an `NLPModels.AbstractNLSModel{Float64, Vector{Float64}}`, which exposes the residual vector and
 its Jacobian, for nonlinear least-squares solvers that work on them directly, such as `JSOSolvers.trunk` and
@@ -453,8 +560,8 @@ Every cost must be a non-adaptive [`AbstractResidual`](@ref) with a linear kerne
 cost is exactly `½‖r‖²`, which these solvers derive from `r`; otherwise it throws an `ArgumentError`. Every unfixed
 variable must update by plain addition and pack into a flat `Float64` vector (as for [`flat_optimvars_nls`](@ref)).
 
-It is built on the tall path ([`optimvars_nls`](@ref)): `reduction = :auto` means `:none`. The cost alone (`obj`) is
-evaluated by the cost function, threaded by `min_work_cost`; the residual and Jacobian by the tall fill, threaded by
+It is built on the Jacobian path ([`optimvars_nls`](@ref)): `reduction = :auto` means `:none`. The cost alone (`obj`) is
+evaluated by the cost function, threaded by `min_work_cost`; the residual and Jacobian by the Jacobian fill, threaded by
 `min_work`. `name` is the name given to the model's metadata (default `"NLLSNLSModel"`).
 
 The solution is transferred back to `problem.variables` with [`syncvars!`](@ref).
@@ -470,3 +577,87 @@ Copies the flat solution vector `x` back into the problem's `variables` array,
 taking unfixed variable subsets and block variable structures into account.
 """
 syncvars!
+
+"""
+    recommendoptimizer(model::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), max_dense_bytes=$MAX_DENSE_BYTES) -> OptimizationRecommendation
+
+Recommends how to solve `model`, from its structure and its current values: a formulation (`:hessian`, the Hessian, or `:jacobian`, the residual and the Jacobian), the `reduction` and `storage`, a linear solver and an iterator,
+each chosen by a hand-written rule. Displaying the result explains each choice and prints the equivalent call to
+`optimize!(model, options; ...)`; with SecondOrderOptimization loaded, `optimize!(model, rec)` runs it.
+
+It builds the Hessian path as `optimize!(model, options)` does with `reduction = storage = :auto`, then builds, linearizes
+and factorizes its linear system once, at the model's current values, to measure the spread of the Hessian's diagonal
+(largest over smallest), a lower bound on the condition number of the Jacobi-scaled Hessian `D^-½ H D^-½` (by
+$REC_INVERSE_ITERATIONS steps of inverse iteration), and the time of a cost evaluation, a linearization and an undamped
+solve. When every cost is an [`AbstractResidual`](@ref) and the Hessian is ill-conditioned (the estimate is at least
+$(REC_JACOBIAN_CONDITION)) or could not be factorized undamped, it also tests the rank of the Jacobian `J`: it takes the
+weakest direction `w` of the scaled Hessian (from the undamped factorization, or else from the first of the scaled
+dampings `H + λD`, λ in $(REC_RANK_DAMPINGS), that factorizes), refines it by $(REC_RANK_REFINEMENTS) step of inverse
+iteration on `JᵀJ`, with products of `J`, and reads `t = ‖J D^-½ w‖`, with `‖w‖ = 1`: the smallest of the readings
+before and after each step.
+The column-scaled `J D^-½` has unit columns, so `t` is an upper bound on its smallest singular value. This evaluates
+the Jacobian once, through [`optimvars_nls`](@ref) without elimination; the first such call compiles the Jacobian
+evaluators. Then:
+
+- **Formulation:** `:hessian` when the Hessian is well conditioned, or when a cost is not a residual, except for the
+  normal equations from the Jacobian, below. Otherwise the rank
+  test decides: `J` is numerically rank-deficient when `t` is below $(REC_RANK_TOLERANCE) (a gauge freedom, for example),
+  which factorizing `J` would not help and damping handles, so `:hessian`; otherwise `J` has full numerical rank, and
+  `:jacobian`, since forming `JᵀJ` squares its conditioning. Where the test cannot run, `:hessian`: the Hessian has a
+  diagonal entry that is not positive, no damping tried factorizes it (it is indefinite, say), or [`optimvars_nls`](@ref)
+  cannot build the model (an unfixed adaptive kernel, for example).
+  *The normal equations from the Jacobian:* `:jacobian` with the normal equations formed from a dense Jacobian when every
+  cost is a residual, the Hessian is well conditioned (no rank test), the Hessian path's system is dense (not static,
+  sparse or eliminated), the dimension is above $(MAX_STATIC_SYSTEM), and building the Hessian cost by cost is estimated
+  to take at least $(REC_NORMAL_MARGIN) times the multiply-adds of one product `JᵀJ`: `Σ n_c² (m_c + $(REC_HESSIAN_SCATTER))`
+  over the costs (`m_c` residual rows, `n_c` unfixed dimensions; $(REC_HESSIAN_SCATTER) stands for one load-add-store into
+  the Hessian) against `M N² / 2` for the `M × N` Jacobian; and the dense Jacobian fits `max_dense_bytes` and
+  [`optimvars_nls`](@ref) builds it.
+- **Reduction and storage:** what `:auto` builds, on the formulation's path; for the normal equations from the Jacobian,
+  `reduction = :none` and `storage = :dense`, which the product needs.
+- **Linear solver:** on the Hessian path, `:cholesky` for a static, dense or eliminated system and `:ldl` for a sparse
+  one (what `linsolver = :auto` uses), but `:ldl` whenever a cost is not a residual, since the Hessian can then be
+  indefinite; on the Jacobian path `:qr`, and `:cholesky` (of `JᵀJ`, formed from the Jacobian in one product) for the
+  normal equations from the Jacobian.
+- **Iterator:** `:dogleg` when the undamped solve succeeded, the condition estimate is below $(REC_DOGLEG_CONDITION), the
+  diagonal's spread is below $(REC_DIAGSPREAD) and a solve takes at least as long as a linearization; otherwise
+  `:levenbergmarquardt_dtd` when the spread is at least $(REC_DIAGSPREAD); otherwise `:levenbergmarquardt`.
+
+Every threshold is a starting value, not yet measured against benchmarks ($(REC_HESSIAN_SCATTER) and $(REC_NORMAL_MARGIN)
+too). The model's variables are not changed. A model whose cost, gradient or Hessian is not finite at its current values
+is an `ArgumentError`.
+
+The two work estimates count arithmetic only: not threads (the Hessian is filled cost by cost on Polyester's threads, the
+product `JᵀJ` by BLAS), and not a cost whose Jacobian block is mostly zeros. The iterator's test of a solve against a
+linearization still reads the Hessian path's times.
+
+The rank test detects a null space of `J`; it is not an estimate of `J`'s condition number. Its known limits: a null
+space together with a remainder whose smallest scaled singular value is below about 1e-7 reads as full rank, and goes to
+the Jacobian path; and a full-rank `J` with a condition number near 1e13 reads about 1e-8 when damping was needed, so it
+too goes to the Jacobian path.
+
+The keywords are those of [`optimvars`](@ref), with the same meanings and defaults; the recommendation keeps them, and
+`optimize!(model, rec)` uses them.
+
+# Example
+```julia
+rec = recommendoptimizer(model)   # displays the explanation and the call
+result = optimize!(model, rec)    # with `using SecondOrderOptimization`
+```
+"""
+recommendoptimizer
+
+"""
+    OptimizationRecommendation
+
+What [`recommendoptimizer`](@ref) recommends for a model: a formulation, reduction, storage, linear solver and iterator,
+the keywords it was made with, and the evidence for each choice (the features measured and the rule that fired).
+Displaying it in the REPL (`show` with `MIME"text/plain"`) explains each choice and prints the equivalent call to
+`optimize!(model, options; ...)`; the two-argument `show` is one line with the five choices. With SecondOrderOptimization
+loaded, `optimize!(model, rec)` and `optimize(model, rec)` run it.
+
+A recommendation holds for the model, and the values, it was made from; it is not checked against the model when it is
+used. Its fields are internal, and it cannot be changed: to change a choice, set the options and keywords by hand on
+`optimize!(model, options; ...)`, starting from the call it prints.
+"""
+OptimizationRecommendation

@@ -110,6 +110,9 @@ function addcost!(problem::Model, cost::Cost) where Cost <: AbstractCost
     if Cost <: AbstractResidual
         M = nres(cost)
         (isa(M, Integer) || isa(M, StaticInt)) && M > 0 || inputerror("Problem with nres()", Cost, "cost")
+        kd = kerneldim(Cost <: AbstractAdaptiveResidual ? vars[1] : robustkernel(cost))
+        isnothing(kd) || kd == dynamic(M) ||
+            inputerror("The robust kernel is for residuals of length $kd, but nres() is $(dynamic(M))", Cost, "cost")
     end
     push!(problem.costs, cost)
     problem.varcostmapvalid = false
@@ -180,7 +183,7 @@ resnum(vec::Vector)   = length(vec) != 0 ? (dynamic(is_static(nres(vec[1]))) ? l
 countcosts(fun, costs::CostStruct) = sum(fun, values(costs); init=0)
 nresiduals(problem::Model) = Int(countcosts(resnum, problem.costs))
 
-# The partition for elimination, or `nothing`: the one rule of the normal and the tall path. `:none` never eliminates;
+# The partition for elimination, or `nothing`: the one rule of the Hessian and the Jacobian path. `:none` never eliminates;
 # `:auto` eliminates when the model has eliminable variables and the structure fits; `:eliminate` eliminates or throws.
 function schur_partition(problem::Model, unfixed::AbstractVector, reduction::Symbol)
     reduction === :none && return nothing
@@ -189,16 +192,26 @@ function schur_partition(problem::Model, unfixed::AbstractVector, reduction::Sym
     return partition_schur_problem(problem, unfixed, reduction === :eliminate)
 end
 
+# The row blocks of a description held as one flat vector of block numbers and a pointer vector: row block `k` is a view,
+# so no vector is allocated per cost
+struct FlatRowBlocks <: AbstractVector{SubArray{Int, 1, Vector{Int}, Tuple{UnitRange{Int}}, true}}
+    flat::Vector{Int}
+    ptr::Vector{Int}
+end
+Base.size(r::FlatRowBlocks) = (length(r.ptr) - 1,)
+Base.@propagate_inbounds Base.getindex(r::FlatRowBlocks, k::Int) = view(r.flat, r.ptr[k]:r.ptr[k + 1] - 1)
+
 """
     partition_schur_problem(problem::Model, unfixed::AbstractVector, explicit::Bool=false)
 
-Validate bipartite structure and perform two-pass variable ordering for Schur complement reduction.
-Returns named tuple `(unfixed_inds, extra_blocks, r_dims, e_dims, couplings, nrblocks, neblocks)`,
-where `extra_blocks` lists the pairs of retained blocks that share a cost (in the sorted retained ordering)
-or `nothing` if the problem does not have both retained and eliminable variables, or if its structure does not suit
-Schur reduction. With `explicit = true` (`reduction = :eliminate` in [`optimvars`](@ref)) a structure that does not fit
-throws an `ArgumentError` instead. Eliminated variables, like retained ones, may have any number of dimensions that
-BlockLinearSystems takes as a block; it checks the sizes, and its `ArgumentError` names the block.
+Decide whether the problem is eliminated, and which variables: the unfixed eliminable ones (`iseliminable`). Returns the
+description BlockLinearSystems lays the elimination out from, in the order of `findall(unfixed)`:
+`(unfixed_raw, blocksizes, eliminated, rowblocks)`, with one row block per cost (in `eachcost` order) listing the cost's
+unfixed variables by their position in `unfixed_raw`. Returns `nothing` if the problem does not have both retained and
+eliminable variables, or if a cost connects two eliminable variables. With `explicit = true` (`reduction = :eliminate` in
+[`optimvars`](@ref)) a structure that does not fit throws an `ArgumentError` instead. Eliminated variables, like retained
+ones, may have any number of dimensions that BlockLinearSystems takes as a block; it checks the sizes, and its
+`ArgumentError` names the block.
 """
 function partition_schur_problem(problem::Model, unfixed::AbstractVector, explicit::Bool=false)
     unfixed_raw = findall(unfixed)
@@ -218,91 +231,33 @@ function partition_schur_problem(problem::Model, unfixed::AbstractVector, explic
         return nothing
     end
 
-    # 2. Structural Bipartite Validation
-    elim_set = Set(unfixed_raw[findall(is_elim)])
-    retained_set = Set(unfixed_raw[findall(!, is_elim)])
-
-    # Blocks of any size BlockLinearSystems takes (it checks them), eliminated or retained
-    block_sizes = [block_dimension(problem.variables[i]) for i in unfixed_raw]
-
-    # Map from original variable index to retained block index (1:nret)
-    retained_raw_list = unfixed_raw[findall(!, is_elim)]
-    retained_map = Dict{Int, Int}(var_idx => i for (i, var_idx) in enumerate(retained_raw_list))
-
-    couplings_dict = Dict{Int, Vector{Int}}()
-    for var_idx in elim_set
-        couplings_dict[var_idx] = Int[]
+    # 2. The row blocks, and the check that no cost connects more than one unfixed eliminable variable
+    blockof = zeros(Int, length(problem.variables))   # Position of each unfixed variable in unfixed_raw, 0 if fixed
+    for (b, v) in enumerate(unfixed_raw)
+        blockof[v] = b
     end
-
-    # Pairs of retained variables that share a cost (they need a slot in the reduced system's pattern)
-    retained_pairs = Set{Tuple{Int, Int}}()
-
-    # Block-Diagonality Check: No residual connects > 1 unfixed eliminable variable
+    ptr = Int[1]
+    flat = Int[]
     for costvec in values(problem.costs)
         for cost in costvec
             vinds = varindices(cost)
-            elims_in_cost = [v for v in vinds if v in elim_set]
-            if length(elims_in_cost) > 1
+            nelims = 0
+            for v in vinds
+                b = blockof[v]
+                b == 0 && continue
+                nelims += is_elim[b]
+                push!(flat, b)
+            end
+            if nelims > 1
                 explicit || return nothing
+                elims_in_cost = [v for v in vinds if blockof[v] != 0 && is_elim[blockof[v]]]
                 throw(ArgumentError("Bipartite structure violation: cost block of type $(typeof(cost)) connects multiple eliminable variables $(elims_in_cost). Eliminable variables cannot couple to each other."))
-            elseif length(elims_in_cost) == 1
-                elim_var = elims_in_cost[1]
-                for v in vinds
-                    if v in retained_set
-                        push!(couplings_dict[elim_var], retained_map[v])
-                    end
-                end
             end
-            retained_in_cost = [retained_map[v] for v in vinds if v in retained_set]
-            for a in 2:length(retained_in_cost), b in 1:a-1
-                ra, rb = retained_in_cost[a], retained_in_cost[b]
-                push!(retained_pairs, (min(ra, rb), max(ra, rb)))
-            end
+            push!(ptr, length(flat) + 1)
         end
     end
 
-    # Deduplicate the couplings of each eliminated variable
-    couplings = Vector{Vector{Int}}(undef, nblocks)
-    for (i, var_idx) in enumerate(unfixed_raw)
-        if is_elim[i]
-            couplings[i] = unique(couplings_dict[var_idx])
-        else
-            couplings[i] = Int[]
-        end
-    end
-
-    # 3. Two-pass variable ordering using sort_schur_blocks from BlockLinearSystems
-    perm = sort_schur_blocks(is_elim, block_sizes, couplings)
-    unfixed_inds = unfixed_raw[perm]
-    sorted_sizes = block_sizes[perm]
-
-    r_dims = sorted_sizes[1:nret]
-    e_dims = sorted_sizes[nret+1:nblocks]
-
-    # Re-map the retained indices in the couplings to the new retained ordering
-    old_to_new_retained = Dict{Int, Int}()
-    for new_r in 1:nret
-        orig_var = unfixed_inds[new_r]
-        old_r = retained_map[orig_var]
-        old_to_new_retained[old_r] = new_r
-    end
-
-    couplings_remapped = Vector{Vector{Int}}(undef, nelim)
-    for e in 1:nelim
-        orig_idx = perm[nret + e]
-        orig_couplings = couplings[orig_idx]
-        couplings_remapped[e] = sort([old_to_new_retained[r] for r in orig_couplings if haskey(old_to_new_retained, r)])
-    end
-
-    extra_blocks = sort!([(old_to_new_retained[a], old_to_new_retained[b]) for (a, b) in retained_pairs])
-
-    return (
-        unfixed_inds = unfixed_inds,
-        extra_blocks = extra_blocks,
-        r_dims = r_dims,
-        e_dims = e_dims,
-        couplings = couplings_remapped,
-        nrblocks = nret,
-        neblocks = nelim
-    )
+    # Blocks of any size BlockLinearSystems takes (it checks them), eliminated or retained
+    blocksizes = [block_dimension(problem.variables[i]) for i in unfixed_raw]
+    return (unfixed_raw = unfixed_raw, blocksizes = blocksizes, eliminated = is_elim, rowblocks = FlatRowBlocks(flat, ptr))
 end

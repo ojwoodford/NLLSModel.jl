@@ -2,9 +2,12 @@ using NLLSModel, Test, Static, StaticArrays, Random, LinearAlgebra
 import OptimizationVariableInterface
 import OptimizationVariableInterface: nvars, update, update!, copyvars
 
-# T4: the contract the optimizer relies on. Needs tallproblems.jl.
+include("fixtures/loader.jl")
+fixture("frontdoor", "jacobianproblems")
 
-@testset "tallcontract.jl" begin
+# T4: the contract the optimizer relies on.
+
+@testset "jacobiancontract.jl" begin
     @testset "contract (T4): resjac! returns the true cost" begin
         for name in ("Huber", "Huber, mixed variables")
             for kernel in (true, :second)

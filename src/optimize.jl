@@ -92,8 +92,8 @@ struct MultiVarDenseFDF{LS, P, U}
 end
 @inline function (f::MultiVarDenseFDF)(g, H_mat::Matrix{Float64}, vars)
     full_vars = sync_unfixed_vars!(f.problem, f.unfixed_inds, vars)
-    orig_A = getA(f.linsystem)
-    bdm = DenseBlockLinearSystem{Float64, Matrix{Float64}}(H_mat, orig_A.rowblockoffsets, orig_A.columnblockoffsets, orig_A.rowblocksizes, orig_A.columnblocksizes)
+    # The optimizer's matrix, with the system's layout, which it shares: this allocates nothing
+    bdm = DenseBlockLinearSystem(H_mat, getA(f.linsystem))
     if f.linsystem isa LinearSystemShared
         target = replace_first_ls(f.linsystem, MultiVariateLSdense_ls(bdm, g))
         c = costgradhess!(target, full_vars, f.problem.costs)
@@ -179,28 +179,30 @@ function cholmod_symbolic_nnz(fac::SparseArrays.CHOLMOD.Factor, n::Integer)
     end
 end
 
-# Dense or sparse storage of the reduced system, the one rule of the normal and the tall path. `storage` forces it (a dense
+# Dense or sparse storage of the reduced system, the one rule of the Hessian and the Jacobian path. `storage` forces it (a dense
 # one above `max_dense_bytes` is an `ArgumentError` naming `what`); `:auto` chooses dense for a reduced system of at most
 # 2 000 that fits under the cap and whose Cholesky factor CHOLMOD predicts to be at least 40% full. Returns
 # `(is_dense, pattern, analysed)`: the reduced system's pattern, when it was built (for the decision, or because the caller
-# `needpattern`), and CHOLMOD's symbolic analysis of it, when that was run.
-function reduced_storage(structure::SchurStructure, extra_blocks, storage::Symbol, max_dense_bytes::Int, what::String; needpattern::Bool)
+# `needpattern`), and CHOLMOD's symbolic analysis of it, when that was run. The pattern holds every pair of retained
+# variables that share a cost: BlockLinearSystems keeps them in the structure.
+function reduced_storage(structure::SchurStructure, storage::Symbol, max_dense_bytes::Int, what::String; needpattern::Bool)
+    nr = sum(view(BlockLinearSystems.blocksizes(structure), 1:nretained(structure)))
     if storage === :dense
-        check_densefits(what, structure.nr, structure.nr, max_dense_bytes)
+        check_densefits(what, nr, nr, max_dense_bytes)
         return true, nothing, nothing
     end
-    pattern = (needpattern || storage === :auto) ? build_schur_pattern(structure; extra_blocks) : nothing
-    if storage === :auto && structure.nr <= 2000 && densefits(structure.nr, structure.nr, max_dense_bytes)
+    pattern = (needpattern || storage === :auto) ? build_schur_pattern(structure) : nothing
+    if storage === :auto && nr <= 2000 && densefits(nr, nr, max_dense_bytes)
         chol_fac = SparseArrays.CHOLMOD.analyze(SparseArrays.CHOLMOD.Sparse(Symmetric(pattern.S_sparse, :U)))
         # Fall back to the pattern's own size if CHOLMOD's prediction is unavailable
-        factor_nnz = something(cholmod_symbolic_nnz(chol_fac, structure.nr), nnz(pattern.S_sparse))
-        return factor_nnz >= 0.40 * 0.5 * structure.nr^2, pattern, chol_fac
+        factor_nnz = something(cholmod_symbolic_nnz(chol_fac, nr), nnz(pattern.S_sparse))
+        return factor_nnz >= 0.40 * 0.5 * nr^2, pattern, chol_fac
     end
     return false, pattern, nothing
 end
 
 function optimvars(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction::Symbol=:auto, storage::Symbol=:auto,
-        max_dense_bytes::Integer=MAX_DENSE_BYTES, min_work::Integer=MIN_WORK_PER_THREAD_NORMAL,
+        max_dense_bytes::Integer=MAX_DENSE_BYTES, min_work::Integer=MIN_WORK_PER_THREAD_HESSIAN,
         min_work_cost::Integer=MIN_WORK_PER_THREAD_COST)
     check_reduction(reduction)
     check_storage(storage)
@@ -227,7 +229,7 @@ function optimvars_dispatch(problem::Model, unfixed::Integer, numthreads::Static
     else
         ls = LinearSystem{UniVariateLSdynamic_x, UniVariateLSdynamic_ls}((unfixed, dynamic(varlen)), (dynamic(varlen),))
     end
-    ls_shared = sharedlinearsystem(ls, workestimates(problem, unfixed).normal, numthreads, costsplit(problem.costs), min_work)
+    ls_shared = sharedlinearsystem(ls, workestimates(problem, unfixed).hessianfill, numthreads, costsplit(problem.costs), min_work)
     f = SingleVarCostFunc(problem, unfixed, numthreads, min_work_cost)
     fdf! = SingleVarCostGradHess(ls_shared, problem, unfixed)
     # The Hessian prototype has the type of the system's own storage (an MMatrix or a Matrix), so buffers built from it
@@ -245,56 +247,48 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
 
     partition = schur_partition(problem, unfixed, reduction)
     if !isnothing(partition)
-        structure = SchurStructure(partition.r_dims, partition.e_dims, partition.couplings; nchunks=dynamic(numthreads))
+        # BlockLinearSystems lays out the elimination from the description: the block order, the couplings, the pairs of
+        # retained variables that share a cost
+        structure = SchurStructure(partition.blocksizes, partition.rowblocks; eliminated=partition.eliminated, nchunks=dynamic(numthreads))
+        unfixed_inds = partition.unfixed_raw[blockorder(structure)]
+        nrb = nretained(structure)
+        neb = count(partition.eliminated)
 
         # Dense or sparse. The pattern includes retained-retained pairs sharing a cost, not only those sharing an
         # eliminated variable. When the symbolic analysis is run for the decision, it is kept and handed on with the
         # pattern, so the linear system does not analyse the same pattern again.
-        is_dense, pattern, analysed = reduced_storage(structure, partition.extra_blocks, storage, max_dense_bytes, "reduced Hessian"; needpattern=true)
+        is_dense, pattern, analysed = reduced_storage(structure, storage, max_dense_bytes, "reduced Hessian"; needpattern=true)
 
-        total_e_size = sum(Int(d)^2 for d in structure.e_dims; init=0)
-        total_c_size = sum(Int(structure.e_dims[e]) * Int(structure.r_dims[structure.entry_retained[c]]) for e in eachindex(structure.e_dims) for c in structure.eliminated_ptr[e]:(structure.eliminated_ptr[e+1]-1); init=0)
-        E_data = zeros(Float64, total_e_size)
-        C_data = zeros(Float64, total_c_size)
-
+        # BlockLinearSystems allocates the system; a sparse one on the pattern built for the decision
         H = if is_dense
-            R_dense = zeros(Float64, structure.nr, structure.nr)
-            SchurBlockHessian(structure, R_dense, E_data, C_data)
+            SchurBlockHessian{Float64, Matrix{Float64}}(structure)
         else
-            R_sys = SparseBlockLinearSystem{Float64}(TransposedPattern(pattern.block_pattern), structure.r_dims, structure.r_dims)
             # The pattern (and analysed factor, if any) travel with the matrix to the linear system
             carried = isnothing(analysed) ? pattern : merge(pattern, (S_factor = analysed,))
-            SchurBlockHessian(structure, R_sys, E_data, C_data; pattern=carried)
+            SchurBlockHessian{Float64, SparseBlockLinearSystem{Float64}}(structure; pattern=carried)
         end
 
-        nblocks_tot = partition.nrblocks + partition.neblocks
         blockindices = zeros(UInt, length(problem.variables))
-        for (b, var_idx) in enumerate(partition.unfixed_inds)
+        for (b, var_idx) in enumerate(unfixed_inds)
             blockindices[var_idx] = b
         end
 
-        boffsets = Vector{Int}(undef, nblocks_tot + 1)
-        for b in 1:partition.nrblocks
-            boffsets[b] = structure.boffsets_r[b]
-        end
-        for e in 1:partition.neblocks
-            boffsets[partition.nrblocks + e] = structure.nr + structure.boffsets_e[e]
-        end
-        boffsets[end] = structure.nr + sum(Int, structure.e_dims; init=0) + 1
-
-        tot_len = structure.nr + sum(Int, structure.e_dims; init=0)
+        # The full vector is in layout order: block b starts at boffsets[b]
+        sizes = BlockLinearSystems.blocksizes(structure)
+        tot_len = sum(sizes; init=0)
+        boffsets = push!(computestartindices(sizes), tot_len + 1)
         x_vec = zeros(Float64, tot_len)
         b_vec = zeros(Float64, tot_len)
 
-        ls_x = MultiVariateLSSchur_x(x_vec, blockindices, boffsets, structure, partition.unfixed_inds)
+        ls_x = MultiVariateLSSchur_x(x_vec, blockindices, boffsets, structure, unfixed_inds)
         ls_val = MultiVariateLSSchur_ls(H, b_vec)
         lsschur = LinearSystem(ls_x, ls_val)
-        ls_shared = sharedschurlinearsystem(lsschur, workestimates(problem, partition.unfixed_inds).normal, numthreads, costsplit(problem.costs), min_work)
-        plan = ls_shared isa LinearSystemShared ? build_schur_thread_plan!(problem, blockindices, partition.nrblocks, partition.neblocks, length(ls_shared.ls)) : nothing
+        ls_shared = sharedschurlinearsystem(lsschur, workestimates(problem, unfixed_inds).hessianfill, numthreads, costsplit(problem.costs), min_work)
+        plan = ls_shared isa LinearSystemShared ? build_schur_thread_plan!(problem, blockindices, nrb, neb, length(ls_shared.ls)) : nothing
 
-        f = MultiVarCostFunc(problem, partition.unfixed_inds, numthreads, min_work_cost)
-        fdf! = MultiVarSchurFDF(ls_shared, problem, partition.unfixed_inds, plan)
-        x0 = problem.variables[partition.unfixed_inds]
+        f = MultiVarCostFunc(problem, unfixed_inds, numthreads, min_work_cost)
+        fdf! = MultiVarSchurFDF(ls_shared, problem, unfixed_inds, plan)
+        x0 = problem.variables[unfixed_inds]
         return (f, fdf!, x0, H)
     end
 
@@ -317,12 +311,12 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
     if issparse
         bsm = SparseBlockLinearSystem{Float64}(TransposedPattern(sparsity), blocksizes, blocksizes)
         lssparse = MultiVariateLSsparse(bsm, blockindices, true)
-        ls_shared = sharedlinearsystem(lssparse, workestimates(problem, unfixed).normal, numthreads, costsplit(problem.costs), min_work)
+        ls_shared = sharedlinearsystem(lssparse, workestimates(problem, unfixed).hessianfill, numthreads, costsplit(problem.costs), min_work)
         fdf! = MultiVarSparseFDF(ls_shared, problem, unfixed_sync)
         return (f, fdf!, x0, lssparse.x.hessian)
     else
         lsdense = MultiVariateLSdense(blocksizes, blockindices)
-        ls_shared = sharedlinearsystem(lsdense, workestimates(problem, unfixed).normal, numthreads, costsplit(problem.costs), min_work)
+        ls_shared = sharedlinearsystem(lsdense, workestimates(problem, unfixed).hessianfill, numthreads, costsplit(problem.costs), min_work)
         fdf! = MultiVarDenseFDF(ls_shared, problem, unfixed_sync)
         return (f, fdf!, x0, nothing)
     end

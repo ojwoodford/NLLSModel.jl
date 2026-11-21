@@ -1,26 +1,7 @@
-using NLLSModel, Test, StaticArrays
+using NLLSModel, Test, Static, StaticArrays
 
-# Generic function for testing a robustifier
-function testrobustifier(kernel, costs, expected, firstorder=false)
-    for (i, cost) in enumerate(costs)
-        # Check the value is correct
-        @test robustify(kernel, cost) ≈ expected[i]
-        # Check the derivatives are correct
-        ad = NLLSModel.autorobustifydcost(kernel, cost)
-        if firstorder
-            ad = (ad[1], ad[2], 0.0)
-        end
-        @test SVector(robustifydcost(kernel, cost)) ≈ SVector(ad)
-        if isa(kernel, NLLSModel.AbstractAdaptiveRobustifier)
-            # Check the derivatives w.r.t. the kernel parameters
-            c, dc, d2c = robustifydkernel(kernel, cost)
-            c_, dc_, d2c_ = NLLSModel.autorobustifydkernel(kernel, cost)
-            @test c ≈ c_
-            # @test dc ≈ dc_
-            # @test d2c ≈ d2c_
-        end
-    end
-end
+include("fixtures/loader.jl")
+fixture("robust")
 
 @testset "robust.jl" begin
     # islinearkernel (internal): NoRobust, and Scaled of a linear kernel with a finite non-negative height
@@ -57,6 +38,11 @@ end
     s1 = 0.6
     s2 = 9.0
     w = 0.7
-    out = -2 .* log.((w / s1) * exp.(costs / (-2 * s1^2)) .+ ((1 - w) / s2) * exp.(costs / (-2 * s2^2)))
-    testrobustifier(ContaminatedGaussian(s1, s2, w), costs, out)
+    out = -2 .* log.((w / s1) * exp.(costs / (-2 * s1^2)) .+ ((1 - w) / s2) * exp.(costs / (-2 * s2^2))) .+ log(2π)
+    testrobustifier(ContaminatedGaussian(s1, s2, w, static(1)), costs, out)
+
+    # Gaussian plus uniform (Adaptive kernel), d = 2: −2 log(w N₂(s; σ) + (1 − w)/A)
+    sigma, w, A = 0.8, 0.6, 30.0
+    out = -2 .* log.(w * exp.(costs / (-2 * sigma^2)) / (2π * sigma^2) .+ (1 - w) / A)
+    testrobustifier(GaussianPlusUniform(sigma, w, static(2); volume=A), costs, out)
 end

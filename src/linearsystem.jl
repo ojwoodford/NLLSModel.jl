@@ -178,16 +178,7 @@ BlockLinearSystems.copy_structure(ls::UniVariateLSdynamic_ls) = UniVariateLSdyna
 BlockLinearSystems.copy_structure(::UniVariateLSstatic_ls{N, N2}) where {N, N2} = UniVariateLSstatic_ls{N, N2}()
 BlockLinearSystems.copy_structure(ls::MultiVariateLSdense_ls) = MultiVariateLSdense_ls(copy_structure(ls.A), zeros(Float64, length(ls.b)))
 BlockLinearSystems.copy_structure(ls::MultiVariateLSsparse_ls) = MultiVariateLSsparse_ls(copy_structure(ls.A), zeros(Float64, length(ls.b)))
-function BlockLinearSystems.copy_structure(ls::MultiVariateLSSchur_ls)
-    A = ls.A
-    R_copy = if A.R isa Matrix
-        similar(A.R)
-    else
-        copy_structure(A.R)
-    end
-    A_new = SchurBlockHessian(A.structure, R_copy, similar(A.E_data), similar(A.C_data))
-    return MultiVariateLSSchur_ls(A_new, zeros(Float64, length(ls.b)))
-end
+BlockLinearSystems.copy_structure(ls::MultiVariateLSSchur_ls) = MultiVariateLSSchur_ls(copy_structure(ls.A), zeros(Float64, length(ls.b)))
 BlockLinearSystems.copy_structure(ls::LinearSystem{F, V}) where {F, V} = LinearSystem{F, V}(ls.x, copy_structure(ls.ls))
 BlockLinearSystems.copy_structure(ls::LinearSystemShared{F, V, N}) where {F, V, N} = LinearSystemShared{F, V, N}(ls.x, SVector{N, V}(ntuple(i -> copy_structure(ls.ls[i]), Val(N))), MVector{N, Float64}(undef))
 
@@ -204,9 +195,9 @@ sharedlinearsystem(ls, n::Integer) = sharedlinearsystem(ls, static(n))
 # may use, reducing the number of threads that linearize rather than allocating without bound.
 const MAX_THREAD_COPY_BYTES = 2^30
 threadcopylimit(ls, nthreads::Integer, budget::Integer=MAX_THREAD_COPY_BYTES) = clamp(1 + budget ÷ max(1, Base.summarysize(ls.ls)), 1, nthreads)
-# `work` is the normal-fill estimate of `workestimates`: one copy per thread of `normalthreads`, capped by the memory budget
-function sharedlinearsystem(ls, work::Integer, numthreads::StaticInt, costsplit::Integer, min_work=MIN_WORK_PER_THREAD_NORMAL)
-    n = normalthreads(work, min_work, dynamic(numthreads), costsplit)
+# `work` is the Hessian-fill estimate of `workestimates`: one copy per thread of `hessianthreads`, capped by the memory budget
+function sharedlinearsystem(ls, work::Integer, numthreads::StaticInt, costsplit::Integer, min_work=MIN_WORK_PER_THREAD_HESSIAN)
+    n = hessianthreads(work, min_work, dynamic(numthreads), costsplit)
     n == 1 && return ls
     return sharedlinearsystem(ls, static(threadcopylimit(ls, n)))
 end
@@ -228,10 +219,36 @@ function add!(dest::MultiVariateLSSchur_ls, src::MultiVariateLSSchur_ls)
 end
 add!(dest::LinearSystem, src::LinearSystem) = add!(dest.ls, src.ls)
 
+# The end of an evaluation: a single-variable system accumulated in its lower triangle (from the lazy product) is made
+# symmetric here, once. A full H (a user's computecostgradhess, the dynamic kernels) has added both triangles;
+# mirroring the lower one over the upper keeps the same values when H is symmetric.
+finish!(linsystem) = linsystem
+function finish!(linsystem::UniVariateLS)
+    A = getA(linsystem)
+    n = size(A, 1)
+    @inbounds for j in 2:n, i in 1:j-1
+        A[i, j] = A[j, i]
+    end
+    return linsystem
+end
+
 function updatesymlinearsystem!(linsystem::UniVariateLS, g, H, unusedargs...)
     # Update the blocks in the problem
-    getb(linsystem) .+= g
-    getA(linsystem) .+= H
+    addsys!(getb(linsystem), getA(linsystem), g, H)
+end
+# A full H (the dynamic kernels, a user's computecostgradhess): explicit loops, since the broadcast into an MMatrix
+# system is not vectorized
+function addsys!(b, A, g, H)
+    n = length(b)
+    @inbounds @simd for i in 1:n
+        b[i] += g[i]
+    end
+    @inbounds for j in 1:n
+        @simd for i in 1:n
+            A[i, j] += H[i, j]
+        end
+    end
+    return nothing
 end
 
 function updatesymA!(A, a, vars, varflags, blockindices)
@@ -278,16 +295,12 @@ function updatesymlinearsystem!(linsystem::MultiVariateLS, g::AbstractVector, H:
     updatesymA!(getA(linsystem), H, vars, varflags, blockindices)
 end
 
+# One cost's gradient and Hessian into a Schur system: each block of the cost's Hessian is added to the system by naming
+# the pair of variables, once for each variable with itself and once for each pair `j < i`. BlockLinearSystems decides
+# where and in which orientation the pair is stored. No cost has two unfixed eliminated variables (the partition's
+# check), so every pair named has storage.
 function updatesymschur!(H_schur::SchurBlockHessian{Float64}, g_full::Vector{Float64}, g::AbstractVector, H::AbstractArray, vars, varflags, boffsets, blockindices)
     updateb!(g_full, g, vars, varflags, boffsets, blockindices)
-
-    structure = H_schur.structure
-    nrblocks = structure.nrblocks
-    eliminated_ptr = structure.eliminated_ptr
-    entry_retained = structure.entry_retained
-    coffsets = structure.coffsets
-    eoffsets = structure.eoffsets
-    boffsets_r = structure.boffsets_r
 
     loffseti = static(0)
     @unroll for i in 1:MAX_ARGS
@@ -296,26 +309,7 @@ function updatesymschur!(H_schur::SchurBlockHessian{Float64}, g_full::Vector{Flo
             nvi = nvars(vars[i])
             rangei = blockrange(loffseti + static(1), nvi)
             loffseti += nvi
-            ni = dynamic(nvi)
-
-            if bi <= nrblocks
-                if H_schur.R isa Matrix{Float64}
-                    ro = boffsets_r[bi]
-                    @inbounds for col in 1:ni, row in 1:ni
-                        H_schur.R[ro + row - 1, ro + col - 1] += H[rangei[row], rangei[col]]
-                    end
-                else
-                    @inbounds block(H_schur.R, bi, bi, nvi, nvi) .+= view(H, rangei, rangei)
-                end
-            else
-                e = bi - nrblocks
-                eo = eoffsets[e]
-                idx = eo
-                @inbounds for col in 1:ni, row in 1:ni
-                    H_schur.E_data[idx] += H[rangei[row], rangei[col]]
-                    idx += 1
-                end
-            end
+            @inbounds addblock!(H_schur, bi, bi, H, rangei, rangei)
 
             loffsetj = static(0)
             @unroll for j in 1:i-1
@@ -324,43 +318,7 @@ function updatesymschur!(H_schur::SchurBlockHessian{Float64}, g_full::Vector{Flo
                     nvj = nvars(vars[j])
                     rangej = blockrange(loffsetj + static(1), nvj)
                     loffsetj += nvj
-                    nj = dynamic(nvj)
-
-                    if bi <= nrblocks && bj <= nrblocks
-                        if H_schur.R isa Matrix{Float64}
-                            ro_i = boffsets_r[bi]
-                            ro_j = boffsets_r[bj]
-                            if bi <= bj
-                                @inbounds for col in 1:nj, row in 1:ni
-                                    H_schur.R[ro_i + row - 1, ro_j + col - 1] += H[rangei[row], rangej[col]]
-                                end
-                            else
-                                @inbounds for col in 1:ni, row in 1:nj
-                                    H_schur.R[ro_j + row - 1, ro_i + col - 1] += H[rangej[row], rangei[col]]
-                                end
-                            end
-                        else
-                            if bi >= bj
-                                @inbounds block(H_schur.R, bi, bj, nvi, nvj) .+= view(H, rangei, rangej)
-                            else
-                                @inbounds block(H_schur.R, bj, bi, nvj, nvi) .+= view(H, rangej, rangei)
-                            end
-                        end
-                    elseif bi <= nrblocks && bj > nrblocks
-                        e = bj - nrblocks
-                        c_idx = searchsortedfirst(@inbounds(view(entry_retained, eliminated_ptr[e]:(eliminated_ptr[e+1]-1))), bi) + eliminated_ptr[e] - 1
-                        co = coffsets[c_idx]
-                        @inbounds for col in 1:nj, row in 1:ni
-                            H_schur.C_data[co + (row - 1)*nj + col - 1] += H[rangei[row], rangej[col]]
-                        end
-                    elseif bi > nrblocks && bj <= nrblocks
-                        e = bi - nrblocks
-                        c_idx = searchsortedfirst(@inbounds(view(entry_retained, eliminated_ptr[e]:(eliminated_ptr[e+1]-1))), bj) + eliminated_ptr[e] - 1
-                        co = coffsets[c_idx]
-                        @inbounds for col in 1:ni, row in 1:nj
-                            H_schur.C_data[co + (row - 1)*ni + col - 1] += H[rangej[row], rangei[col]]
-                        end
-                    end
+                    @inbounds addblock!(H_schur, bi, bj, H, rangei, rangej)
                 end
             end
         end

@@ -7,6 +7,10 @@ robustify(::NoRobust, cost) = cost
 robustifydcost(::NoRobust, cost) = cost, one(cost), zero(cost)
 
 robustifydcost(kernel::AbstractRobustifier, cost) = autorobustifydcost(kernel, cost)
+
+# The residual length a kernel is defined for, which `addcost!` checks against `nres`; `nothing` for a kernel that does
+# not depend on it (every fixed kernel here, and a user's kernel)
+kerneldim(::AbstractRobustifier) = nothing
 robustifydkernel(kernel::AbstractAdaptiveRobustifier, cost) = autorobustifydkernel(kernel, cost)
 
 struct Scaled{T<:Real,Robustifier<:AbstractRobustifier} <: AbstractRobustifier
@@ -14,6 +18,7 @@ struct Scaled{T<:Real,Robustifier<:AbstractRobustifier} <: AbstractRobustifier
     height::T
 end
 robustify(kernel::Scaled, cost) = robustify(kernel.robust, cost) * kernel.height
+kerneldim(kernel::Scaled) = kerneldim(kernel.robust)
 robustifydcost(kernel::Scaled{<:Real, NoRobust}, cost) = cost * kernel.height, kernel.height, zero(cost)
 function robustifydcost(kernel::Scaled, cost)
     c, d1, d2 = robustifydcost(kernel.robust, cost)

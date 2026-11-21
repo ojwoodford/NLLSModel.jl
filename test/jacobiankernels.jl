@@ -1,10 +1,13 @@
 using NLLSModel, Test, Static, StaticArrays, Random, LinearAlgebra
 import OptimizationVariableInterface
 
-# R1: the kernel decides how each cost's rows enter the tall system. Needs tallproblems.jl.
+include("fixtures/loader.jl")
+fixture("jacobianproblems", "robustfit")
 
-@testset "tallkernels.jl" begin
-    # R1: per kernel, the tall rows reproduce the normal-equations linearization
+# R1: the kernel decides how each cost's rows enter the Jacobian system.
+
+@testset "jacobiankernels.jl" begin
+    # R1: per kernel, the Jacobian rows reproduce the Hessian linearization
     @testset "R1: J'J and J'r equal the Hessian and gradient, $name" for (name, kernel, wide, exact_hessian) in (
             ("NoRobust", NoRobust(), NoRobust(), true),
             ("Scaled", Scaled(NoRobust(), 2.5), Scaled(NoRobust(), 2.5), true),
@@ -40,7 +43,7 @@ import OptimizationVariableInterface
         end
     end
 
-    @testset "R1: a model mixing kernels reproduces the normal-equations linearization" begin
+    @testset "R1: a model mixing kernels reproduces the Hessian linearization" begin
         kernels = (NoRobust(), HuberKernel(0.5), Huber2oKernel(1.0), GemanMcclureKernel(0.5), GemanMcclure2oKernel(1.0), Scaled(NoRobust(), 2.0))
         base = curvefit()
         model = Model(Vector{Float64}, Union{[TlRob{TlExp, typeof(k)} for k in kernels]...})
@@ -79,4 +82,44 @@ import OptimizationVariableInterface
             end
         end
     end
+end
+
+@testset "alternation from a callback, Jacobian path, $(nameof(typeof(kernel))), $iterator, $nvar unfixed" for
+        kernel in (ContaminatedGaussian(0.5, 5.0, 0.5, static(2)), GaussianPlusUniform(0.5, 0.5, static(2); volume=1600.0)),
+        iterator in (:levenbergmarquardt, :dogleg), nvar in (2, 1)
+    options = OptimizationOptions(; iterator, callbackchangesstate=true)
+    model, truths = alternationmodel(kernel; nvar)
+    result, given, before, returned = alternate!(model, options; formulation=:jacobian)
+    @test isapprox(NLLSModel.params(model.variables[1]), alternationtruth(kernel); rtol=0.1)
+    for (i, m) in enumerate(truths)
+        @test isapprox(model.variables[i + 1], m; rtol=0.1)
+    end
+    @test !isempty(returned) && all(diff(returned) .<= 0)
+    @test given ≈ before rtol=1e-12
+    # The Hessian formulation ends at the same cost
+    hmodel, _ = alternationmodel(kernel; nvar)
+    alternate!(hmodel, options; formulation=:hessian)
+    @test cost(model) ≈ cost(hmodel) rtol=1e-6
+end
+
+@testset "a callback that changes the cost needs callbackchangesstate, Jacobian path" begin
+    model, _ = alternationmodel(ContaminatedGaussian(0.5, 5.0, 0.5, static(2)))
+    err = try alternate!(model, OptimizationOptions(); formulation=:jacobian); nothing catch e e end
+    @test err isa ArgumentError && occursin("callbackchangesstate", err.msg)
+end
+
+@testset "a residual's own volume on the Jacobian path" begin
+    K = typeof(GaussianPlusUniform(0.8, 0.7, static(2); volume=400.0))
+    rng = MersenneTwister(12)
+    model = Model(Union{K, SVector{2, Float64}}, PairVolumeAdaptive{K})
+    addvariable!(model, GaussianPlusUniform(0.8, 0.7, static(2); volume=400.0))
+    addvariable!(model, SVector(0.3, -0.2))
+    for _ in 1:50
+        addcost!(model, PairVolumeAdaptive{K}(3 .* randn(rng, SVector{2, Float64}), log(400.0 * (0.5 + rand(rng))), SVector(1, 2)))
+    end
+    f, res!, resjac!, x0, J = optimvars_nls(model; unfixed=2, numthreads=static(1))
+    r = zeros(NLLSModel.nresiduals(model))
+    fh, = optimvars(model; unfixed=2, numthreads=static(1))
+    @test resjac!(r, J, x0) ≈ fh(x0) rtol=1e-12
+    @test resjac!(r, J, x0) ≈ cost(model) rtol=1e-12
 end

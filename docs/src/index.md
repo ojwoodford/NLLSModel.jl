@@ -11,7 +11,7 @@
 where:
 - $\mathbf{x} = \{ \mathbf{x}_1, \dots, \mathbf{x}_N \}$ are variable blocks (scalars, static vectors, dynamic vectors, or custom manifolds).
 - $r_i$ is the $i$-th residual function depending on a subset of variables $\mathbf{x}_{S_i}$.
-- $\rho_i$ is an optional robust loss kernel ([`HuberKernel`](@ref), [`Huber2oKernel`](@ref), [`GemanMcclureKernel`](@ref), [`GemanMcclure2oKernel`](@ref), [`ContaminatedGaussian`](@ref), [`Scaled`](@ref)).
+- $\rho_i$ is an optional robust loss kernel ([`HuberKernel`](@ref), [`Huber2oKernel`](@ref), [`GemanMcclureKernel`](@ref), [`GemanMcclure2oKernel`](@ref), [`ContaminatedGaussian`](@ref), [`GaussianPlusUniform`](@ref), [`Scaled`](@ref)).
 - $c_j$ is an optional general scalar cost block ([`AbstractCost`](@ref)).
 
 ## Features
@@ -19,7 +19,7 @@ where:
 - **Heterogeneous Variable & Cost Blocks**: Store variable blocks and cost types with zero type-instability.
 - **Fast Block Linear Systems**: Custom `DenseBlockLinearSystem` and `SparseBlockLinearSystem` (from `BlockLinearSystems.jl`) tailored for sparse $LDL^T$, Cholesky, and QR factorizations.
 - **Automatic Differentiation**: Evaluates residual Jacobians and cost gradients/Hessians automatically via `ForwardDiff.jl`, or uses user-supplied analytic derivatives via [`computeresjac`](@ref).
-- **Robust M-Estimators**: First- and second-order robust kernels plus adaptive robustifiers ([`ContaminatedGaussian`](@ref)).
+- **Robust M-Estimators**: First- and second-order robust kernels plus adaptive robustifiers ([`ContaminatedGaussian`](@ref), [`GaussianPlusUniform`](@ref)).
 - **One-Call Solving**: `optimize!(model, options)` (with `using SecondOrderOptimization`) solves the model and writes the solution back.
 - **Solver-Agnostic Extraction**: For advanced use, [`optimvars`](@ref) returns `(f, fdf!, x0, H)` for custom outer loops or other optimizers.
 - **Multi-threaded Evaluation**: Automatic thread-parallel residual and Hessian evaluation via `Polyester.jl`.
@@ -59,30 +59,32 @@ depends on `BlockLinearSystems`). `optimize(model, options)` returns `(model_cop
 The keywords `reduction` and `storage` choose the linear-system layout; see [Linear Solvers & Sparsity](@ref). Every way of
 building or optimizing a model takes the same keywords (see [`optimvars`](@ref)).
 
-## Tall formulation
+## Jacobian formulation
 
-`optimize!(model, options; formulation = :tall)` solves the same model from the residual vector and the Jacobian instead of
+`optimize!(model, options; formulation = :jacobian)` solves the same model from the residual vector and the Jacobian instead of
 the normal equations. Each step is a QR factorization of the Jacobian (dense, or SuiteSparse's sparse QR), or with
 elimination a QR of each eliminated variable's rows and a solve of the reduced problem, so `JᵀJ` is not formed (only the
-reduced system's normal equations, when `linsolver` asks for them) and the conditioning is that of `J`, not its square. Use it when the model is ill conditioned (the normal equations stall above
+reduced system's normal equations, when `linsolver` asks for them) and the conditioning is that of `J`, not its square.
+Without elimination and with a dense Jacobian, `linsolver = :cholesky` or `:ldl` instead forms the normal equations from
+`J` once per linearization: cheaper than QR when there are many more residuals than variables, but with the squared conditioning. Use it when the model is ill conditioned (the normal equations stall above
 the minimum).
 
 ```julia
-result = optimize!(problem, OptimizationOptions(iterator = :levenbergmarquardt); formulation = :tall)
+result = optimize!(problem, OptimizationOptions(iterator = :levenbergmarquardt); formulation = :jacobian)
 ```
 
 What it supports, by the `reduction` and `storage` it ends up with and the `linsolver` given in `OptimizationOptions`:
 
 | `reduction` | `storage` | Jacobian prototype | `linsolver` |
 |:---|:---|:---|:---|
-| no elimination | dense | `Matrix{Float64}` | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
+| no elimination | dense | `Matrix{Float64}` | `:auto`, `:qr`; `:cholesky`, `:ldl` (the normal equations, formed from `J`); `:lsmr` (with Krylov.jl) |
 | no elimination | sparse | `SparseMatrixCSC{Float64, Int}` | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
 | elimination | dense | `SchurBlockJacobian{Float64, Matrix{Float64}}` | `:auto`, `:qr`, `:cholesky`, `:ldl`; `:lsmr` (with Krylov.jl) |
 | elimination | sparse | `SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}` | `:auto`, `:qr`, `:cholesky`, `:ldl`; `:lsmr` (with Krylov.jl) |
 
-`reduction` and `storage` are as for the normal path, `:auto` included: elimination when the model has eliminable
-variables and the structure fits (on the tall path also: each eliminated variable is in a cost), the reduced system
-stored by the normal path's rule, and without elimination the Jacobian's storage from its fill, never dense above
+`reduction` and `storage` are as for the Hessian path, `:auto` included: elimination when the model has eliminable
+variables and the structure fits (on the Jacobian path also: each eliminated variable is in a cost), the reduced system
+stored by the Hessian path's rule, and without elimination the Jacobian's storage from its fill, never dense above
 `max_dense_bytes`. The `linsolver` values are those SecondOrderOptimization accepts for each prototype: its rules,
 the linear system of each row and the iterators it takes are in the "Supported combinations" table of its
 `JacobianObjective` docstring. Any other combination is an `ArgumentError` before anything is evaluated.
@@ -90,7 +92,7 @@ the linear system of each row and the iterators it takes are in the "Supported c
 Also:
 
 - every cost must be a non-adaptive `AbstractResidual`, and no adaptive kernel variable may be unfixed. Otherwise the error
-  from [`optimvars_nls`](@ref) is rethrown with the prefix `formulation = :tall:`, as is a dense Jacobian forced above
+  from [`optimvars_nls`](@ref) is rethrown with the prefix `formulation = :jacobian:`, as is a dense Jacobian forced above
   `max_dense_bytes` (default 256 MB), raised before it is allocated;
 - `min_work` is the floor of the residual and Jacobian fill (the tables, with elimination), in its own work estimate,
   with its own default;

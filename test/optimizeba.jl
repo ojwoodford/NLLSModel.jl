@@ -2,56 +2,8 @@ using NLLSModel, Test, Static, StaticArrays, SparseArrays, Random, LinearAlgebra
 using OptimizationVariableInterface, BlockLinearSystems
 using OptimizationVariableInterface: nvars
 
-# Simple affine projection transform
-NLLSModel.generatemeasurement(pose::SVector{6, T}, X::SVector{3, U}) where {T, U} = SVector(dot(@inbounds(view(pose, NLLSModel.SR(1, 3))), X), dot(@inbounds(view(pose, NLLSModel.SR(4, 6))), X))
-
-function create_ba_problem(ncameras, nlandmarks, propvisible)
-    problem = Model(Union{SVector{6, Float64}, SVector{3, Float64}}, SimpleError2{2, Float64, SVector{6, Float64}, SVector{3, Float64}})
-
-    # Generate the cameras on a unit sphere, pointing to the origin
-    camoffset = SVector(1.0, 0.0, 0.0, 0.0, 1.0, 0.0)
-    for i = 1:ncameras
-        addvariable!(problem, randn(SVector{6, Float64}) .+ camoffset)
-    end
-    
-    # Generate the landmarks in a unit cube centered on the origin
-    lmoffset = SVector(-0.5, -0.5, 10.0)
-    for i = 1:nlandmarks
-        addvariable!(problem, rand(SVector{3, Float64}) .+ lmoffset)
-    end
-
-    # Generate the measurements
-    visibility = abs.(repeat(vec(1:ncameras), outer=(1, nlandmarks)) .- LinRange(2, ncameras-1, nlandmarks)')
-    visibility = visibility .<= sort(vec(visibility))[Int(ceil(length(visibility)*propvisible))]
-    for camind = 1:ncameras
-        camera = problem.variables[camind]::SVector{6, Float64}
-        for (landmark, tf) in enumerate(view(visibility, camind, :)')
-            if tf
-                landmarkind = landmark + ncameras
-                addcost!(problem, SimpleError2{SVector{6, Float64}, SVector{3, Float64}}(generatemeasurement(camera, problem.variables[landmarkind]::SVector{3, Float64}), camind, landmarkind))
-            end
-        end
-    end
-
-    # Return the NLLSModel
-    return problem
-end
-
-function perturb_ba_problem(problem, pointnoise, posenoise)
-    for ind in 1:lastindex(problem.variables)
-        if isa(problem.variables[ind], SVector{3, Float64})
-            problem.variables[ind]::SVector{3, Float64} += randn(SVector{3, Float64}) * pointnoise
-        else
-            problem.variables[ind]::SVector{6, Float64} += randn(SVector{6, Float64}) * posenoise
-        end
-    end
-    return problem
-end
-
-function compute_cost(problem)
-    allocd = @allocated c = NLLSModel.cost(problem, static(1))
-    return (c, allocd)
-end
+include("fixtures/loader.jl")
+fixture("allocations", "optimizeba")
 
 @testset "optimizeba.jl" begin
     # Generate some test data for a dense problem
@@ -104,12 +56,11 @@ end
     @test nvars(x0_int[2]) == 6
     @test nvars(x0_int[3]) == 3
     @test nvars(x0_int[4]) == 3
-    # Check that linear system internal block sizes form a BlockRLE with exactly 2 runs: [2 => 6, 2 => 3]
+    # Check that the linear system's block sizes are grouped, two runs: [6, 6, 3, 3] (a BlockRLE is canonical, so this is
+    # its run structure)
     orig_A_int = NLLSModel.getA(fdf_int!.linsystem)
-    @test orig_A_int.rowblocksizes isa NLLSModel.BlockRLE
-    @test BlockLinearSystems.nruns(orig_A_int.rowblocksizes) == 2
-    @test orig_A_int.rowblocksizes.runlengths == [2, 2]
-    @test orig_A_int.rowblocksizes.blocksizes == [6, 3]
+    @test blocksizes(orig_A_int, 1) isa NLLSModel.BlockRLE
+    @test collect(blocksizes(orig_A_int, 1)) == [6, 6, 3, 3]
 
     # M9: syncvars! writes a solution back in the block order optimvars used
     orig_int = copy(problem_interleaved.variables)
@@ -190,7 +141,7 @@ end
     f_ds, fdf_ds!, x0_ds, H_ds = optimvars(prob_schur; numthreads=static(1), reduction=:eliminate, storage=:dense)
     @test H_ds isa BlockLinearSystems.SchurBlockHessian
     @test H_ds.R isa Matrix{Float64}
-    tot_dim_ds = H_ds.structure.nr + sum(H_ds.structure.e_dims)
+    tot_dim_ds = sum(blocksizes(H_ds.structure))
     g_ds = zeros(tot_dim_ds)
     c_ds = fdf_ds!(g_ds, H_ds, x0_ds)
     @test isapprox(c_ds, f_ds(x0_ds); atol=1e-12)
@@ -225,10 +176,16 @@ end
         addcost!(prob_rr, SimpleError2{SVector{6, Float64}, Landmark3D{Float64}}(randn(SVector{2, Float64}), cam, l))
     end
     addcost!(prob_rr, SimpleError2{SVector{6, Float64}, SVector{6, Float64}}(randn(SVector{2, Float64}), 2, 3)) # relative-pose cost
-    @test NLLSModel.partition_schur_problem(prob_rr, trues(7), true).extra_blocks == [(2, 3)]
+    # The description lists the relative-pose cost as a row block of variables 2 and 3, so the reduced system has a block
+    # for the pair
+    d_rr = NLLSModel.partition_schur_problem(prob_rr, trues(7), true)
+    @test d_rr.rowblocks[end] == [2, 3]
+    st_rr = SchurStructure(d_rr.blocksizes, d_rr.rowblocks; eliminated=d_rr.eliminated)
+    pos_rr = invperm(blockorder(st_rr))
+    @test build_schur_pattern(st_rr).block_pattern[minmax(pos_rr[2], pos_rr[3])...]
     f_rd, fdf_rd!, x0_rd, H_rd = optimvars(prob_rr; numthreads=static(1), reduction=:eliminate, storage=:dense)
     f_rs, fdf_rs!, x0_rs, H_rs = optimvars(prob_rr; numthreads=static(1), reduction=:eliminate, storage=:sparse)
-    tot_rr = H_rd.structure.nr + sum(H_rd.structure.e_dims)
+    tot_rr = sum(blocksizes(H_rd.structure))
     g_rd = zeros(tot_rr); g_rs = zeros(tot_rr)
     @test fdf_rd!(g_rd, H_rd, x0_rd) ≈ fdf_rs!(g_rs, H_rs, x0_rs)
     @test g_rd ≈ g_rs
