@@ -225,7 +225,8 @@ fixture("recommender")
             ("eliminated, an unfixed subset", () -> posechain(8, 12), (unfixed=[2:8; 10:20],)),
             ("one variable", () -> linearmodel(scaledjacobian(3, 0.5)), (;)),
             ("a robust kernel, first order", () -> curvefit(; huber=true, outliers=5), (;)),
-            ("a robust kernel, second order", gemanmcclurecurve, (;)))
+            ("a robust kernel, second order", gemanmcclurecurve, (;)),
+            ("a fixed GaussianPlusUniform", gaussianplusuniformcurve, (;)))
         model = make()
         pc = rankpieces(model; kw...)
         lhs, rhs = permutedproducts(pc)

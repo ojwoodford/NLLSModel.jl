@@ -173,6 +173,16 @@ function gemanmcclurecurve()
     return model
 end
 
+# The same curve fit under a fixed GaussianPlusUniform
+function gaussianplusuniformcurve()
+    plain = curvefit(; outliers=5)
+    k = GaussianPlusUniform(0.05, 0.9, static(1); volume=10.0)
+    model = Model(Vector{Float64}, TlRob{TlExp, typeof(k)})
+    addvariable!(model, plain.variables[1])
+    foreach(c -> addcost!(model, TlRob(c, k)), Iterators.flatten(values(plain.costs)))
+    return model
+end
+
 # A linear residual r(x) = X x - y on one variable of static size N, so that the Hessian path builds a static system
 struct StaticLinRes{N} <: NLLSModel.AbstractResidual
     X::Matrix{Float64}

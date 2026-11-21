@@ -2,7 +2,7 @@ using NLLSModel, Test, Static, StaticArrays, Random
 using OptimizationVariableInterface: update!, update
 
 include("fixtures/loader.jl")
-fixture("adaptivecost")
+fixture("adaptivecost", "robustfit")
 
 @testset "adaptivecost.jl" begin
     # Create the problem
@@ -54,4 +54,32 @@ end
     @test occursin("static(2)", err.msg)
     # Arguments are promoted to one float type
     @test ContaminatedGaussian(2, 5.0f0, 0.5f0, static(1)) isa ContaminatedGaussian{Float32, 1}
+end
+
+@testset "alternation from a callback, Hessian path, $(nameof(typeof(kernel))), $iterator, $nvar unfixed" for
+        kernel in (ContaminatedGaussian(0.5, 5.0, 0.5, static(2)), GaussianPlusUniform(0.5, 0.5, static(2); volume=1600.0)),
+        iterator in (:levenbergmarquardt, :dogleg), nvar in (2, 1)
+    model, truths = alternationmodel(kernel; nvar)
+    result, given, before, returned = alternate!(model, OptimizationOptions(; iterator, callbackchangesstate=true); formulation=:hessian)
+    @test isapprox(NLLSModel.params(model.variables[1]), alternationtruth(kernel); rtol=0.1)
+    for (i, m) in enumerate(truths)
+        @test isapprox(model.variables[i + 1], m; rtol=0.1)
+    end
+    @test !isempty(returned) && all(diff(returned) .<= 0) # The costs the callback returns never increase
+    @test given ≈ before rtol=1e-12 # At the callback the model holds the point the optimizer evaluated (to rounding: two sums)
+end
+
+@testset "a callback that changes the cost needs callbackchangesstate" begin
+    model, _ = alternationmodel(GaussianPlusUniform(0.5, 0.5, static(2); volume=1600.0))
+    err = try alternate!(model, OptimizationOptions(); formulation=:hessian); nothing catch e e end
+    @test err isa ArgumentError && occursin("callbackchangesstate", err.msg)
+end
+
+@testset "joint optimization of a GaussianPlusUniform and the variables, Hessian path" begin
+    model, truths = alternationmodel(GaussianPlusUniform(1.1, 0.75, static(2); volume=1600.0); start=SVector(0.1, -0.1))
+    result = optimize!(model, OptimizationOptions(maxiters=200); numthreads=static(1))
+    @test isapprox(NLLSModel.params(model.variables[1]), SVector(1.0, 0.8); rtol=0.1)
+    for (i, m) in enumerate(truths)
+        @test isapprox(model.variables[i + 1], m; rtol=0.1)
+    end
 end
