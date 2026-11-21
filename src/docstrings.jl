@@ -136,7 +136,7 @@ Adaptive two-component Gaussian mixture robustifier with standard deviations `s1
 
 # Example
 ```julia
-kernel = ContaminatedGaussian(1.0, 10.0, 0.8)
+kernel = ContaminatedGaussian(1.0, 10.0, 0.8, static(1))
 ```
 """
 ContaminatedGaussian

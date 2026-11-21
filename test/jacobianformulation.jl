@@ -237,8 +237,8 @@ fixture("frontdoor", "jacobianformulation", "jacobianproblems")
             @test ok
         end
         # A fixed adaptive kernel works with no mode to choose
-        prob = Model(Union{ContaminatedGaussian{Float64}, Float64}, TlAdapt)
-        addvariable!(prob, ContaminatedGaussian(1.0, 5.0, 0.8))
+        prob = Model(Union{ContaminatedGaussian{Float64, 1}, Float64}, TlAdapt)
+        addvariable!(prob, ContaminatedGaussian(1.0, 5.0, 0.8, static(1)))
         addvariable!(prob, 2.0)
         addcost!(prob, TlAdapt(SVector(1, 2)))
         out, res = optimize(prob, JacobianOptions; formulation=:jacobian, unfixed=2, numthreads=static(1))
@@ -254,8 +254,8 @@ fixture("frontdoor", "jacobianformulation", "jacobianproblems")
         @test err isa ArgumentError
         @test occursin("formulation = :jacobian", err.msg) && occursin("AbstractResidual", err.msg)
         # An unfixed adaptive kernel
-        prob = Model(Union{ContaminatedGaussian{Float64}, Float64}, TlAdapt)
-        addvariable!(prob, ContaminatedGaussian(1.0, 5.0, 0.8))
+        prob = Model(Union{ContaminatedGaussian{Float64, 1}, Float64}, TlAdapt)
+        addvariable!(prob, ContaminatedGaussian(1.0, 5.0, 0.8, static(1)))
         addvariable!(prob, 2.0)
         addcost!(prob, TlAdapt(SVector(1, 2)))
         err = try optimize!(prob, JacobianOptions; formulation=:jacobian); nothing catch e e end

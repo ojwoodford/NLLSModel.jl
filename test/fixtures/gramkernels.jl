@@ -61,7 +61,7 @@ end
 NLLSModel.ndeps(::GramAdaptive) = static(2)
 NLLSModel.nres(::GramAdaptive{M}) where M = static(M)
 NLLSModel.varindices(::GramAdaptive) = SVector(1, 2)
-NLLSModel.getvars(::GramAdaptive, vars::AbstractVector) = (vars[1]::ContaminatedGaussian{Float64}, vars[2]::Vector{Float64})
+NLLSModel.getvars(::GramAdaptive{M}, vars::AbstractVector) where M = (vars[1]::ContaminatedGaussian{Float64, M}, vars[2]::Vector{Float64})
 Base.eltype(::GramAdaptive) = Float64
 NLLSModel.computeresidual(r::GramAdaptive{M}, x) where M = SVector{M}(ntuple(k -> x[k] * x[k+1] - r.meas[k], Val(M)))
 
@@ -73,7 +73,7 @@ end
 NLLSModel.ndeps(::GramAdaptiveHand) = static(2)
 NLLSModel.nres(::GramAdaptiveHand{M}) where M = static(M)
 NLLSModel.varindices(::GramAdaptiveHand) = SVector(1, 2)
-NLLSModel.getvars(::GramAdaptiveHand, vars::AbstractVector) = (vars[1]::ContaminatedGaussian{Float64}, vars[2]::Vector{Float64})
+NLLSModel.getvars(::GramAdaptiveHand{M}, vars::AbstractVector) where M = (vars[1]::ContaminatedGaussian{Float64, M}, vars[2]::Vector{Float64})
 Base.eltype(::GramAdaptiveHand) = Float64
 function NLLSModel.computeresjac(varflags, r::GramAdaptiveHand{M}, x) where M
     for k in 1:M
@@ -175,7 +175,7 @@ StatAdaptive{M, R}(meas, n::Integer) where {M, R} = StatAdaptive{M, R}(meas, zer
 NLLSModel.ndeps(::StatAdaptive) = static(2)
 NLLSModel.nres(::StatAdaptive{M}) where M = static(M)
 NLLSModel.varindices(::StatAdaptive) = SVector(1, 2)
-NLLSModel.getvars(::StatAdaptive, vars::AbstractVector) = (vars[1]::ContaminatedGaussian{Float64}, vars[2]::Vector{Float64})
+NLLSModel.getvars(::StatAdaptive{M}, vars::AbstractVector) where M = (vars[1]::ContaminatedGaussian{Float64, M}, vars[2]::Vector{Float64})
 Base.eltype(::StatAdaptive) = Float64
 function NLLSModel.computeresjac(varflags, r::StatAdaptive{M, R}, x) where {M, R}
     for k in 1:M

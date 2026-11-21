@@ -110,6 +110,9 @@ function addcost!(problem::Model, cost::Cost) where Cost <: AbstractCost
     if Cost <: AbstractResidual
         M = nres(cost)
         (isa(M, Integer) || isa(M, StaticInt)) && M > 0 || inputerror("Problem with nres()", Cost, "cost")
+        kd = kerneldim(Cost <: AbstractAdaptiveResidual ? vars[1] : robustkernel(cost))
+        isnothing(kd) || kd == dynamic(M) ||
+            inputerror("The robust kernel is for residuals of length $kd, but nres() is $(dynamic(M))", Cost, "cost")
     end
     push!(problem.costs, cost)
     problem.varcostmapvalid = false

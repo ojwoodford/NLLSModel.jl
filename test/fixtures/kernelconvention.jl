@@ -1,6 +1,8 @@
 using NLLSModel, Test, Static, StaticArrays, Random
 using OptimizationVariableInterface: update
 
+fixture("allocations")
+
 # Composite Simpson's rule for ∫₀ᴿ f(x) dx with `panels` (even) panels
 function simpson(f, R, panels)
     h = R / panels
@@ -20,8 +22,8 @@ function densityintegral(kernel, d, sigmamax; minus=0.0, panels=400_000)
     return SPHERE_MEASURE[d] * simpson(x -> (exp(-robustify(kernel, x^2) / 2) - minus) * x^(d - 1), 40 * sigmamax, panels)
 end
 
-# A ContaminatedGaussian for residuals of length d. Today's constructor takes no d, so it is ignored.
-cgkernel(s1, s2, w, d) = ContaminatedGaussian(s1, s2, w)
+# A ContaminatedGaussian for residuals of length d
+cgkernel(s1, s2, w, d) = ContaminatedGaussian(s1, s2, w, static(d))
 
 # The kernel fitted to squared residual norms `s`. Today's fit.
 fitkernel(kernel, s; maxiters=100) = NLLSModel.optimizekernel(kernel, s, maxiters)
@@ -51,4 +53,49 @@ function fdkernel(kernel, s)
     g = [(f(e(i)) - f(-e(i))) / 2h for i in 1:n]
     H = [(f(e(i) + e(j)) - f(e(i) - e(j)) - f(-e(i) + e(j)) + f(-e(i) - e(j))) / (4h^2) for i in 1:n, j in 1:n]
     return g, H
+end
+
+# An adaptive residual of length 2, r = x − data, with the kernel (of type K) as variable 1
+struct PairAdaptive{K} <: NLLSModel.AbstractAdaptiveResidual
+    data::SVector{2, Float64}
+    varind::Int
+end
+PairAdaptive{K}(data) where K = PairAdaptive{K}(data, 2)
+NLLSModel.ndeps(::PairAdaptive) = static(2)
+NLLSModel.nres(::PairAdaptive) = static(2)
+NLLSModel.varindices(r::PairAdaptive) = SVector(1, r.varind)
+NLLSModel.getvars(r::PairAdaptive{K}, vars::Vector) where K = (vars[1]::K, vars[r.varind]::SVector{2, Float64})
+NLLSModel.computeresidual(r::PairAdaptive, x) = x - r.data
+Base.eltype(::PairAdaptive) = Float64
+
+# A residual of length 2 with a fixed kernel of its own
+struct PairFixed{K} <: NLLSModel.AbstractResidual
+    data::SVector{2, Float64}
+    kernel::K
+end
+NLLSModel.ndeps(::PairFixed) = static(1)
+NLLSModel.nres(::PairFixed) = static(2)
+NLLSModel.varindices(::PairFixed) = 1
+NLLSModel.getvars(::PairFixed, vars::Vector) = (vars[1]::SVector{2, Float64},)
+NLLSModel.computeresidual(r::PairFixed, x) = x - r.data
+NLLSModel.robustkernel(r::PairFixed) = r.kernel
+Base.eltype(::PairFixed) = Float64
+
+# A user's kernel, which defines no kerneldim
+struct UserKernel <: AbstractRobustifier end
+NLLSModel.robustify(::UserKernel, s) = s
+NLLSModel.robustifydcost(::UserKernel, s) = (s, one(s), zero(s))
+
+# The cost, gradient and Hessian of `computecost(res, update(kernel, x), vars + x)` at x = 0 by central differences, with
+# the kernel's parameters first (`withkernel = false`: the variable's only)
+function fdcostgradhess(res, kernel, var; withkernel=true, h=1e-5)
+    nk = withkernel ? Int(dynamic(NLLSModel.nvars(kernel))) : 0
+    nv = length(var)
+    n = nk + nv
+    f(x) = NLLSModel.computecost(res, withkernel ? update(kernel, x, 1) : kernel, var + SVector{nv}(ntuple(i -> x[nk + i], nv)))
+    e(i) = SVector{n, Float64}(ntuple(j -> j == i ? h : 0.0, n))
+    z = zeros(SVector{n, Float64})
+    g = [(f(e(i)) - f(-e(i))) / 2h for i in 1:n]
+    H = [(f(e(i) + e(j)) - f(e(i) - e(j)) - f(-e(i) + e(j)) + f(-e(i) - e(j))) / 4h^2 for i in 1:n, j in 1:n]
+    return f(z), g, H
 end

@@ -43,8 +43,8 @@ end
 # would cost less; well conditioned, but optimvars_nls refuses an unfixed adaptive kernel
 function adaptivedensemodel(; samples=200, dim=20, rows=400)
     rng = MersenneTwister(1)
-    model = Model(Union{ContaminatedGaussian{Float64}, Float64, Vector{Float64}}, Union{SimpleResidual, LinearResidualDynamic})
-    addvariable!(model, ContaminatedGaussian(1.0, 5.0, 0.8))
+    model = Model(Union{ContaminatedGaussian{Float64, 1}, Float64, Vector{Float64}}, Union{SimpleResidual, LinearResidualDynamic})
+    addvariable!(model, ContaminatedGaussian(1.0, 5.0, 0.8, static(1)))
     addvariable!(model, 0.1)
     addvariable!(model, randn(rng, dim))
     for _ in 1:samples
@@ -99,8 +99,8 @@ end
 # formulation's threshold, but optimvars_nls refuses an unfixed adaptive kernel
 function adaptivemodel()
     rng = MersenneTwister(1)
-    model = Model(Union{ContaminatedGaussian{Float64}, Float64, Vector{Float64}}, Union{SimpleResidual, LinearResidualDynamic})
-    addvariable!(model, ContaminatedGaussian(1.0, 5.0, 0.8))
+    model = Model(Union{ContaminatedGaussian{Float64, 1}, Float64, Vector{Float64}}, Union{SimpleResidual, LinearResidualDynamic})
+    addvariable!(model, ContaminatedGaussian(1.0, 5.0, 0.8, static(1)))
     addvariable!(model, 0.1)
     addvariable!(model, ones(3))
     for _ in 1:200
@@ -154,8 +154,8 @@ monomialmodel(m, deg) = linearmodel([x^k for x in range(0, 1; length=m), k in 0:
 # the rank test's ladder factorizes it
 function indefinitemodel()
     rng = MersenneTwister(1)
-    model = Model(Union{ContaminatedGaussian{Float64}, Float64}, SimpleResidual)
-    addvariable!(model, ContaminatedGaussian(1.0, 5.0, 0.8))
+    model = Model(Union{ContaminatedGaussian{Float64, 1}, Float64}, SimpleResidual)
+    addvariable!(model, ContaminatedGaussian(1.0, 5.0, 0.8, static(1)))
     addvariable!(model, 2.0)
     for _ in 1:200
         addcost!(model, SimpleResidual(rand(rng) < 0.8 ? randn(rng) : 5 * randn(rng), 2))

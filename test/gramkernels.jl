@@ -114,8 +114,8 @@ end
     end
 
     @testset "adaptive kernel" begin
-        kernel = ContaminatedGaussian(0.5, 5.0, 0.4)
         for M in (3, 9), varflags in (static(3), static(2)) # With and without the kernel parameters
+            kernel = ContaminatedGaussian(0.5, 5.0, 0.4, static(M))
             res = GramAdaptive{M}(meas(M))
             c, g, H = NLLSModel.computerescostgradhess(varflags, res, kernel, (x,))
             c_ref, g_ref, H_ref = reference_costgradhess(varflags, res, kernel, (x,))
@@ -143,7 +143,7 @@ end
     end
     # Adaptive kernel (hand-written Jacobian)
     ares = GramAdaptiveHand{9}(randn(rng, 9), zeros(9), zeros(9, 24))
-    akernel = ContaminatedGaussian(0.5, 5.0, 0.4)
+    akernel = ContaminatedGaussian(0.5, 5.0, 0.4, static(9))
     cg(static(3), ares, akernel, (x,))
     cg(static(3), ares, akernel, (x,))
     @test allocs_warm(cg, static(3), ares, akernel, (x,)) == 0
@@ -312,7 +312,7 @@ end
     end
 
     @testset "adaptive kernel, M = $M, $R" for M in (7, 17), R in (:svector, :mvector)
-        kernel = ContaminatedGaussian(0.5, 5.0, 0.4)
+        kernel = ContaminatedGaussian(0.5, 5.0, 0.4, static(M))
         meas = randn(rng, M)
         res = StatAdaptive{M, R}(meas, 48)
         for varflags in (static(3), static(2))

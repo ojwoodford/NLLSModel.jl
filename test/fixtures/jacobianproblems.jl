@@ -88,7 +88,7 @@ end
 NLLSModel.ndeps(::TlAdapt) = static(2)
 NLLSModel.nres(::TlAdapt) = static(1)
 NLLSModel.varindices(r::TlAdapt) = r.varind
-NLLSModel.getvars(r::TlAdapt, vars::Vector) = (vars[r.varind[1]]::ContaminatedGaussian{Float64}, vars[r.varind[2]]::Float64)
+NLLSModel.getvars(r::TlAdapt, vars::Vector) = (vars[r.varind[1]]::ContaminatedGaussian{Float64, 1}, vars[r.varind[2]]::Float64)
 NLLSModel.computeresidual(::TlAdapt, x) = SVector(x - 1.0)
 Base.eltype(::TlAdapt) = Float64
 

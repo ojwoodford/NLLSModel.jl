@@ -163,7 +163,7 @@ end
 NLLSModel.ndeps(::TestAdaptiveRes) = static(2)
 NLLSModel.nres(::TestAdaptiveRes) = static(1)
 NLLSModel.varindices(r::TestAdaptiveRes) = r.varind
-NLLSModel.getvars(r::TestAdaptiveRes, vars::Vector) = (vars[r.varind[1]]::ContaminatedGaussian{Float64}, vars[r.varind[2]]::Float64)
+NLLSModel.getvars(r::TestAdaptiveRes, vars::Vector) = (vars[r.varind[1]]::ContaminatedGaussian{Float64, 1}, vars[r.varind[2]]::Float64)
 NLLSModel.computeresidual(::TestAdaptiveRes, x) = SVector(x - 1.0)
 Base.eltype(::TestAdaptiveRes) = Float64
 

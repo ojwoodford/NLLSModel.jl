@@ -207,8 +207,8 @@ fixture("nls_interface")
     end
 
     @testset "6.1.7 Fixed AbstractAdaptiveResidual Support" begin
-        prob = Model(Union{ContaminatedGaussian{Float64}, Float64}, TestAdaptiveRes)
-        kernel = ContaminatedGaussian(1.0, 5.0, 0.8)
+        prob = Model(Union{ContaminatedGaussian{Float64, 1}, Float64}, TestAdaptiveRes)
+        kernel = ContaminatedGaussian(1.0, 5.0, 0.8, static(1))
         addvariable!(prob, kernel) # var 1 = adaptive kernel
         addvariable!(prob, 2.0)    # var 2 = value
 
