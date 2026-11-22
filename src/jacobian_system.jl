@@ -143,7 +143,8 @@ function jacobian_schur_map(problem::Model, partition, resblocksizes::Vector{Int
 end
 
 # The layout of the Jacobian system, and the Jacobian prototype: a `Matrix` or a `SparseMatrixCSC`, or with a `partition`
-# (elimination) a `SchurBlockJacobian`, whose reduced storage `storage` chooses
+# (elimination) a `SchurBlockJacobian`, whose reduced storage `storage` chooses; its element type is `T`, the `precision`
+# keyword (the residual stays Float64: a SchurBlockJacobian keeps it in a Float64 vector of its own)
 function build_jacobian_layout(problem::Model, unfixed, storage::Symbol, max_dense_bytes::Int, partition=nothing, nchunks::Int=1, ::Type{T}=Float64) where T
     # 2. Sizing and layout arrays
     K = Int(countcosts(costnum, problem.costs))
@@ -268,7 +269,7 @@ function build_jacobian_layout(problem::Model, unfixed, storage::Symbol, max_den
     if !isnothing(partition)
         schur = jacobian_schur_map(problem, partition, resblocksizes, dep_start_idx, nchunks)
         is_dense, = reduced_storage(SchurStructure(schur.structure), storage, max_dense_bytes, "reduced system", T; needpattern=false)
-        J_proto = SchurBlockJacobian{Float64, is_dense ? Matrix{Float64} : SparseMatrixCSC{Float64, Int}}(schur.structure)
+        J_proto = SchurBlockJacobian{T, is_dense ? Matrix{T} : SparseMatrixCSC{T, Int}}(schur.structure)
         return NLSTallLayout(
             K, M, N, 0,
             resoffsets, resblocksizes,
@@ -335,7 +336,7 @@ function build_jacobian_layout(problem::Model, unfixed, storage::Symbol, max_den
         end
     end
 
-    J_sparse = SparseMatrixCSC{Float64, Int}(M, N, colptr, rowval, zeros(Float64, nnz_total))
+    J_sparse = SparseMatrixCSC{T, Int}(M, N, colptr, rowval, zeros(T, nnz_total))
 
     # Finalize sparse_p to absolute 1-based indices in J_csc.nzval
     eachcost(problem.costs) do c, k
@@ -367,7 +368,7 @@ function build_jacobian_layout(problem::Model, unfixed, storage::Symbol, max_den
         end
     end
 
-    J_proto = is_dense ? zeros(Float64, M, N) : J_sparse
+    J_proto = is_dense ? zeros(T, M, N) : J_sparse
 
     return NLSTallLayout(
         K, M, N, nnz_total,
