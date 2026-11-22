@@ -30,7 +30,7 @@ struct SingleVarCostGradHess{LS, P, U}
     problem::P
     unfixed::U
 end
-@inline makels(::UniVariateLSstatic_ls{N, N2}, H, g) where {N, N2} = UniVariateLSstatic_ls{N, N2}(H, g)
+@inline makels(::UniVariateLSstatic_ls, H, g) = UniVariateLSstatic_ls(H, g)
 @inline makels(::UniVariateLSdynamic_ls, H, g) = UniVariateLSdynamic_ls(H, g)
 
 @inline function (f::SingleVarCostGradHess)(g, H, x)
@@ -90,7 +90,7 @@ struct MultiVarDenseFDF{LS, P, U}
     problem::P
     unfixed_inds::U
 end
-@inline function (f::MultiVarDenseFDF)(g, H_mat::Matrix{Float64}, vars)
+@inline function (f::MultiVarDenseFDF)(g, H_mat::Matrix{<:Union{Float64, Float32}}, vars)
     full_vars = sync_unfixed_vars!(f.problem, f.unfixed_inds, vars)
     # The optimizer's matrix, with the system's layout, which it shares: this allocates nothing
     bdm = DenseBlockLinearSystem(H_mat, getA(f.linsystem))
@@ -111,7 +111,7 @@ struct MultiVarSparseFDF{LS, P, U}
     problem::P
     unfixed_inds::U
 end
-@inline function (f::MultiVarSparseFDF)(g, H_csc::SparseMatrixCSC{Float64, Int}, vars)
+@inline function (f::MultiVarSparseFDF)(g, H_csc::SparseMatrixCSC{<:Union{Float64, Float32}, Int}, vars)
     full_vars = sync_unfixed_vars!(f.problem, f.unfixed_inds, vars)
     if f.linsystem isa LinearSystemShared
         target = replace_first_ls(f.linsystem, MultiVariateLSsparse_ls(f.linsystem.ls[1].A, g))
@@ -226,16 +226,16 @@ function optimvars_dispatch(problem::Model, unfixed::Integer, numthreads::Static
     varlen = nvars(x0)
     check_densefits("Hessian of a single variable", dynamic(varlen), dynamic(varlen), max_dense_bytes, "raise max_dense_bytes", T)
     if usesstaticsystem(x0)
-        ls = LinearSystem{UniVariateLSstatic_x{dynamic(varlen)}, UniVariateLSstatic_ls{dynamic(varlen), dynamic(varlen * varlen)}}((unfixed,), ())
+        ls = LinearSystem{UniVariateLSstatic_x{dynamic(varlen)}, UniVariateLSstatic_ls{dynamic(varlen), dynamic(varlen * varlen), T}}((unfixed,), ())
     else
-        ls = LinearSystem{UniVariateLSdynamic_x, UniVariateLSdynamic_ls}((unfixed, dynamic(varlen)), (dynamic(varlen),))
+        ls = LinearSystem{UniVariateLSdynamic_x, UniVariateLSdynamic_ls{T}}((unfixed, dynamic(varlen)), (dynamic(varlen),))
     end
     ls_shared = sharedlinearsystem(ls, workestimates(problem, unfixed).hessianfill, numthreads, costsplit(problem.costs), min_work)
     f = SingleVarCostFunc(problem, unfixed, numthreads, min_work_cost)
     fdf! = SingleVarCostGradHess(ls_shared, problem, unfixed)
     # The Hessian prototype has the type of the system's own storage (an MMatrix or a Matrix), so buffers built from it
     # take fdf!'s direct-write branch
-    H = fill!(copy_structure(ls.ls).A, 0.0)
+    H = fill!(copy_structure(ls.ls).A, zero(T))
     return (f, fdf!, x0, H)
 end
 
@@ -262,11 +262,11 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
 
         # BlockLinearSystems allocates the system; a sparse one on the pattern built for the decision
         H = if is_dense
-            SchurBlockHessian{Float64, Matrix{Float64}}(structure)
+            SchurBlockHessian{T, Matrix{T}}(structure)
         else
             # The pattern (and analysed factor, if any) travel with the matrix to the linear system
             carried = isnothing(analysed) ? pattern : merge(pattern, (S_factor = analysed,))
-            SchurBlockHessian{Float64, SparseBlockLinearSystem{Float64}}(structure; pattern=carried)
+            SchurBlockHessian{T, SparseBlockLinearSystem{T}}(structure; pattern=carried)
         end
 
         blockindices = zeros(UInt, length(problem.variables))
@@ -310,16 +310,17 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
     issparse = storage === :sparse ||
         (storage === :auto && (!densefits(len, len, max_dense_bytes, T) || (len >= 40 && sparse_dense_decision(len, sparsity, blocksizes))))
     if issparse
-        bsm = SparseBlockLinearSystem{Float64}(TransposedPattern(sparsity), blocksizes, blocksizes)
+        bsm = SparseBlockLinearSystem{T}(TransposedPattern(sparsity), blocksizes, blocksizes)
         lssparse = MultiVariateLSsparse(bsm, blockindices, true)
         ls_shared = sharedlinearsystem(lssparse, workestimates(problem, unfixed).hessianfill, numthreads, costsplit(problem.costs), min_work)
         fdf! = MultiVarSparseFDF(ls_shared, problem, unfixed_sync)
         return (f, fdf!, x0, lssparse.x.hessian)
     else
-        lsdense = MultiVariateLSdense(blocksizes, blockindices)
+        lsdense = MultiVariateLSdense(blocksizes, blockindices, T)
         ls_shared = sharedlinearsystem(lsdense, workestimates(problem, unfixed).hessianfill, numthreads, costsplit(problem.costs), min_work)
         fdf! = MultiVarDenseFDF(ls_shared, problem, unfixed_sync)
-        return (f, fdf!, x0, nothing)
+        # A Float64 dense Hessian needs no prototype (the optimizer allocates its own); another precision is carried by one
+        return (f, fdf!, x0, T === Float64 ? nothing : zeros(T, len, len))
     end
 end
 
