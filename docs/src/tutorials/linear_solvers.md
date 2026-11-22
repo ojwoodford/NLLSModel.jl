@@ -114,3 +114,49 @@ There are two ways to use it, with `using SecondOrderOptimization`:
   dynamic dispatch of building them from the recommendation's values.
 
 A recommendation holds for the model and the values it was made from: it is not checked again when it is used.
+
+## Single Precision
+
+`precision = Float32` (a keyword of `optimize!(model, options; ...)`, [`optimvars`](@ref) and [`optimvars_nls`](@ref);
+default `Float64`) builds the linear system in single precision: the Hessian (with `formulation = :jacobian`, the
+Jacobian), its Schur or QR reduction and its factorization. Everything else stays in double precision: the
+variables, the residuals, each cost's derivatives (computed in `Float64` and narrowed as they are added into the
+system), the cost, the gradient, the step and every test the optimizer makes. Because the gradient is exact, the
+optimizer converges to the double-precision answer, in the same or a few more iterations; inside the linear solve
+the system is conditioned by powers of two, so the single-precision factorization works on a well-scaled matrix.
+
+```julia
+julia> o = OptimizationOptions(iterator = :levenbergmarquardt);
+
+julia> for T in (Float64, Float32)
+           r = optimize!(deepcopy(model), o; reduction = :eliminate, storage = :dense, precision = T)
+           println("precision = $T: ", r.niterations, " iterations, cost ", r.bestcost, ", converged ", isconverged(r))
+       end
+precision = Float64: 5 iterations, cost 2.0947539345256057, converged true
+precision = Float32: 5 iterations, cost 2.094753934525606, converged true
+```
+
+(a bundle adjustment of 30 cameras and 1500 eliminated landmarks with noisy measurements.)
+
+**When it pays.** Measured on one thread of an Apple-silicon machine, against `Float64` on the same problem:
+
+- The system holds half the memory: bundle adjustment of 60 cameras and 5000 landmarks, 51 → 28 MB on the Hessian
+  path with elimination, and 2.6 GB → 1.3 GB on the Jacobian path (dense reduced), 945 → 482 MB (sparse reduced).
+- A solve is faster where it is dominated by the factorization of a large dense matrix: 1.7× on the Jacobian path
+  with a dense reduced system (3.8 s → 2.3 s per solve), 1.2× on the Hessian path (85 → 72 ms); elsewhere it is about
+  the same, and on small problems nothing changes.
+- The iterations are the same on the Hessian path, and one or two more on the Jacobian path.
+
+So single precision is worth it for a large problem whose linear system is the memory or the time: elimination with a
+large reduced system, or the Jacobian path's tables.
+
+**When it does not.** On an ill-conditioned problem (a monomial polynomial fit of degree 10 or more) the Hessian path
+in single precision does not converge: the Jacobian path, whose QR works at the condition number of `J` rather than
+of `JᵀJ`, is the remedy. A sparse Jacobian without elimination offers only `:lsmr` in single precision (sparse QR is
+double only), whose inexact steps may not converge. Some large sparse problems without elimination converged in double
+and not in single on the Hessian path too. Check the result's `isconverged`.
+
+**Which solvers offer it.** Dense systems: every solver. Sparse systems: `:ldl` (and `:cg`, `:minres`, `:lsmr` with
+Krylov.jl), `:cholesky` where SparseArrays' CHOLMOD factorizes single precision (checked: Julia 1.13, not 1.10); sparse QR (`:qr`, and `:auto` where it means QR) is
+double only. A solver that does not offer single precision for the system is an `ArgumentError` when the system is
+built, naming those that do, so with sparse storage name the solver (`linsolver = :ldl`, or `:cholesky`).

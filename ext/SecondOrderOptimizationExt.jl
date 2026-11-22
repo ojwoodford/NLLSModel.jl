@@ -64,7 +64,9 @@ The second method, `optimize!(model, rec)`, takes every choice from an `Optimiza
 $JACOBIAN_FORMULATION_DOC
 
 `formulation` is a keyword here only: it is not a field of `OptimizationOptions` and is not inferred from `options.linsolver`. Any
-other value is an `ArgumentError`. `callback` and `workspace` are passed to the optimizer. The default of `min_work` is the
+other value is an `ArgumentError`. `precision = Float32` builds the linear system (on either path, and its elimination) in
+single precision, everything else in double; see the keywords below, and the "Single Precision" section of the
+linear-solvers tutorial for when it pays. `callback` and `workspace` are passed to the optimizer. The default of `min_work` is the
 formulation's ($MIN_WORK_PER_THREAD_HESSIAN for `:hessian`, $MIN_WORK_PER_THREAD_JACOBIAN for `:jacobian`).
 
 $KEYWORDS_DOC"""

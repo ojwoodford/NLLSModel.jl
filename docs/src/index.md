@@ -20,6 +20,7 @@ where:
 - **Fast Block Linear Systems**: Custom `DenseBlockLinearSystem` and `SparseBlockLinearSystem` (from `BlockLinearSystems.jl`) tailored for sparse $LDL^T$, Cholesky, and QR factorizations.
 - **Automatic Differentiation**: Evaluates residual Jacobians and cost gradients/Hessians automatically via `ForwardDiff.jl`, or uses user-supplied analytic derivatives via [`computeresjac`](@ref).
 - **Robust M-Estimators**: First- and second-order robust kernels plus adaptive robustifiers ([`ContaminatedGaussian`](@ref), [`GaussianPlusUniform`](@ref)).
+- **Single Precision**: `precision = Float32` holds the linear system (Hessian or Jacobian, its reduction and factorization) in single precision and everything else in double; see [Linear Solvers & Sparsity](tutorials/linear_solvers.md).
 - **One-Call Solving**: `optimize!(model, options)` (with `using SecondOrderOptimization`) solves the model and writes the solution back.
 - **Solver-Agnostic Extraction**: For advanced use, [`optimvars`](@ref) returns `(f, fdf!, x0, H)` for custom outer loops or other optimizers.
 - **Multi-threaded Evaluation**: Automatic thread-parallel residual and Hessian evaluation via `Polyester.jl`.
