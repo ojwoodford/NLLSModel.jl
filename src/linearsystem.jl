@@ -83,9 +83,9 @@ struct UniVariateLSstatic_x{N}
     end
 end
 
-const UniVariateLSsingle = Union{LinearSystem{UniVariateLSdynamic_x, <:UniVariateLSdynamic_ls}, LinearSystem{UniVariateLSstatic_x{N}, UniVariateLSstatic_ls{N, N2, T}} where {N, N2, T}}
+const UniVariateLSsingle = Union{LinearSystem{UniVariateLSdynamic_x, <:UniVariateLSdynamic_ls}, LinearSystem{UniVariateLSstatic_x{N}, <:UniVariateLSstatic_ls{N}} where N}
 const UniVariateLSdynamic = Union{LinearSystem{UniVariateLSdynamic_x, <:UniVariateLSdynamic_ls}, LinearSystemShared{UniVariateLSdynamic_x, V, M} where {V <: UniVariateLSdynamic_ls, M}}
-const UniVariateLSstatic = Union{LinearSystem{UniVariateLSstatic_x{N}, UniVariateLSstatic_ls{N, N2, T}} where {N, N2, T}, LinearSystemShared{UniVariateLSstatic_x{N}, UniVariateLSstatic_ls{N, N2, T}, M} where {N, N2, T, M}}
+const UniVariateLSstatic = Union{LinearSystem{UniVariateLSstatic_x{N}, <:UniVariateLSstatic_ls{N}} where N, LinearSystemShared{UniVariateLSstatic_x{N}, V, M} where {N, V <: UniVariateLSstatic_ls{N}, M}}
 const UniVariateLS = Union{UniVariateLSdynamic, UniVariateLSstatic}
 
 # Multi-variate linear system
@@ -101,6 +101,8 @@ struct MultiVariateLSsparse_ls{T}
     A::SparseBlockLinearSystem{T}
     b::Vector{Float64}
 end
+# The gradient converted to a Vector{Float64}, as the non-parametric type did
+MultiVariateLSsparse_ls(A::SparseBlockLinearSystem{T}, b::AbstractVector) where T = MultiVariateLSsparse_ls{T}(A, b)
 
 struct MultiVariateLSdense_x
     x::Vector{Float64}
@@ -112,6 +114,7 @@ struct MultiVariateLSdense_ls{T, M<:AbstractMatrix{T}}
     A::DenseBlockLinearSystem{T, M}
     b::Vector{Float64}
 end
+MultiVariateLSdense_ls(A::DenseBlockLinearSystem{T, M}, b::AbstractVector) where {T, M} = MultiVariateLSdense_ls{T, M}(A, b)
 
 # Schur linear system
 struct MultiVariateLSSchur_x
@@ -126,6 +129,7 @@ struct MultiVariateLSSchur_ls{T, BType}
     A::SchurBlockHessian{T, BType}
     b::Vector{Float64}
 end
+MultiVariateLSSchur_ls(A::SchurBlockHessian{T, BType}, b::AbstractVector) where {T, BType} = MultiVariateLSSchur_ls{T, BType}(A, b)
 
 const MultiVariateLSsparse = Union{LinearSystem{<:MultiVariateLSsparse_x, <:MultiVariateLSsparse_ls}, LinearSystemShared{X, V, M} where {X <: MultiVariateLSsparse_x, V <: MultiVariateLSsparse_ls, M}}
 const MultiVariateLSdense = Union{LinearSystem{MultiVariateLSdense_x, <:MultiVariateLSdense_ls}, LinearSystemShared{MultiVariateLSdense_x, <:MultiVariateLSdense_ls, M} where M}

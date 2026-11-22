@@ -91,7 +91,7 @@ fixture("allocations", "multithreading")
     for k in 1:120
         addcost!(prob_static, MTTestScalarRes(k * 0.1, 1))
     end
-    ls_static_single = NLLSModel.LinearSystem{NLLSModel.UniVariateLSstatic_x{1}, NLLSModel.UniVariateLSstatic_ls{1, 1}}((1,), ())
+    ls_static_single = NLLSModel.LinearSystem{NLLSModel.UniVariateLSstatic_x{1}, NLLSModel.UniVariateLSstatic_ls{1, 1, Float64}}((1,), ())
     ls_static_shared = NLLSModel.sharedlinearsystem(ls_static_single, static(4))
     c_s = NLLSModel.costgradhess!(ls_static_single, prob_static.variables, prob_static.costs)
     c_m = NLLSModel.costgradhess!(ls_static_shared, prob_static.variables, prob_static.costs)
@@ -147,7 +147,7 @@ fixture("allocations", "multithreading")
     @test NLLSModel.getA(ls_static_single.ls) === ls_static_single.ls.A
     @test NLLSModel.getb(ls_static_single.ls) === ls_static_single.ls.b
     @test NLLSModel.getx(ls_static_single.x) === ls_static_single.x.x
-    lss_direct = NLLSModel.LinearSystemShared{NLLSModel.UniVariateLSstatic_x{1}, NLLSModel.UniVariateLSstatic_ls{1, 1}, 2}((1,), ())
+    lss_direct = NLLSModel.LinearSystemShared{NLLSModel.UniVariateLSstatic_x{1}, NLLSModel.UniVariateLSstatic_ls{1, 1, Float64}, 2}((1,), ())
     @test lss_direct isa NLLSModel.LinearSystemShared
     @test NLLSModel.updateunfixed(ls_static_shared, 1) isa NLLSModel.LinearSystemShared
 
@@ -158,7 +158,7 @@ fixture("allocations", "multithreading")
     for k in 1:120
         addcost!(prob_dyn, MTTestDynamicRes(1.0, randn(dim)))
     end
-    ls_dyn_single = NLLSModel.LinearSystem{NLLSModel.UniVariateLSdynamic_x, NLLSModel.UniVariateLSdynamic_ls}((1, dim), (dim,))
+    ls_dyn_single = NLLSModel.LinearSystem{NLLSModel.UniVariateLSdynamic_x, NLLSModel.UniVariateLSdynamic_ls{Float64}}((1, dim), (dim,))
     ls_dyn_shared = NLLSModel.sharedlinearsystem(ls_dyn_single, static(4))
     c_ds = NLLSModel.costgradhess!(ls_dyn_single, prob_dyn.variables, prob_dyn.costs)
     c_dm = NLLSModel.costgradhess!(ls_dyn_shared, prob_dyn.variables, prob_dyn.costs)
@@ -232,7 +232,7 @@ fixture("allocations", "multithreading")
     for k in 1:NLLSModel.MIN_WORK_PER_THREAD_HESSIAN
         addcost!(prob_large, MTTestScalarRes(k * 0.001, 1))
     end
-    ls_large_single = NLLSModel.LinearSystem{NLLSModel.UniVariateLSstatic_x{1}, NLLSModel.UniVariateLSstatic_ls{1, 1}}((1,), ())
+    ls_large_single = NLLSModel.LinearSystem{NLLSModel.UniVariateLSstatic_x{1}, NLLSModel.UniVariateLSstatic_ls{1, 1, Float64}}((1,), ())
     @test NLLSModel.workestimates(prob_large, nothing).hessianfill == 2 * NLLSModel.MIN_WORK_PER_THREAD_HESSIAN # m = 1, n = 1 per cost
     shared_large = NLLSModel.sharedlinearsystem(ls_large_single, NLLSModel.workestimates(prob_large, nothing).hessianfill, static(4), NLLSModel.costsplit(prob_large.costs))
     @test shared_large isa NLLSModel.LinearSystemShared && length(shared_large.ls) == 2
