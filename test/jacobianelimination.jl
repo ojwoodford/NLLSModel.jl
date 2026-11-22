@@ -47,17 +47,18 @@ fixture("allocations", "frontdoor", "jacobianelimination")
         _, rese!, rje, xe, Je = optimvars_nls(model; unfixed, reduction=:eliminate, numthreads=static(1))
         rp = zeros(size(Jp, 1))
         cp = rjp(rp, Jp, xp)
-        fill!(Je.data, 7.0) # Not prezeroed: every entry is set
+        fill!(Je.data, 7.0); fill!(Je.r, 7.0) # Not prezeroed: every entry is set
         ce = rje(Float64[], Je, xe) # The residual vector is not used
         @test ce == cp
         Jd, rd = tables_as_plain(rje, Je, rjp)
         @test Jd == Jp
         @test rd == rp
         # And nothing else is written: the damping rows and the entries no cost touches are zero
-        @test sum(abs2, Je.data) ≈ sum(abs2, Jp) + sum(abs2, rp) rtol=1e-14
+        # (the residual is in its own vector, Je.r, since BlockLinearSystems SP-B5)
+        @test sum(abs2, Je.data) + sum(abs2, Je.r) ≈ sum(abs2, Jp) + sum(abs2, rp) rtol=1e-14
         # With prezeroed = true the zeros are taken to be in place
         Jz = copy_structure(Je)
-        @test rje(Float64[], Jz, xe; prezeroed=true) == ce && Jz.data == Je.data
+        @test rje(Float64[], Jz, xe; prezeroed=true) == ce && Jz.data == Je.data && Jz.r == Je.r
         # res! still writes the whole residual, in the plain order
         r2, r3 = zeros(length(rp)), zeros(length(rp))
         @test rese!(r2, xe) == resp!(r3, xp)
