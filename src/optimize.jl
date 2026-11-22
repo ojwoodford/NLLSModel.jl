@@ -185,14 +185,14 @@ end
 # `(is_dense, pattern, analysed)`: the reduced system's pattern, when it was built (for the decision, or because the caller
 # `needpattern`), and CHOLMOD's symbolic analysis of it, when that was run. The pattern holds every pair of retained
 # variables that share a cost: BlockLinearSystems keeps them in the structure.
-function reduced_storage(structure::SchurStructure, storage::Symbol, max_dense_bytes::Int, what::String; needpattern::Bool)
+function reduced_storage(structure::SchurStructure, storage::Symbol, max_dense_bytes::Int, what::String, ::Type{T}=Float64; needpattern::Bool) where T
     nr = sum(view(BlockLinearSystems.blocksizes(structure), 1:nretained(structure)))
     if storage === :dense
-        check_densefits(what, nr, nr, max_dense_bytes)
+        check_densefits(what, nr, nr, max_dense_bytes, "raise max_dense_bytes or use storage = :sparse", T)
         return true, nothing, nothing
     end
-    pattern = (needpattern || storage === :auto) ? build_schur_pattern(structure) : nothing
-    if storage === :auto && nr <= 2000 && densefits(nr, nr, max_dense_bytes)
+    pattern = (needpattern || storage === :auto) ? build_schur_pattern(structure, T) : nothing
+    if storage === :auto && nr <= 2000 && densefits(nr, nr, max_dense_bytes, T)
         chol_fac = SparseArrays.CHOLMOD.analyze(SparseArrays.CHOLMOD.Sparse(Symmetric(pattern.S_sparse, :U)))
         # Fall back to the pattern's own size if CHOLMOD's prediction is unavailable
         factor_nnz = something(cholmod_symbolic_nnz(chol_fac, nr), nnz(pattern.S_sparse))
@@ -203,10 +203,11 @@ end
 
 function optimvars(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction::Symbol=:auto, storage::Symbol=:auto,
         max_dense_bytes::Integer=MAX_DENSE_BYTES, min_work::Integer=MIN_WORK_PER_THREAD_HESSIAN,
-        min_work_cost::Integer=MIN_WORK_PER_THREAD_COST)
+        min_work_cost::Integer=MIN_WORK_PER_THREAD_COST, precision::Type=Float64)
     check_reduction(reduction)
     check_storage(storage)
-    return optimvars_dispatch(problem, convertunfixed(unfixed, problem), static(numthreads), reduction, storage, Int(max_dense_bytes), min_work, min_work_cost)
+    check_precision(precision)
+    return optimvars_dispatch(problem, convertunfixed(unfixed, problem), static(numthreads), reduction, storage, Int(max_dense_bytes), min_work, min_work_cost, precision)
 end
 
 # The static rule for one variable's system: static (stack-allocated `StaticArrays`) when the variable's size is static and
@@ -218,12 +219,12 @@ const MAX_STATIC_SYSTEM = 16
 usesstaticsystem(x0) = isstaticsize(nvars(x0))
 isstaticsize(n) = dynamic(is_static(n)) && n <= MAX_STATIC_SYSTEM
 
-function optimvars_dispatch(problem::Model, unfixed::Integer, numthreads::StaticInt, reduction::Symbol, storage::Symbol, max_dense_bytes::Int, min_work::Integer, min_work_cost::Integer)
+function optimvars_dispatch(problem::Model, unfixed::Integer, numthreads::StaticInt, reduction::Symbol, storage::Symbol, max_dense_bytes::Int, min_work::Integer, min_work_cost::Integer, ::Type{T}=Float64) where T
     # One variable's system is always dense (or static)
     storage === :sparse && throw(ArgumentError("storage = :sparse is not available for a single unfixed variable: its Hessian is always dense; use :auto or :dense."))
     x0 = problem.variables[unfixed]
     varlen = nvars(x0)
-    check_densefits("Hessian of a single variable", dynamic(varlen), dynamic(varlen), max_dense_bytes, "raise max_dense_bytes")
+    check_densefits("Hessian of a single variable", dynamic(varlen), dynamic(varlen), max_dense_bytes, "raise max_dense_bytes", T)
     if usesstaticsystem(x0)
         ls = LinearSystem{UniVariateLSstatic_x{dynamic(varlen)}, UniVariateLSstatic_ls{dynamic(varlen), dynamic(varlen * varlen)}}((unfixed,), ())
     else
@@ -238,11 +239,11 @@ function optimvars_dispatch(problem::Model, unfixed::Integer, numthreads::Static
     return (f, fdf!, x0, H)
 end
 
-function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads::StaticInt, reduction::Symbol, storage::Symbol, max_dense_bytes::Int, min_work::Integer, min_work_cost::Integer)
+function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads::StaticInt, reduction::Symbol, storage::Symbol, max_dense_bytes::Int, min_work::Integer, min_work_cost::Integer, ::Type{T}=Float64) where T
     isempty(problem.variables) && throw(ArgumentError("The model has no variables"))
     nblocks = sum(unfixed)
     if nblocks == 1
-        return optimvars_dispatch(problem, findfirst(unfixed), numthreads, reduction, storage, max_dense_bytes, min_work, min_work_cost)
+        return optimvars_dispatch(problem, findfirst(unfixed), numthreads, reduction, storage, max_dense_bytes, min_work, min_work_cost, T)
     end
 
     partition = schur_partition(problem, unfixed, reduction)
@@ -257,7 +258,7 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
         # Dense or sparse. The pattern includes retained-retained pairs sharing a cost, not only those sharing an
         # eliminated variable. When the symbolic analysis is run for the decision, it is kept and handed on with the
         # pattern, so the linear system does not analyse the same pattern again.
-        is_dense, pattern, analysed = reduced_storage(structure, storage, max_dense_bytes, "reduced Hessian"; needpattern=true)
+        is_dense, pattern, analysed = reduced_storage(structure, storage, max_dense_bytes, "reduced Hessian", T; needpattern=true)
 
         # BlockLinearSystems allocates the system; a sparse one on the pattern built for the decision
         H = if is_dense
@@ -304,10 +305,10 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
     f = MultiVarCostFunc(problem, unfixed_sync, numthreads, min_work_cost)
 
     # storage forces the choice; :auto takes the structure's, but never a dense Hessian above max_dense_bytes
-    storage === :dense && check_densefits("Hessian", len, len, max_dense_bytes)
+    storage === :dense && check_densefits("Hessian", len, len, max_dense_bytes, "raise max_dense_bytes or use storage = :sparse", T)
     sparsity = block_sparsity(problem, unfixed_inds)
     issparse = storage === :sparse ||
-        (storage === :auto && (!densefits(len, len, max_dense_bytes) || (len >= 40 && sparse_dense_decision(len, sparsity, blocksizes))))
+        (storage === :auto && (!densefits(len, len, max_dense_bytes, T) || (len >= 40 && sparse_dense_decision(len, sparsity, blocksizes))))
     if issparse
         bsm = SparseBlockLinearSystem{Float64}(TransposedPattern(sparsity), blocksizes, blocksizes)
         lssparse = MultiVariateLSsparse(bsm, blockindices, true)

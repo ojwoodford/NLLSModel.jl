@@ -144,13 +144,13 @@ end
 
 # The layout of the Jacobian system, and the Jacobian prototype: a `Matrix` or a `SparseMatrixCSC`, or with a `partition`
 # (elimination) a `SchurBlockJacobian`, whose reduced storage `storage` chooses
-function build_jacobian_layout(problem::Model, unfixed, storage::Symbol, max_dense_bytes::Int, partition=nothing, nchunks::Int=1)
+function build_jacobian_layout(problem::Model, unfixed, storage::Symbol, max_dense_bytes::Int, partition=nothing, nchunks::Int=1, ::Type{T}=Float64) where T
     # 2. Sizing and layout arrays
     K = Int(countcosts(costnum, problem.costs))
     M = Int(countcosts(resnum, problem.costs))
     # A forced dense Jacobian above the cap is refused before anything is allocated (with elimination, `storage` is the
     # storage of the reduced system, checked below)
-    isnothing(partition) && storage === :dense && check_densefits("Jacobian", M, unfixeddims(problem, unfixed), max_dense_bytes)
+    isnothing(partition) && storage === :dense && check_densefits("Jacobian", M, unfixeddims(problem, unfixed), max_dense_bytes, "raise max_dense_bytes or use storage = :sparse", T)
     resoffsets = Vector{Int}(undef, K + 1)
     resblocksizes = Vector{Int}(undef, K)
     resoffsets[1] = 1
@@ -267,7 +267,7 @@ function build_jacobian_layout(problem::Model, unfixed, storage::Symbol, max_den
     # path's rule (`reduced_storage`); the optimizer builds its own pattern for a sparse one.
     if !isnothing(partition)
         schur = jacobian_schur_map(problem, partition, resblocksizes, dep_start_idx, nchunks)
-        is_dense, = reduced_storage(SchurStructure(schur.structure), storage, max_dense_bytes, "reduced system"; needpattern=false)
+        is_dense, = reduced_storage(SchurStructure(schur.structure), storage, max_dense_bytes, "reduced system", T; needpattern=false)
         J_proto = SchurBlockJacobian{Float64, is_dense ? Matrix{Float64} : SparseMatrixCSC{Float64, Int}}(schur.structure)
         return NLSTallLayout(
             K, M, N, 0,
@@ -360,7 +360,7 @@ function build_jacobian_layout(problem::Model, unfixed, storage::Symbol, max_den
     elseif storage === :sparse
         is_dense = false
     else # :auto
-        if densefits(M, N, max_dense_bytes) && (M * N <= 100_000 || fill_fraction >= 0.5 || (N <= 100 && fill_fraction >= 0.25))
+        if densefits(M, N, max_dense_bytes, T) && (M * N <= 100_000 || fill_fraction >= 0.5 || (N <= 100 && fill_fraction >= 0.25))
             is_dense = true
         else
             is_dense = false
@@ -875,7 +875,7 @@ function (resjac!::NLSResJac)(r::AbstractVector{Float64}, J, vars; prezeroed::Bo
 end
 
 """
-    optimvars_nls(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work=$MIN_WORK_PER_THREAD_JACOBIAN, min_work_cost=$MIN_WORK_PER_THREAD_COST)
+    optimvars_nls(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work=$MIN_WORK_PER_THREAD_JACOBIAN, min_work_cost=$MIN_WORK_PER_THREAD_COST, precision=Float64)
 
 Constructs the residual and Jacobian callable structs `(f, res!, resjac!, x0, J_proto)` for `problem`.
 
@@ -914,13 +914,15 @@ function optimvars_nls(
     max_dense_bytes::Integer = MAX_DENSE_BYTES,
     min_work::Integer = MIN_WORK_PER_THREAD_JACOBIAN,
     min_work_cost::Integer = MIN_WORK_PER_THREAD_COST,
+    precision::Type = Float64,
 )
     check_reduction(reduction)
     check_storage(storage)
+    check_precision(precision)
     check_jacobian_costs(problem)
     conv_unfixed = convertunfixed(unfixed, problem)
     partition = jacobian_schur_partition(problem, conv_unfixed, reduction)
-    layout, J_proto = build_jacobian_layout(problem, conv_unfixed, storage, Int(max_dense_bytes), partition, Int(dynamic(numthreads)))
+    layout, J_proto = build_jacobian_layout(problem, conv_unfixed, storage, Int(max_dense_bytes), partition, Int(dynamic(numthreads)), precision)
 
     if !isnothing(partition)
         # The variables in the layout's order (retained, then eliminated), which is the column order of the tables
@@ -956,7 +958,7 @@ function optimvars_nls(
 end
 
 """
-    flat_optimvars_nls(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work=$MIN_WORK_PER_THREAD_JACOBIAN, min_work_cost=$MIN_WORK_PER_THREAD_COST)
+    flat_optimvars_nls(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work=$MIN_WORK_PER_THREAD_JACOBIAN, min_work_cost=$MIN_WORK_PER_THREAD_COST, precision=Float64)
 
 Constructs a flat Euclidean vector wrapper around `optimvars_nls`.
 Returns a NamedTuple `(; f, res!, resjac!, jac!, x0, J_proto, layout, status)`. Its Jacobian is a plain matrix, for
@@ -976,8 +978,10 @@ function flat_optimvars_nls(
     max_dense_bytes::Integer = MAX_DENSE_BYTES,
     min_work::Integer = MIN_WORK_PER_THREAD_JACOBIAN,
     min_work_cost::Integer = MIN_WORK_PER_THREAD_COST,
+    precision::Type = Float64,
 )
     reduction = check_plain_reduction(reduction, "flat_optimvars_nls")
+    check_plain_precision(precision, "flat_optimvars_nls")
     conv_unfixed = convertunfixed(unfixed, problem)
 
     check_flat_variables(problem, conv_unfixed)
@@ -1049,7 +1053,7 @@ function throw_nonlinear(name, problem)
 end
 
 """
-    nls_callbacks(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work=$MIN_WORK_PER_THREAD_JACOBIAN, min_work_cost=$MIN_WORK_PER_THREAD_COST)
+    nls_callbacks(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work=$MIN_WORK_PER_THREAD_JACOBIAN, min_work_cost=$MIN_WORK_PER_THREAD_COST, precision=Float64)
 
 Lightweight callback helper for `LeastSquaresOptim.jl`.
 Accepts any non-adaptive `AbstractResidual` problem in which every cost has a linear kernel (`NoRobust`, or `Scaled` with a finite non-negative height).
@@ -1065,8 +1069,10 @@ function nls_callbacks(
     max_dense_bytes::Integer = MAX_DENSE_BYTES,
     min_work::Integer = MIN_WORK_PER_THREAD_JACOBIAN,
     min_work_cost::Integer = MIN_WORK_PER_THREAD_COST,
+    precision::Type = Float64,
 )
     check_plain_reduction(reduction, "nls_callbacks")
+    check_plain_precision(precision, "nls_callbacks")
     flat = flat_optimvars_nls(
         problem;
         unfixed = unfixed,

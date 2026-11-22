@@ -27,7 +27,23 @@ fixture("keywords", "jacobianformulation")
         for (name, entry, _) in KW_ENTRY
             @test_throws ArgumentError entry(model; reduction=:schur)
             @test_throws ArgumentError entry(model; storage=:banded)
+            @test_throws ArgumentError entry(model; precision=Float16)   # SP-N1
+            @test_throws ArgumentError entry(model; precision=BigFloat)
         end
+    end
+
+    # SP-N1: precision; the wrappers that hand a plain system to external solvers take Float64 only
+    @testset "precision: the wrappers take Float64 only" begin
+        for (name, entry) in (("flat_optimvars_nls", flat_optimvars_nls), ("NLPLSModel", NLPLSModel), ("NLLSNLSModel", NLLSNLSModel),
+                              ("nls_callbacks", NLLSModel.nls_callbacks))
+            err = try entry(model; precision=Float32); nothing catch e; e end
+            @test err isa ArgumentError && occursin(name, err.msg) && occursin("Float64", err.msg)
+            @test entry(model; precision=Float64) !== nothing
+        end
+        @test NLLSModel.densefits(10, 10, 400, Float32) && !NLLSModel.densefits(10, 10, 400, Float64)   # sizeof(precision)
+        needs(T) = (e = try optimvars_nls(model; reduction=:none, storage=:dense, max_dense_bytes=100, precision=T); nothing catch e; e end;
+                    parse(Int, match(r"needs (\d+) bytes", e.msg)[1]))
+        @test 2 * needs(Float32) == needs(Float64)
     end
 
     # NTP2: the Hessian path's rule; with no eliminable variable :eliminate is the partition's ArgumentError (elimination on

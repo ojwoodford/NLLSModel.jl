@@ -19,9 +19,9 @@ end
 # The Jacobian formulation: the residual vector and the Jacobian, solved by the optimizer from the Jacobian prototype that
 # `optimvars_nls` returns (its type decides the linear system; the optimizer validates it against `linsolver`). A dense
 # Jacobian forced above `max_dense_bytes` is refused by `optimvars_nls` before it is allocated.
-function optimize_jacobian!(model::Model, options; unfixed, numthreads, callback, workspace, reduction, storage, max_dense_bytes, min_work, min_work_cost)
+function optimize_jacobian!(model::Model, options; unfixed, numthreads, callback, workspace, reduction, storage, max_dense_bytes, min_work, min_work_cost, precision)
     f, _, resjac!, x0, J = try
-        optimvars_nls(model; unfixed, numthreads, reduction, storage, max_dense_bytes, min_work, min_work_cost)
+        optimvars_nls(model; unfixed, numthreads, reduction, storage, max_dense_bytes, min_work, min_work_cost, precision)
     catch err
         err isa ArgumentError ? throw(ArgumentError("formulation = :jacobian: " * err.msg)) : rethrow()
     end
@@ -40,7 +40,7 @@ end
 # through `optimize` (which returns the solution); everything else is updated in place by `optimize!`. Either way the
 # solution is written back with `syncvars!`, which knows the block order and the Schur partition.
 """
-    optimize!(model::Model, options = OptimizationOptions(); formulation=:hessian, callback=nullcallback, workspace=nothing, unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work, min_work_cost=$MIN_WORK_PER_THREAD_COST) -> OptimizationResult
+    optimize!(model::Model, options = OptimizationOptions(); formulation=:hessian, callback=nullcallback, workspace=nothing, unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work, min_work_cost=$MIN_WORK_PER_THREAD_COST, precision=Float64) -> OptimizationResult
 
 Solve `model` and write the solution back into `model.variables`. This is the normal way to solve a `Model`; it is defined when
 `SecondOrderOptimization` is loaded (`using SecondOrderOptimization`).
@@ -73,12 +73,13 @@ function SecondOrderOptimization.optimize!(model::Model, options::OptimizationOp
         unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction::Symbol=:auto, storage::Symbol=:auto,
         max_dense_bytes::Integer=MAX_DENSE_BYTES,
         min_work::Integer=(formulation === :jacobian ? MIN_WORK_PER_THREAD_JACOBIAN : MIN_WORK_PER_THREAD_HESSIAN),
-        min_work_cost::Integer=MIN_WORK_PER_THREAD_COST)
+        min_work_cost::Integer=MIN_WORK_PER_THREAD_COST, precision::Type=Float64)
     formulation in (:hessian, :jacobian) || throw(ArgumentError("Unknown formulation $(repr(formulation)); expected :hessian or :jacobian."))
     NLLSModel.check_reduction(reduction)
     NLLSModel.check_storage(storage)
-    formulation === :jacobian && return optimize_jacobian!(model, options; unfixed, numthreads, callback, workspace, reduction, storage, max_dense_bytes, min_work, min_work_cost)
-    f, fdf!, x0, H = optimvars(model; unfixed, numthreads, reduction, storage, max_dense_bytes, min_work, min_work_cost)
+    NLLSModel.check_precision(precision)
+    formulation === :jacobian && return optimize_jacobian!(model, options; unfixed, numthreads, callback, workspace, reduction, storage, max_dense_bytes, min_work, min_work_cost, precision)
+    f, fdf!, x0, H = optimvars(model; unfixed, numthreads, reduction, storage, max_dense_bytes, min_work, min_work_cost, precision)
     obj = HessianObjective(f, fdf!; H)
     if ismutablevar(x0)
         result = SecondOrderOptimization.optimize!(x0, obj, options; callback, workspace)
@@ -106,7 +107,7 @@ end
 const RECOMMENDATION_KEYWORDS = (:iterator, :linsolver, :formulation, :reduction, :storage, :unfixed, :numthreads, :max_dense_bytes)
 
 """
-    optimize!(model::Model, rec::OptimizationRecommendation; callback=nullcallback, workspace=nothing, min_work, min_work_cost=$MIN_WORK_PER_THREAD_COST, options...) -> OptimizationResult
+    optimize!(model::Model, rec::OptimizationRecommendation; callback=nullcallback, workspace=nothing, min_work, min_work_cost=$MIN_WORK_PER_THREAD_COST, precision=Float64, options...) -> OptimizationResult
 
 Solve `model` as the recommendation `rec` (from [`recommendoptimizer`](@ref)) says, and write the solution back into
 `model.variables`. It builds `OptimizationOptions(; iterator = rec.iterator, linsolver = rec.linsolver, options...)` and
@@ -117,7 +118,8 @@ The remaining keywords are passed to the `OptimizationOptions` constructor (`max
 so an unknown one is an error there. A keyword the recommendation sets (`iterator`, `linsolver`, `formulation`,
 `reduction`, `storage`, `unfixed`, `numthreads`, `max_dense_bytes`) is an `ArgumentError`, raised before anything is
 built: to change one, use `optimize!(model, options; ...)`, starting from the call that `show` prints. `callback`,
-`workspace`, `min_work` (default the formulation's) and `min_work_cost` are as for `optimize!(model, options)`.
+`workspace`, `min_work` (default the formulation's), `min_work_cost` and `precision` are as for `optimize!(model, options)`:
+the recommendation is made in `Float64` and recommends no precision, so `precision` is the caller's.
 
 The options are built from the recommendation's values at run time, so the call dispatches once on their type. Setting
 the options by hand, from the call that `show` prints, avoids it.
@@ -125,7 +127,7 @@ the options by hand, from the call that `show` prints, avoids it.
 function SecondOrderOptimization.optimize!(model::Model, rec::OptimizationRecommendation;
         callback=nullcallback, workspace=nothing,
         min_work::Integer=(rec.formulation === :jacobian ? MIN_WORK_PER_THREAD_JACOBIAN : MIN_WORK_PER_THREAD_HESSIAN),
-        min_work_cost::Integer=MIN_WORK_PER_THREAD_COST, options...)
+        min_work_cost::Integer=MIN_WORK_PER_THREAD_COST, precision::Type=Float64, options...)
     # The one slurped keyword list in an entry point (rules.md 19): every keyword in it goes to the `OptimizationOptions`
     # constructor, whose keywords are spelled out, so a misspelt or stale keyword is still an error
     for name in keys(options)
@@ -134,7 +136,7 @@ function SecondOrderOptimization.optimize!(model::Model, rec::OptimizationRecomm
     opts = OptimizationOptions(; iterator=rec.iterator, linsolver=rec.linsolver, options...)
     return SecondOrderOptimization.optimize!(model, opts; formulation=rec.formulation, reduction=rec.reduction,
         storage=rec.storage, unfixed=rec.unfixed, numthreads=rec.numthreads, max_dense_bytes=rec.max_dense_bytes,
-        callback, workspace, min_work, min_work_cost)
+        callback, workspace, min_work, min_work_cost, precision)
 end
 
 """
