@@ -3,6 +3,13 @@ using Test, Static, StaticArrays, SparseArrays, LinearAlgebra, NLLSModel
 include("fixtures/loader.jl")
 fixture("allocations", "multithreading")
 
+# A static single-variable system is evaluated by the fold (src/staticfold.jl), not in place: into its own (first)
+# buffers, so its gradient and Hessian are read as before
+function mt_staticfold!(ls, vars, costs)
+    l1 = ls isa NLLSModel.LinearSystemShared ? ls.ls[1] : ls.ls
+    return NLLSModel.staticfold!(l1.b, l1.A, ls, vars, costs)
+end
+
 @testset "multithreading.jl" begin
     # chunk_indices: chunks are contiguous, cover 1:len exactly, and differ in size by at most 1
     for len in (0, 1, 5, 16, 17, 1001), nchunks in (1, 2, 3, 4, 7, 20)
@@ -93,8 +100,8 @@ fixture("allocations", "multithreading")
     end
     ls_static_single = NLLSModel.LinearSystem{NLLSModel.UniVariateLSstatic_x{1}, NLLSModel.UniVariateLSstatic_ls{1, 1, Float64}}((1,), ())
     ls_static_shared = NLLSModel.sharedlinearsystem(ls_static_single, static(4))
-    c_s = NLLSModel.costgradhess!(ls_static_single, prob_static.variables, prob_static.costs)
-    c_m = NLLSModel.costgradhess!(ls_static_shared, prob_static.variables, prob_static.costs)
+    c_s = mt_staticfold!(ls_static_single, prob_static.variables, prob_static.costs)
+    c_m = mt_staticfold!(ls_static_shared, prob_static.variables, prob_static.costs)
     @test c_s ≈ c_m
     @test NLLSModel.getgrad(ls_static_single) ≈ NLLSModel.getgrad(ls_static_shared)
     @test NLLSModel.gethessian(ls_static_single) ≈ NLLSModel.gethessian(ls_static_shared)
@@ -107,7 +114,7 @@ fixture("allocations", "multithreading")
 
     # LinearSystemShared with N == 1
     ls_static_shared_1 = NLLSModel.LinearSystemShared(ls_static_single.x, SVector{1}(ls_static_single.ls), MVector{1, Float64}(undef))
-    @test NLLSModel.costgradhess!(ls_static_shared_1, prob_static.variables, prob_static.costs) ≈ c_s
+    @test mt_staticfold!(ls_static_shared_1, prob_static.variables, prob_static.costs) ≈ c_s
 
     # Threaded costgradhess! with concrete DataType and Union CostStructs
     prob_static_typed = Model{Float64, MTTestScalarRes}()
@@ -115,8 +122,8 @@ fixture("allocations", "multithreading")
     for k in 1:120
         addcost!(prob_static_typed, MTTestScalarRes(k * 0.1, 1))
     end
-    c_st = NLLSModel.costgradhess!(ls_static_single, prob_static_typed.variables, prob_static_typed.costs)
-    c_mt = NLLSModel.costgradhess!(ls_static_shared, prob_static_typed.variables, prob_static_typed.costs)
+    c_st = mt_staticfold!(ls_static_single, prob_static_typed.variables, prob_static_typed.costs)
+    c_mt = mt_staticfold!(ls_static_shared, prob_static_typed.variables, prob_static_typed.costs)
     @test c_st ≈ c_mt
 
     prob_static_union = Model{Float64, Union{MTTestScalarRes, MTTestPairRes}}()
@@ -126,8 +133,8 @@ fixture("allocations", "multithreading")
         addcost!(prob_static_union, MTTestScalarRes(k * 0.1, 1))
         addcost!(prob_static_union, MTTestPairRes(k * 0.1, 1, 2))
     end
-    c_su = NLLSModel.costgradhess!(ls_static_single, prob_static_union.variables, prob_static_union.costs)
-    c_mu = NLLSModel.costgradhess!(ls_static_shared, prob_static_union.variables, prob_static_union.costs)
+    c_su = mt_staticfold!(ls_static_single, prob_static_union.variables, prob_static_union.costs)
+    c_mu = mt_staticfold!(ls_static_shared, prob_static_union.variables, prob_static_union.costs)
     @test c_su ≈ c_mu
 
     # Verify ephemeral stack wrapper construction has 0 allocations

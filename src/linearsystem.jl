@@ -225,11 +225,12 @@ function add!(dest::MultiVariateLSSchur_ls, src::MultiVariateLSSchur_ls)
 end
 add!(dest::LinearSystem, src::LinearSystem) = add!(dest.ls, src.ls)
 
-# The end of an evaluation: a single-variable system accumulated in its lower triangle (from the lazy product) is made
-# symmetric here, once. A full H (a user's computecostgradhess, the dynamic kernels) has added both triangles;
-# mirroring the lower one over the upper keeps the same values when H is symmetric.
+# The end of an evaluation: a dynamic single-variable system accumulated in its lower triangle (from the lazy product)
+# is made symmetric here, once. A full H (a user's computecostgradhess, the dynamic kernels) has added both triangles;
+# mirroring the lower one over the upper keeps the same values when H is symmetric. A static single-variable system is
+# never accumulated in place: its costs are folded in values and written once, both triangles (src/staticfold.jl).
 finish!(linsystem) = linsystem
-function finish!(linsystem::UniVariateLS)
+function finish!(linsystem::UniVariateLSdynamic)
     A = getA(linsystem)
     n = size(A, 1)
     @inbounds for j in 2:n, i in 1:j-1
@@ -238,7 +239,7 @@ function finish!(linsystem::UniVariateLS)
     return linsystem
 end
 
-function updatesymlinearsystem!(linsystem::UniVariateLS, g, H, unusedargs...)
+function updatesymlinearsystem!(linsystem::UniVariateLSdynamic, g, H, unusedargs...)
     # Update the blocks in the problem
     addsys!(getb(linsystem), getA(linsystem), g, H)
 end

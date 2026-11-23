@@ -301,8 +301,9 @@ end
     return cost, g, adaptivelazy(Hkk, w, GramLazy{T, typeof(J), typeof(gu), T}(J, gu, convert(T, dc), convert(T, c2)))
 end
 
-# One row's lazy product into a single-variable system: the lower triangle, each entry computed as it is added
-# (dc u[i] u[j] + c2 gu[i] gu[j]); the system is mirrored once per evaluation (`finish!`). These are methods of
+# One row's lazy product into a dynamic single-variable system: the lower triangle, each entry computed as it is added
+# (dc u[i] u[j] + c2 gu[i] gu[j]); the system is mirrored once per evaluation (`finish!`). A static one is folded in
+# values by the counterparts of these (`addhess`, src/staticfold.jl). These are methods of
 # `addsys!` rather than of `updatesymlinearsystem!`, so that the latter's method table is unchanged and a run-time
 # dispatch on it (the run-time-size autodiff path) stays fast.
 function addsys!(b, A, g, H::GramLazy{T, <:Adjoint}) where T
