@@ -25,6 +25,7 @@ trianglesize(N) = (N * (N + 1)) >> 1
 @inline zerosum(::Val{N}, ::Type{T}) where {N, T} =
     StaticSum{N, T, trianglesize(N)}(zero(SVector{N, Float64}), SHermitianCompact{N, T, trianglesize(N)}(zero(SVector{trianglesize(N), T})))
 @inline zerosum(::LinearSystem{UniVariateLSstatic_x{N}, <:UniVariateLSstatic_ls{N, <:Any, T}}) where {N, T} = zerosum(Val(N), T)
+@inline zerosum(ls::LinearSystemShared) = zerosum(LinearSystem(ls, 1))
 
 # (i, j) of each entry of the lower triangle, column-major, as constants
 @generated trianglepairs(::Val{N}) where N = Expr(:tuple, [:(($i, $j)) for j in 1:N for i in j:N]...)
@@ -150,4 +151,43 @@ function staticfold!(g, H, ls::LinearSystem, vars, costs::CostStruct)::Float64
     c, acc = foldcosts(zerosum(ls), ls, vars, costs)
     writesum!(g, H, acc)
     return c
+end
+
+# On several threads: each task folds its chunk of every cost vector and writes it once into its own copy of the
+# system; the copies are summed as on the in-place path. Each copy holds both triangles, so the sum needs no mirror.
+function staticfold!(g, H, ls::LinearSystemShared{F, V, N}, vars, costs::CostStruct)::Float64 where {F, V, N}
+    if H isa typeof(ls.ls[1].A) && g isa typeof(ls.ls[1].b)
+        # The optimizer's storage is the first copy: the sum lands in it
+        target = replace_first_ls(ls, makels(ls.ls[1], H, g))
+        return staticfold_shared!(target, vars, costs)
+    end
+    c = staticfold_shared!(ls, vars, costs)
+    copyto!(g, ls.ls[1].b)
+    copyto!(H, ls.ls[1].A)
+    return c
+end
+function staticfold_shared!(linsystem::LinearSystemShared{F, V, N}, vars, costs::CostStruct)::Float64 where {F, V, N}
+    args = threadargs((linsystem, vars, costs))
+    GC.@preserve linsystem vars costs begin
+        @batch for taskid in 1:N
+            linsystem_, vars_, costs_ = fromthreadargs(args)
+            ls = LinearSystem(linsystem_, taskid)
+            c, acc = foldcosts(zerosum(ls), ls, vars_, costs_, bindleadingargs(ithchunk, N, taskid))
+            writesum!(ls.ls.b, ls.ls.A, acc)
+            linsystem_.costs[taskid] = c
+        end
+        # The tree reduction of the in-place path (costgradhess! of a LinearSystemShared), unchanged
+        n = N
+        while n > 1
+            n_ = (n + 1) >> 1
+            m = n - n_
+            @batch for taskid in 1:m
+                linsystem_ = fromthreadargs(args)[1]
+                add!(linsystem_.ls[taskid], linsystem_.ls[taskid + n_])
+                linsystem_.costs[taskid] += linsystem_.costs[taskid + n_]
+            end
+            n = n_
+        end
+    end
+    return linsystem.costs[1]
 end

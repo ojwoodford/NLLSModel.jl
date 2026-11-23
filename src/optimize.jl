@@ -61,7 +61,7 @@ end
 end
 
 # A static system: the costs folded in values and written once into g and H (src/staticfold.jl)
-@inline function (f::SingleVarCostGradHess{<:LinearSystem{<:UniVariateLSstatic_x}})(g, H, x)
+@inline function (f::SingleVarCostGradHess{<:UniVariateLSstatic})(g, H, x)
     @inbounds f.problem.variables[f.unfixed] = x
     return staticfold!(g, H, f.linsystem, f.problem.variables, f.problem.costs)
 end
