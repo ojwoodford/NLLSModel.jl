@@ -60,6 +60,12 @@ end
     end
 end
 
+# A static system: the costs folded in values and written once into g and H (src/staticfold.jl)
+@inline function (f::SingleVarCostGradHess{<:LinearSystem{<:UniVariateLSstatic_x}})(g, H, x)
+    @inbounds f.problem.variables[f.unfixed] = x
+    return staticfold!(g, H, f.linsystem, f.problem.variables, f.problem.costs)
+end
+
 # Multi-variable objective and gradient/Hessian functors
 @inline sync_unfixed_vars!(::Model, ::Nothing, vars) = vars
 @inline function sync_unfixed_vars!(problem::Model, unfixed_inds::Vector{Int}, vars)

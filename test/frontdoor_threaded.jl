@@ -33,7 +33,9 @@ fixture("frontdoor", "optimization")
         # The fallback: buffers of another type than the system's
         gf, Hf = isstatic ? (zeros(n), zeros(n, n)) : (view(zeros(n), :), view(zeros(n, n), :, :))
         cf = fdf!(gf, Hf, x0)
-        @test !all(==(7.0), internal) # The fallback accumulates internally, then copies
+        # The fallback: a static system on one thread writes from its values (internal storage untouched, item 19);
+        # otherwise it accumulates internally, then copies
+        @test all(==(7.0), internal) == (isstatic && nt == 1)
         @test cf == c
         @test gf == gd
         @test Hf == Hd
