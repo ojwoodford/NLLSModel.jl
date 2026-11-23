@@ -148,13 +148,22 @@ precision = Float32: 5 iterations, cost 2.094753934525606, converged true
 - The iterations are the same on the Hessian path, and one or two more on the Jacobian path.
 
 So single precision is worth it for a large problem whose linear system is the memory or the time: elimination with a
-large reduced system, or the Jacobian path's tables.
+large reduced system, or the Jacobian path's tables. On the Jacobian path, check the time on the whole run, not per
+solve (below).
 
 **When it does not.** On an ill-conditioned problem (a monomial polynomial fit of degree 10 or more) the Hessian path
 in single precision does not converge: the Jacobian path, whose QR works at the condition number of `J` rather than
 of `JᵀJ`, is the remedy. A sparse Jacobian without elimination offers only `:lsmr` in single precision (sparse QR is
 double only), whose inexact steps may not converge. Some large sparse problems without elimination converged in double
 and not in single on the Hessian path too. Check the result's `isconverged`.
+
+On the Jacobian path the single-precision QR loses accuracy where the residual at the solution is large against the
+gradient (its error grows with the residual; it is not refined), and the optimizer then takes rejected steps near the
+optimum. On bundle adjustments of 10 × 300 to 60 × 5000 cameras and landmarks with elimination and a dense reduced
+system (Levenberg–Marquardt, one thread, no time limit), `Float32` took one to three more iterations and 1.6 to 2.0
+linear solves per iteration (`Float64`: 1.0 to 1.1), stopped on lack of progress 6e-5 to 1e-4 from the `Float64`
+solution, and spent 1.4 to 2.3 times as long in the linear solver, although each solve was 22 % to 36 % faster. There
+single precision saves memory, not time.
 
 **Which solvers offer it.** Dense systems: every solver. Sparse systems: `:ldl` (and `:cg`, `:minres`, `:lsmr` with
 Krylov.jl), `:cholesky` where SparseArrays' CHOLMOD factorizes single precision (checked: Julia 1.13, not 1.10); sparse QR (`:qr`, and `:auto` where it means QR) is
