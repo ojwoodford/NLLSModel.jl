@@ -112,6 +112,29 @@ end
     @test UnrollCheck.count_unrolled((1, 2, 3)) == 3
 end
 
+@testset "unroll folds constant conditions" begin
+    @test UnrollCheck.unrolled_branches() == [1, 2, -3, 0]
+    ex = macroexpand(UnrollCheck, quote
+        NLLSModel.@unroll for i in 1:2
+            if i == 1
+                a
+            end
+        end
+    end)
+    @test !occursin("if", string(ex)) # Both conditions folded: `a`, then `nothing`
+    # Anything but a plain for-loop is rejected
+    notfor = (quote
+        NLLSModel.@unroll while true
+        end
+    end, quote
+        NLLSModel.@unroll for (i, j) in pairs(1:2)
+        end
+    end)
+    for ex in notfor
+        @test_throws "must be a for-loop" macroexpand(UnrollCheck, ex)
+    end
+end
+
 @testset "per-thread linear system copies are memory capped" begin
     A = NLLSModel.MultiVariateLSdense([3, 3, 3], UInt[1, 2, 3])
     ls = NLLSModel.LinearSystem(NLLSModel.MultiVariateLSdense_x(zeros(9), UInt[1, 2, 3], [1, 4, 7, 10]), A)

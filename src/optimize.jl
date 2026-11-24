@@ -181,7 +181,7 @@ function cholmod_symbolic_nnz(fac::SparseArrays.CHOLMOD.Factor, n::Integer)
         all(c -> 1 <= c <= n, colcount) || return nothing
         return Int(sum(colcount))
     catch
-        return nothing
+        return nothing # COV_EXCL_LINE: a defensive guard; a valid Factor cannot make the try body throw
     end
 end
 

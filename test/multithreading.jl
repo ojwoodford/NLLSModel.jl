@@ -189,6 +189,13 @@ end
     @test c_dens_s ≈ c_dens_m
     @test NLLSModel.getgrad(ls_dense_single) ≈ NLLSModel.getgrad(ls_dense_shared)
     @test NLLSModel.gethessian(ls_dense_single) ≈ NLLSModel.gethessian(ls_dense_shared)
+    # A shared system of one buffer: costgradhess! runs serially on it; sharing on one thread returns the system itself
+    @test NLLSModel.sharedlinearsystem(ls_dense_single, static(1)) === ls_dense_single
+    ls_dense_shared_1 = NLLSModel.LinearSystemShared(ls_dense_single.x, SVector{1}(NLLSModel.copy_structure(ls_dense_single.ls)), MVector{1, Float64}(undef))
+    @test NLLSModel.costgradhess!(ls_dense_shared_1, prob_dense.variables, prob_dense.costs) ≈ c_dens_s
+    @test ls_dense_shared_1.costs[1] ≈ c_dens_s
+    @test NLLSModel.getgrad(ls_dense_shared_1) ≈ NLLSModel.getgrad(ls_dense_single)
+    @test NLLSModel.gethessian(ls_dense_shared_1) ≈ NLLSModel.gethessian(ls_dense_single)
     ls_dense_reconstructed = NLLSModel.MultiVariateLSdense(ls_dense_single.ls.A, ls_dense_single.ls.b, ls_dense_single.x.x, ls_dense_single.x.blockindices, ls_dense_single.x.boffsets)
     @test ls_dense_reconstructed isa NLLSModel.LinearSystem
 

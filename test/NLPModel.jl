@@ -37,6 +37,9 @@ fixture("NLPModel")
     # sum = [-107.8, -44.0]
     @test isapprox(g, [-107.8, -44.0], atol=1e-12)
     @test neval_grad(nlp) == 1
+    # The objective at the point of the last gradient is the cached cost
+    @test obj(nlp, copy(nlp.meta.x0)) == nlp.last_cost[] && nlp.last_cost[] ≈ c0
+    @test neval_obj(nlp) == 2
 
     # Combined objgrad
     c_eval, g_eval = objgrad(nlp, nlp.meta.x0)

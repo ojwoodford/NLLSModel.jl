@@ -372,6 +372,24 @@ end
     end
     # An MMatrix Jacobian is not admitted to @turbo either
     @test kernel(zeros(MMatrix{20, 5, Float64}), zeros(20)) == :plain
+    # jtr! runs the kernel it is routed to: here @turbo
+    rng = MersenneTwister(64)
+    J, r = randn(rng, 100, 3), randn(rng, 100)
+    @test NLLSModel.jtr!(zeros(3), J, r) ≈ J' * r
+end
+
+@testset "the lazy Hessian of an adaptive residual without the rank-1 term (c2 == 0)" begin
+    rng = MersenneTwister(65)
+    J, r = randn(rng, SMatrix{4, 3, Float64}), randn(rng, SVector{4, Float64})
+    gk, Hkk, w, dc = SVector(0.2, -0.1), SMatrix{2, 2}(2.0, 0.5, 0.5, 1.0), SVector(0.3, 0.7), 0.8
+    cost, g, H = NLLSModel.adaptivecostgradhess_lazy(1.5, gk, Hkk, w, J, r, dc, 0.0)
+    gu = J' * r
+    @test cost == 1.5
+    @test g ≈ vcat(gk, dc * gu)
+    @test H isa NLLSModel.AdaptiveLazy && size(H) == (5, 5)
+    @test Matrix(H) ≈ [Matrix(Hkk) w * gu'; gu * w' dc * (J' * J)]
+    # The same as the general product with c2 == 0
+    @test Matrix(H) ≈ Matrix(NLLSModel.adaptivecostgradhess_lazy(1.5, gk, Hkk, w, J, r, dc, 1e-300)[3])
 end
 
 @testset "F2: plain, @turbo and the definition agree, $T" for T in (Float64, Float32)

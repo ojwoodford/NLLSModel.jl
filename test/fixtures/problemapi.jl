@@ -54,4 +54,20 @@ function count_unrolled(vars)
     end
     return n
 end
+# Conditions on the loop variable alone are folded at expansion: the taken branch is kept, the other is dropped, and
+# an `if` without `else` whose condition is false becomes `nothing`
+function unrolled_branches()
+    out = Int[]
+    NLLSModel.@unroll for i in 1:3
+        if i <= 2
+            push!(out, i)
+        else
+            push!(out, -i)
+        end
+        if i == 3
+            push!(out, 0)
+        end
+    end
+    return out
+end
 end

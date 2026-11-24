@@ -27,7 +27,7 @@ NLPModelExt = "NLPModels"
 SecondOrderOptimizationExt = "SecondOrderOptimization"
 
 [compat]
-BlockLinearSystems = "0.2"
+BlockLinearSystems = "0.3"
 DampedLinearSolve = "0.1"
 DiffResults = "1.1"
 FastNorm = "0.3"
