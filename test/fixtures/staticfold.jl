@@ -155,13 +155,13 @@ end
 const STATICFOLD_CASES = [
     ("scalar residual, N = 3", () -> scalarmodel(3, 40), Float64, true),
     ("scalar residual, N = 8, Float32", () -> scalarmodel(8, 40), Float32, true),
-    ("scalar residual, N = 16", () -> scalarmodel(16, 20), Float64, true),
+    ("scalar residual, N = 12 (MAX_STATIC_SYSTEM)", () -> scalarmodel(12, 20), Float64, true),
     ("scalar residual, Huber2oKernel (both arms)", () -> scalarmodel(3, 40; kernel=Huber2oKernel(0.2)), Float64, true),
     ("3 rows, N = 3", () -> rowsmodel(3, 3, 30), Float64, true),
     ("3 rows, N = 3, Float32", () -> rowsmodel(3, 3, 30), Float32, true),
     ("2 rows, N = 5, Huber2oKernel", () -> rowsmodel(5, 2, 30; kernel=Huber2oKernel(0.5)), Float64, true),
     ("autodiff, N = 4, M = 2", () -> automodel(4, 2, 30), Float64, true),
-    ("autodiff, wide (Matrix Jacobian), N = 16, M = 9", () -> automodel(16, 9, 10), Float64, true),
+    ("autodiff, wide (Matrix Jacobian), N = 12, M = 11", () -> automodel(12, 11, 10), Float64, true),
     ("a cost that is not a residual", () -> costmodel(3, 30), Float64, true),
     ("several cost types, one empty", () -> mixedmodel(20), Float64, true),
     ("a scalar variable", () -> onemodel(30), Float64, VERSION >= v"1.11"), # on 1.10 the in-place path allocates too

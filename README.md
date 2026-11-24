@@ -168,6 +168,14 @@ Costs not on the full static path use ForwardDiff with run-time sized buffers, c
 `MAX_STATIC_JAC` and `MAX_STATIC_ROWS` are starting values that have not been tuned; they are constants in `src/NLLSModel.jl`.
 A scalar residual (`nres == 1`) with a run-time sized variable uses an outer-product kernel.
 
+With one unfixed variable whose size `n` is static and at most 12, the linear system is static (an `MMatrix` and an
+`MVector`), and it is accumulated in values: each cost's gradient and Hessian are added to a running sum held as
+`StaticArrays` values (the Hessian's triangle only), and the sum is written to the system once per evaluation. Above 12,
+or for a run-time size, the system is a `Matrix` and a `Vector`, and each cost is added to it in place. 12 was measured
+on an Apple M1 Pro: up to it the static system was faster in every case measured but one (up to 3.4 times; eight
+residual rows at `n = 8` on Julia 1.10 was 1.09 times slower), while above it compilation grows quickly with `n` and,
+for costs with several residual rows, the static system was no longer faster.
+
 Rules for your own `computeresidual`, `computeresjac` and `computecostgradhess`, because residuals are evaluated on
 several threads at once:
 

@@ -217,11 +217,18 @@ function optimvars(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads
 end
 
 # The static rule for one variable's system: static (stack-allocated `StaticArrays`) when the variable's size is static and
-# at most MAX_STATIC_SYSTEM, dense otherwise. The value is that of the inline rule this replaced; not measured here.
+# at most MAX_STATIC_SYSTEM, dense otherwise. A static system is accumulated in values (src/staticfold.jl).
+# 12 was measured (2026-11-24, Apple M1 Pro, Julia 1.13 and 1.10, one thread; one and eight residual rows per cost): at
+# n <= 12 the static system with the fold was faster than the dense one in every case measured but one (up to 3.4x;
+# eight rows at n = 8 on 1.10 was 1.09x slower); at n = 16
+# it was slower with eight rows (about 1.1x), and from n = 16 its compilation grows quickly (about 7 to 9 s for a first
+# optimize at n = 16 against under 5 s dense, on 1.13). Above 12 single-row problems give up some speed for the shorter
+# compilation (dense was 1.1x to 1.6x slower than static at n = 16).
 # SecondOrderOptimization has a twin (its `usesstaticsystem` and `MAX_STATIC_SYSTEM`), deliberately not shared: neither
-# package depends on the other except weakly (decided 2026-11-16, rules.md 4). The two may differ; when they do, the
-# optimizer converts the Hessian to its own system's storage, which costs a copy, not correctness.
-const MAX_STATIC_SYSTEM = 16
+# package depends on the other except weakly (decided 2026-11-16, rules.md 4). The two may differ. Through `optimvars`
+# they do not meet: the prototype `H` decides the optimizer's system. Only when the optimizer builds its own system
+# (`H = nothing`) can `fdf!` be handed buffers of another type, which it fills through a copy.
+const MAX_STATIC_SYSTEM = 12
 usesstaticsystem(x0) = isstaticsize(nvars(x0))
 isstaticsize(n) = dynamic(is_static(n)) && n <= MAX_STATIC_SYSTEM
 

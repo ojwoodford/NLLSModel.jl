@@ -12,13 +12,13 @@ fixture("frontdoor", "optimization")
     # from it (H by deepcopy, g by `zero(H[:, 1])`) take fdf!'s direct-write branch: the costs accumulate straight into
     # them, with no internal accumulation and no copy. Other buffer types take the fallback, with the same result.
     @testset "single-variable prototype: $name" for (name, V, n, nt) in (
-            ("static 3", SVector{3, Float64}, 3, 1), ("static 16", SVector{16, Float64}, 16, 1),
-            ("static 3, shared", SVector{3, Float64}, 3, 4), ("static 17", SVector{17, Float64}, 17, 1),
+            ("static 3", SVector{3, Float64}, 3, 1), ("static 12", SVector{12, Float64}, 12, 1),
+            ("static 3, shared", SVector{3, Float64}, 3, 4), ("static 13", SVector{13, Float64}, 13, 1),
             ("dynamic 3", Vector{Float64}, 3, 1), ("dynamic 3, shared", Vector{Float64}, 3, 4))
         model = linsingleproblem(V, n, 11)
         _, fdf!, x0, H = optimvars(model; numthreads=static(nt), min_work=0) # min_work=0: share the system when nt > 1
         @test (fdf!.linsystem isa NLLSModel.LinearSystemShared) == (nt > 1)
-        isstatic = V <: StaticVector && n <= 16
+        isstatic = V <: StaticVector && n <= NLLSModel.MAX_STATIC_SYSTEM
         @test H isa (isstatic ? MMatrix{n, n, Float64, n * n} : Matrix{Float64})
         @test size(H) == (n, n)
         @test all(iszero, H)

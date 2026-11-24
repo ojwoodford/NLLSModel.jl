@@ -461,10 +461,10 @@ fixture("recommender")
             @test !T(hessiansystem=kind).densesystem
             @test F(hessiansystem=kind) == (:hessian, :F_wellconditioned)
         end
-        # 4: the dimension, 16 and 17
-        @test NLLSModel.MAX_STATIC_SYSTEM == 16
-        @test !T(dimension=16).dimension && F(dimension=16) == (:hessian, :F_wellconditioned)
-        @test T(dimension=17).dimension
+        # 4: the dimension, 12 and 13
+        @test NLLSModel.MAX_STATIC_SYSTEM == 12
+        @test !T(dimension=12).dimension && F(dimension=12) == (:hessian, :F_wellconditioned)
+        @test T(dimension=13).dimension
         # 5: the margin, equal and just below
         m = NLLSModel.REC_NORMAL_MARGIN
         @test T(work_hessian=m * 100.0).work && F(work_hessian=m * 100.0) == (:jacobian, :F_normalequations)
@@ -523,7 +523,7 @@ fixture("recommender")
     end
 
     @testset "the normal equations do not fire: $name" for (name, make, kw, densejacobian, rule) in (
-            ("16 dimensions (test 4)", () -> scalarmodel(1, 16, 80), (;), :notneeded, :F_wellconditioned),
+            ("12 dimensions (test 4)", () -> scalarmodel(1, 12, 80), (;), :notneeded, :F_wellconditioned),
             ("a sparse model (test 3)", () -> first(chainproblem(60, 2, 2)), (;), :notneeded, :F_wellconditioned),
             ("a small static variable (test 3)", () -> first(singleproblem(SVector{2, Float64}, 2, 1)), (;), :notneeded, :F_wellconditioned),
             ("each cost on one of four variables (test 5)", () -> scalarmodel(4, 5, 20), (;), :notneeded, :F_wellconditioned),
@@ -552,7 +552,7 @@ fixture("recommender")
     @testset "show: every reason of the normal equations (N2)" begin
         reason(f; kw...) = flat(f(recby(; kw...)))
         fire = recfeatures(dimension=20, nresiduals=80, work_hessian=112000.0, work_jacobian=16000.0)
-        @test occursin("is below 1.0e12, the dimension, 20, is above the static system's 16, and building the dense " *
+        @test occursin("is below 1.0e12, the dimension, 20, is above the static system's 12, and building the dense " *
             "Hessian cost by cost is estimated at 112000.0 multiply-adds against 16000.0 for one product JᵀJ of the 80×20 " *
             "Jacobian, at least 2.0 times fewer: the Jacobian path, forming the normal equations from J",
             reason(NLLSModel.formulation_reason; formulation=:jacobian, features=fire))
