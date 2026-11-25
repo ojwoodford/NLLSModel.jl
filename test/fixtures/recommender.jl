@@ -217,9 +217,10 @@ const REC_RANK_MODELS = (
         make = () -> staticlinearmodel(only(values(svdmodel(40, exp10.(range(0, -7.5; length=10))).costs))[1].X),
         rule = :F_illconditioned, ranktest = :ran, damping = 0.0),
     # Static: at most MAX_STATIC_SYSTEM = 12 parameters. A monomial fit of degree 11 or less factorizes undamped, so the
-    # singular values are set instead; undamped Cholesky fails from 1e-9.5 on Julia 1.13 and from 1e-10.5 on 1.10
-    (name = "full rank, cond(J) 1e11, static, does not factorize undamped",
-        make = () -> staticlinearmodel(only(values(svdmodel(40, exp10.(range(0, -11; length=12))).costs))[1].X),
+    # singular values are set instead; undamped Cholesky fails from 1e-9.5 on Julia 1.13 and from 1e-10.5 on 1.10 (on
+    # aarch64). 1e-12 leaves a margin: at 1e-11 one x64 runner factorized it undamped
+    (name = "full rank, cond(J) 1e12, static, does not factorize undamped",
+        make = () -> staticlinearmodel(only(values(svdmodel(40, exp10.(range(0, -12; length=12))).costs))[1].X),
         rule = :F_illconditioned, ranktest = :ran, damping = 1e-14),
     (name = "a zero column", make = () -> linearmodel([1.0 0.0; 2.0 0.0]),
         rule = :F_singular, ranktest = :nodiagonal, damping = NaN),
