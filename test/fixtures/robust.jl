@@ -1,5 +1,11 @@
 using NLLSModel, Test, StaticArrays
 
+# A kernel of the user's own that defines only `robustify`: its derivatives are found by autodiff
+struct UserCauchy <: NLLSModel.AbstractRobustifier
+    c2::Float64
+end
+NLLSModel.robustify(k::UserCauchy, cost) = k.c2 * log1p(cost / k.c2)
+
 # Generic function for testing a robustifier
 function testrobustifier(kernel, costs, expected, firstorder=false)
     for (i, cost) in enumerate(costs)

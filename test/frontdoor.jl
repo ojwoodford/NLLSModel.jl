@@ -10,7 +10,7 @@ fixture("frontdoor", "optimization", "recommender")
 # keywords of optimvars; optimize!(model, rec) and optimize(model, rec) for a recommendation (RC5).
 
 @testset "frontdoor.jl" begin
-    @testset "variables hold the solution: $name" for (name, V, n) in (("static 1", SVector{1, Float64}, 1), ("static 16", SVector{16, Float64}, 16), ("static 17", SVector{17, Float64}, 17), ("dynamic Vector", Vector{Float64}, 17), ("short Vector", Vector{Float64}, 3))
+    @testset "variables hold the solution: $name" for (name, V, n) in (("static 1", SVector{1, Float64}, 1), ("static 12", SVector{12, Float64}, 12), ("static 13", SVector{13, Float64}, 13), ("dynamic Vector", Vector{Float64}, 17), ("short Vector", Vector{Float64}, 3))
         model, t = singleproblem(V, n, 1)
         c0 = NLLSModel.cost(model)
         result = optimize!(model, FDOptions)
@@ -40,6 +40,21 @@ fixture("frontdoor", "optimization", "recommender")
         result = optimize!(model, FDOptions; storage)
         @test NLLSModel.cost(model) ≈ result.bestcost atol=1e-12
         @test NLLSModel.cost(model) < 1e-3 * c0
+    end
+
+    # A gradient that is not a Vector{Float64} (here a view) is written too: the costs accumulate into a vector of the
+    # system's own, copied into it
+    @testset "a view as the gradient: $name" for (name, make, storage) in (("dense", () -> chainproblem(5, 2, 2)[1], :auto),
+            ("sparse", () -> chainproblem(60, 2, 2)[1], :auto), ("Schur", () -> (Random.seed!(3); optlandmark_problem(4, 20)), :dense))
+        model = make()
+        _, fdf!, x0, H = optimvars(model; numthreads=static(1), storage)
+        n = sum(v -> Int(OptimizationVariableInterface.nvars(v)), x0)
+        H = H === nothing ? zeros(n, n) : H
+        g = zeros(n)
+        c = fdf!(g, deepcopy(H), x0)
+        gv = view(fill(NaN, n + 1), 2:n+1)
+        @test fdf!(gv, deepcopy(H), x0) == c
+        @test gv == g && any(!iszero, g)
     end
 
     @testset "write-back order, unfixed = $name" for (name, unfixed, free) in (
@@ -131,11 +146,11 @@ fixture("frontdoor", "optimization", "recommender")
     # This package's static rule for one variable (`usesstaticsystem`, `MAX_STATIC_SYSTEM`), on its own: SecondOrderOptimization
     # has a twin, deliberately not shared, and the two may differ
     @testset "static rule for one variable: $name" for (name, V, n, isstatic) in (("1", SVector{1, Float64}, 1, true),
-            ("16", SVector{16, Float64}, 16, true), ("17", SVector{17, Float64}, 17, false), ("dynamic 3", Vector{Float64}, 3, false),
+            ("12", SVector{12, Float64}, 12, true), ("13", SVector{13, Float64}, 13, false), ("dynamic 3", Vector{Float64}, 3, false),
             ("dynamic 17", Vector{Float64}, 17, false))
         model, _ = singleproblem(V, n, 8)
         _, fdf!, x0, H = optimvars(model; numthreads=static(1))
-        @test NLLSModel.MAX_STATIC_SYSTEM == 16
+        @test NLLSModel.MAX_STATIC_SYSTEM == 12
         @test NLLSModel.usesstaticsystem(x0) == isstatic
         @test (typeof(fdf!.linsystem.ls) <: NLLSModel.UniVariateLSstatic_ls) == isstatic
     end

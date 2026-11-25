@@ -11,6 +11,11 @@ NLLSModel.getvars(res::DiffResidual, vars::Vector) = (vars[res.i]::Float64, vars
 NLLSModel.computeresidual(::DiffResidual, a, b) = a - b
 Base.eltype(::DiffResidual) = Float64
 
+# Measurements of three and four 2-vectors, for SimpleError3 and SimpleError4
+const V2 = SVector{2, Float64}
+NLLSModel.generatemeasurement(a::SVector{2}, b::SVector{2}, c::SVector{2}) = a + 2 * b - c
+NLLSModel.generatemeasurement(a::SVector{2}, b::SVector{2}, c::SVector{2}, d::SVector{2}) = a + b + c + d
+
 # A difference of two variables of either type
 struct EitherDiff <: NLLSModel.AbstractResidual
     i::Int
@@ -53,5 +58,21 @@ function count_unrolled(vars)
         end
     end
     return n
+end
+# Conditions on the loop variable alone are folded at expansion: the taken branch is kept, the other is dropped, and
+# an `if` without `else` whose condition is false becomes `nothing`
+function unrolled_branches()
+    out = Int[]
+    NLLSModel.@unroll for i in 1:3
+        if i <= 2
+            push!(out, i)
+        else
+            push!(out, -i)
+        end
+        if i == 3
+            push!(out, 0)
+        end
+    end
+    return out
 end
 end

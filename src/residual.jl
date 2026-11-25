@@ -35,9 +35,6 @@ getvars(res::SimpleError4{N, T, V1, V2, V3, V4}, vars::AbstractVector) where {N,
 computeresidual(res::SimpleError4, arg1, arg2, arg3, arg4) = generatemeasurement(arg1, arg2, arg3, arg4) - res.measurement
 Base.eltype(::SimpleError4{N, T, V1, V2, V3, V4}) where {N, T, V1, V2, V3, V4} = T
 
-# Dummy definition
-generatemeasurement() = nothing
-
 # Functions for computing costs and gradients of residuals
 computecost(residual::AbstractResidual, vars...) = computerescost(residual, robustkernel(residual), vars)
 computecostgradhess(varflags, residual::AbstractResidual, vars...) = computerescostgradhess(varflags << static(1), residual, robustkernel(residual), vars)

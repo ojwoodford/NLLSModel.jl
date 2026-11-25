@@ -137,7 +137,7 @@ function jtr_plain!(g, J, r)
         acc = zero(eltype(g))
         @fastmath @simd for k in 1:M
             acc += J[k, i] * r[k]
-        end
+        end # COV_EXCL_LINE
         g[i] = acc
     end
 end
@@ -150,7 +150,7 @@ function gram_plain!(H, g, J, r, dc, c2)
             acc = zero(eltype(H))
             @fastmath @simd for k in 1:M
                 acc += J[k, i] * J[k, j]
-            end
+            end # COV_EXCL_LINE
             H[i, j] = acc
         end
     end
@@ -268,7 +268,6 @@ end
     end
     return cost, dc * gu, GramLazy{T, typeof(J), typeof(gu), T}(J, gu, convert(T, dc), convert(T, c2))
 end
-@inline gramcostgradhess_lazy(cost, J, r, dc, c2) = (cost, gramgrad(J, r, dc, c2)...)
 
 # The Hessian of an adaptive residual whose kernel is optimized, not formed: kernel parameters first, then variables,
 #     [ Hkk     w gu' ]      Hkk = ½ ∂²ρ/∂θ²,  w = ∂²ρ/∂θ∂s,  gu = J'r
@@ -301,8 +300,9 @@ end
     return cost, g, adaptivelazy(Hkk, w, GramLazy{T, typeof(J), typeof(gu), T}(J, gu, convert(T, dc), convert(T, c2)))
 end
 
-# One row's lazy product into a single-variable system: the lower triangle, each entry computed as it is added
-# (dc u[i] u[j] + c2 gu[i] gu[j]); the system is mirrored once per evaluation (`finish!`). These are methods of
+# One row's lazy product into a dynamic single-variable system: the lower triangle, each entry computed as it is added
+# (dc u[i] u[j] + c2 gu[i] gu[j]); the system is mirrored once per evaluation (`finish!`). A static one is folded in
+# values by the counterparts of these (`addhess`, src/staticfold.jl). These are methods of
 # `addsys!` rather than of `updatesymlinearsystem!`, so that the latter's method table is unchanged and a run-time
 # dispatch on it (the run-time-size autodiff path) stays fast.
 function addsys!(b, A, g, H::GramLazy{T, <:Adjoint}) where T
@@ -310,13 +310,13 @@ function addsys!(b, A, g, H::GramLazy{T, <:Adjoint}) where T
     n = length(b)
     @inbounds @simd for i in 1:n
         b[i] += g[i]
-    end
+    end # COV_EXCL_LINE
     @inbounds for j in 1:n
         uj = H.dc * u[j]
         gj = c2col(H, j)
         @simd for i in j:n
             A[i, j] = muladd(u[i], uj, addc2(H, i, gj, A[i, j]))
-        end
+        end # COV_EXCL_LINE
     end
 end
 
@@ -326,7 +326,7 @@ function addsys!(b, A, g, H::GramLazy{T, <:StaticMatrix}) where T
     M, n = size(J)
     @inbounds @simd for i in 1:n
         b[i] += g[i]
-    end
+    end # COV_EXCL_LINE
     @inbounds for j in 1:n
         wj = ntuple(k -> H.dc * J[k, j], Val(M))
         gj = c2col(H, j)
@@ -336,6 +336,6 @@ function addsys!(b, A, g, H::GramLazy{T, <:StaticMatrix}) where T
                 s = muladd(J[k, i], wj[k], s)
             end
             A[i, j] = s
-        end
+        end # COV_EXCL_LINE
     end
 end

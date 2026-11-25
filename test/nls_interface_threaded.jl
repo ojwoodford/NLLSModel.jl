@@ -33,4 +33,15 @@ fixture("nls_interface")
         @test J1 == J4
         @test isapprox(c1, c4; atol=1e-12)
     end
+
+    @testset "a negative kernel derivative throws from any thread" begin
+        prob = Model(Float64, RobustWrapper{ScalarVarIndRes, MockClampingKernel})
+        addvariable!(prob, 3.0)
+        for _ in 1:100
+            addcost!(prob, RobustWrapper(ScalarVarIndRes(), MockClampingKernel(-0.1)))
+        end
+        _, res!, resjac!, x0, J = optimvars_nls(prob; numthreads=static(Threads.nthreads()), min_work=1)
+        @test_throws DomainError res!(zeros(100), x0)
+        @test_throws DomainError resjac!(zeros(100), J, x0)
+    end
 end

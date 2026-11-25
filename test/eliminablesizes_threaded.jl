@@ -19,4 +19,20 @@ fixture("allocations", "eliminablesizes")
             @test warmallocs(model; reduction=:eliminate, storage, numthreads=static(nt), min_work=0) == (0, 0, 0)
         end
     end
+
+    @testset "a cost added after the thread plan was made: evaluated on one thread" begin
+        nt = Threads.nthreads()
+        model = sizedmodel(1)
+        _, fdf!, x0, H = optimvars(model; numthreads=static(nt), reduction=:eliminate, storage=:dense, min_work=0, min_work_cost=0)
+        @test H isa SchurBlockHessian
+        @test (fdf!.plan !== nothing) == (nt > 1)
+        # A second prior on the first pose: a new cost, but no new block of the Hessian
+        addcost!(model, SizedPrior(model.variables[1] .+ 0.1, 1))
+        g = zeros(nvars(x0))
+        c = fdf!(g, H, x0)
+        _, fdf1!, x01, H1 = optimvars(model; numthreads=static(1), reduction=:eliminate, storage=:dense)
+        g1 = zeros(nvars(x01))
+        @test c ≈ fdf1!(g1, H1, x01) rtol=1e-12
+        @test g ≈ g1 rtol=1e-12
+    end
 end

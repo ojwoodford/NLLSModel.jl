@@ -55,8 +55,9 @@ end
 # Compute the variable flags indicating which variables are unfixed (i.e. to be optimized)
 computevarflags(blockind) = mapreduce((ind, val) -> (val != 0) << ind, |, SR(0, length(blockind)-1), blockind)
 
-# One cost into the system. A single-variable system may hold only its lower triangle until `finish!` (called once per
-# evaluation by `costgradhess_nozero!`), so anything that reads the system after adding single costs calls it first.
+# One cost into the system. A dynamic single-variable system may hold only its lower triangle until `finish!` (called
+# once per evaluation by `costgradhess_nozero!`), so anything that reads the system after adding single costs calls it
+# first. A static single-variable system is not filled here: its costs are folded in values (src/staticfold.jl).
 function costgradhess!(linsystem, vars::AbstractVector, cost::AbstractCost)
     # Determine which variables are free
     blockind = getoffsets(cost, linsystem)

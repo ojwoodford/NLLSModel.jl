@@ -30,6 +30,44 @@ fixture("problemapi")
     @test which(NLLSModel.robustifydcost, Tuple{typeof(k), Float64}).sig.parameters[2] <: NLLSModel.Scaled{<:Real, NLLSModel.NoRobust}
 end
 
+@testset "Model constructors and show" begin
+    problem = Model([1.0, 2.0, 4.0], DiffResidual)
+    @test problem isa Model{Float64, DiffResidual}
+    addcost!(problem, DiffResidual(1, 2))
+    addcost!(problem, DiffResidual(2, 3))
+    @test sprint(show, problem) == "Model with 3 variable blocks of total dimension 3,\n             and 2 residual blocks of total dimension 2."
+    fromcosts = Model([1.0, 2.0], NLLSModel.CostStruct([DiffResidual(1, 2)]))
+    @test NLLSModel.cost(fromcosts) ≈ 0.5
+    # A model with no cost type; the call is made at run time, as a constant one is folded by the compiler
+    @test NLLSModel.tupelize(Base.inferencebarrier(Union{})) === Tuple{}
+    # Without NLPModels, the wrappers say what to load (here called past the extension's own methods)
+    @test_throws "requires the NLPModels package" invoke(NLPLSModel, Tuple{Model, Vararg{Any}}, problem)
+    @test_throws "requires the NLPModels package" invoke(NLLSNLSModel, Tuple{Model, Vararg{Any}}, problem)
+end
+
+@testset "SimpleError3 and SimpleError4" begin
+    model = Model(V2, Union{SimpleError3{2, Float64, V2, V2, V2}, SimpleError4{2, Float64, V2, V2, V2, V2}})
+    for v in (V2(1, 2), V2(-1, 0.5), V2(3, 1), V2(0, -2))
+        addvariable!(model, v)
+    end
+    a, b, c, d = model.variables
+    m3, m4 = V2(0.5, 0.5), V2(1, -1)
+    addcost!(model, SimpleError3{V2, V2, V2}(m3, 1, 2, 3))
+    addcost!(model, SimpleError4{V2, V2, V2, V2}(m4, 1, 2, 3, 4))
+    r3, r4 = a + 2 * b - c - m3, a + b + c + d - m4
+    @test NLLSModel.cost(model) ≈ 0.5 * (sum(abs2, r3) + sum(abs2, r4))
+    _, fdf!, x0, _ = optimvars(model; numthreads=static(1), storage=:dense, reduction=:none)
+    g, H = zeros(8), zeros(8, 8)
+    @test fdf!(g, H, x0) ≈ NLLSModel.cost(model)
+    @test g ≈ vcat(r3 + r4, 2 * r3 + r4, -r3 + r4, r4)
+end
+
+@testset "non-finite checks of other element types" begin
+    # Run-time values, so that the methods are called rather than folded
+    @test NLLSModel.is_nonfinite(Base.inferencebarrier(NaN32)) && !NLLSModel.is_nonfinite(Base.inferencebarrier(1.0f0))
+    @test NLLSModel.safe_sqnorm(Base.inferencebarrier(-3.0f0)) === 9.0
+end
+
 @testset "subproblem: each form of unfixed selects the costs touching those variables (AN2)" begin
     # Cost k does not touch variable k, so variable indices read as cost indices select other costs. Variables 1 and 3 are
     # of another type, for the type form.
@@ -110,6 +148,29 @@ end
 @testset "unroll ignores module globals" begin
     @test UnrollCheck.count_unrolled((1, 2)) == 2
     @test UnrollCheck.count_unrolled((1, 2, 3)) == 3
+end
+
+@testset "unroll folds constant conditions" begin
+    @test UnrollCheck.unrolled_branches() == [1, 2, -3, 0]
+    ex = macroexpand(UnrollCheck, quote
+        NLLSModel.@unroll for i in 1:2
+            if i == 1
+                a
+            end
+        end
+    end)
+    @test !occursin("if", string(ex)) # Both conditions folded: `a`, then `nothing`
+    # Anything but a plain for-loop is rejected
+    notfor = (quote
+        NLLSModel.@unroll while true
+        end
+    end, quote
+        NLLSModel.@unroll for (i, j) in pairs(1:2)
+        end
+    end)
+    for ex in notfor
+        @test_throws "must be a for-loop" macroexpand(UnrollCheck, ex)
+    end
 end
 
 @testset "per-thread linear system copies are memory capped" begin

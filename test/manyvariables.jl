@@ -5,15 +5,20 @@ include("fixtures/loader.jl")
 fixture("manyvariables")
 
 # AN1: a cost with more than 5 variables, some of them fixed (no value dispatch on which: the variable flags are a run-time
-# value), on both paths. Variables of static size (SVector{2}) and of run-time size (Vector{Float64} of length 2).
+# value), on both paths. Variables of static size (SVector{2}), 10 of them (MAX_ARGS), and of run-time size (Vector{Float64}
+# of length 2), 6 of them: each pair compiles every path anew, and 10 run-time variables take minutes to compile on Julia
+# 1.10. On the suite's own thread count only: the serial run covers one thread, the threaded run several.
+# One unfixed set, every other variable from the third: each pattern of fixed variables a cost sees compiles its
+# linearization anew, and the model's two costs, which list the variables in opposite orders, see two different patterns
+# of it, enough to check that argument positions map to the right variables.
 
 @testset "manyvariables.jl" begin
     nt = Threads.nthreads()
     opts = OptimizationOptions(iterator=:levenbergmarquardt, maxiters=200)
-    @testset "a cost of $N variables, $V, unfixed = $unfixed" for N in (6, 10), V in (SVector{2, Float64}, Vector{Float64}),
-            unfixed in (collect(2:N), collect(3:2:N), [N])
+    @testset "a cost of $N variables, $V, unfixed = $unfixed" for (N, V) in ((10, SVector{2, Float64}), (6, Vector{Float64})),
+            unfixed in (collect(3:2:N),)
         model = manymodel(N, V)
-        for numthreads in unique((1, nt))
+        let numthreads = nt
             # The Jacobian linearization equals the Hessian one, for the same unfixed variables
             _, _, resjac!, xt, J = optimvars_nls(model; unfixed, numthreads=static(numthreads), reduction=:none, storage=:dense, min_work=0, min_work_cost=0)
             r = zeros(size(J, 1))

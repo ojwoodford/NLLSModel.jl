@@ -44,9 +44,10 @@ end
 
 function NLLSModel.NLPLSModel(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction::Symbol=:auto,
         storage::Symbol=:auto, max_dense_bytes::Integer=NLLSModel.MAX_DENSE_BYTES, min_work::Integer=NLLSModel.MIN_WORK_PER_THREAD_HESSIAN,
-        min_work_cost::Integer=NLLSModel.MIN_WORK_PER_THREAD_COST, name="NLPLSModel")
+        min_work_cost::Integer=NLLSModel.MIN_WORK_PER_THREAD_COST, precision::Type=Float64, name="NLPLSModel")
     # Never use the Schur path here: the model works on the full (non-reduced) system
     NLLSModel.check_reduction(reduction)
+    NLLSModel.check_plain_precision(precision, "NLPLSModel")
     reduction === :eliminate && throw(ArgumentError("NLPLSModel works on the full system: reduction = :eliminate is not supported; use :auto or :none."))
     conv_unfixed = NLLSModel.convertunfixed(unfixed, problem)
     # The solver's x is the flat vector of the variables' values, and the gradient is with respect to the update's step:
@@ -319,9 +320,11 @@ function NLLSModel.NLLSNLSModel(
     max_dense_bytes::Integer = NLLSModel.MAX_DENSE_BYTES,
     min_work::Integer = NLLSModel.MIN_WORK_PER_THREAD_JACOBIAN,
     min_work_cost::Integer = NLLSModel.MIN_WORK_PER_THREAD_COST,
+    precision::Type = Float64,
     name::String = "NLLSNLSModel",
 )
     reduction = NLLSModel.check_plain_reduction(reduction, "NLLSNLSModel")
+    NLLSModel.check_plain_precision(precision, "NLLSNLSModel")
     flat = flat_optimvars_nls(problem; unfixed, numthreads, reduction, storage, max_dense_bytes, min_work, min_work_cost)
 
     islinear(flat) || NLLSModel.throw_nonlinear("NLLSNLSModel", problem)

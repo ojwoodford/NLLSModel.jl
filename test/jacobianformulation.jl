@@ -123,7 +123,7 @@ fixture("frontdoor", "jacobianformulation", "jacobianproblems")
         f, _, resjac!, x0, J = tlnls(m; unfixed=[1, 3], numthreads=static(1), storage=:dense)
         obj = JacobianObjective(f, JacobianExt.JacobianResJac(resjac!), J)
         result = SecondOrderOptimization.optimize!(x0, obj, JacobianOptions)
-        resjac!(zeros(size(J, 1)), J, update!(deepcopy(x0), x0, fill(0.3, 4))) # A rejected trial, the last thing evaluated
+        resjac!(zeros(size(J, 1)), J, update!(deepcopy(x0), x0, fill(0.3, size(J, 2)))) # A rejected trial, the last thing evaluated
         @test !(NLLSModel.cost(m) ≈ result.bestcost)
         syncvars!(m, resjac!, x0)
         @test NLLSModel.cost(m) ≈ result.bestcost rtol=1e-12

@@ -8,7 +8,6 @@ function convertunfixed(unfixed::AbstractVector{<:Integer}, problem)
     mask[unfixed] .= true
     return mask
 end
-convertunfixed(unfixed, problem) = unfixed
 
 # Single-variable objective and gradient/Hessian functors
 struct SingleVarCostFunc{P, U}
@@ -30,7 +29,7 @@ struct SingleVarCostGradHess{LS, P, U}
     problem::P
     unfixed::U
 end
-@inline makels(::UniVariateLSstatic_ls{N, N2}, H, g) where {N, N2} = UniVariateLSstatic_ls{N, N2}(H, g)
+@inline makels(::UniVariateLSstatic_ls, H, g) = UniVariateLSstatic_ls(H, g)
 @inline makels(::UniVariateLSdynamic_ls, H, g) = UniVariateLSdynamic_ls(H, g)
 
 @inline function (f::SingleVarCostGradHess)(g, H, x)
@@ -58,6 +57,12 @@ end
             return c
         end
     end
+end
+
+# A static system: the costs folded in values and written once into g and H (src/staticfold.jl)
+@inline function (f::SingleVarCostGradHess{<:UniVariateLSstatic})(g, H, x)
+    @inbounds f.problem.variables[f.unfixed] = x
+    return staticfold!(g, H, f.linsystem, f.problem.variables, f.problem.costs)
 end
 
 # Multi-variable objective and gradient/Hessian functors
@@ -90,7 +95,7 @@ struct MultiVarDenseFDF{LS, P, U}
     problem::P
     unfixed_inds::U
 end
-@inline function (f::MultiVarDenseFDF)(g, H_mat::Matrix{Float64}, vars)
+@inline function (f::MultiVarDenseFDF)(g::Vector{Float64}, H_mat::Matrix{<:Union{Float64, Float32}}, vars)
     full_vars = sync_unfixed_vars!(f.problem, f.unfixed_inds, vars)
     # The optimizer's matrix, with the system's layout, which it shares: this allocates nothing
     bdm = DenseBlockLinearSystem(H_mat, getA(f.linsystem))
@@ -111,7 +116,7 @@ struct MultiVarSparseFDF{LS, P, U}
     problem::P
     unfixed_inds::U
 end
-@inline function (f::MultiVarSparseFDF)(g, H_csc::SparseMatrixCSC{Float64, Int}, vars)
+@inline function (f::MultiVarSparseFDF)(g::Vector{Float64}, H_csc::SparseMatrixCSC{<:Union{Float64, Float32}, Int}, vars)
     full_vars = sync_unfixed_vars!(f.problem, f.unfixed_inds, vars)
     if f.linsystem isa LinearSystemShared
         target = replace_first_ls(f.linsystem, MultiVariateLSsparse_ls(f.linsystem.ls[1].A, g))
@@ -131,7 +136,7 @@ struct MultiVarSchurFDF{LS, P, U, PL}
     unfixed_inds::U
     plan::PL # SchurThreadPlan when linearizing on several threads, otherwise nothing
 end
-@inline function (f::MultiVarSchurFDF)(g, H_schur::SchurBlockHessian, vars)
+@inline function (f::MultiVarSchurFDF)(g::Vector{Float64}, H_schur::SchurBlockHessian, vars)
     full_vars = sync_unfixed_vars!(f.problem, f.unfixed_inds, vars)
     if f.linsystem isa LinearSystemShared
         c = schur_threaded!(f.linsystem, f.plan, H_schur, g, full_vars, f.problem.costs)
@@ -140,6 +145,18 @@ end
         zero!(target_ls)
         c = costgradhess_nozero!(target_ls, full_vars, f.problem.costs)
     end
+    return c
+end
+
+# A gradient that is not a Vector{Float64} (a view, another element type) cannot be the system's own gradient: the costs
+# accumulate into a vector of Float64, copied into it at the end
+(f::MultiVarDenseFDF)(g::AbstractVector, H::Matrix{<:Union{Float64, Float32}}, vars) = gradviacopy(f, g, H, vars)
+(f::MultiVarSparseFDF)(g::AbstractVector, H::SparseMatrixCSC{<:Union{Float64, Float32}, Int}, vars) = gradviacopy(f, g, H, vars)
+(f::MultiVarSchurFDF)(g::AbstractVector, H::SchurBlockHessian, vars) = gradviacopy(f, g, H, vars)
+function gradviacopy(f, g, H, vars)
+    gv = Vector{Float64}(undef, length(g))
+    c = f(gv, H, vars)
+    copyto!(g, gv)
     return c
 end
 
@@ -175,7 +192,7 @@ function cholmod_symbolic_nnz(fac::SparseArrays.CHOLMOD.Factor, n::Integer)
         all(c -> 1 <= c <= n, colcount) || return nothing
         return Int(sum(colcount))
     catch
-        return nothing
+        return nothing # COV_EXCL_LINE: a defensive guard; a valid Factor cannot make the try body throw
     end
 end
 
@@ -185,14 +202,14 @@ end
 # `(is_dense, pattern, analysed)`: the reduced system's pattern, when it was built (for the decision, or because the caller
 # `needpattern`), and CHOLMOD's symbolic analysis of it, when that was run. The pattern holds every pair of retained
 # variables that share a cost: BlockLinearSystems keeps them in the structure.
-function reduced_storage(structure::SchurStructure, storage::Symbol, max_dense_bytes::Int, what::String; needpattern::Bool)
+function reduced_storage(structure::SchurStructure, storage::Symbol, max_dense_bytes::Int, what::String, ::Type{T}=Float64; needpattern::Bool) where T
     nr = sum(view(BlockLinearSystems.blocksizes(structure), 1:nretained(structure)))
     if storage === :dense
-        check_densefits(what, nr, nr, max_dense_bytes)
+        check_densefits(what, nr, nr, max_dense_bytes, "raise max_dense_bytes or use storage = :sparse", T)
         return true, nothing, nothing
     end
-    pattern = (needpattern || storage === :auto) ? build_schur_pattern(structure) : nothing
-    if storage === :auto && nr <= 2000 && densefits(nr, nr, max_dense_bytes)
+    pattern = (needpattern || storage === :auto) ? build_schur_pattern(structure, T) : nothing
+    if storage === :auto && nr <= 2000 && densefits(nr, nr, max_dense_bytes, T)
         chol_fac = SparseArrays.CHOLMOD.analyze(SparseArrays.CHOLMOD.Sparse(Symmetric(pattern.S_sparse, :U)))
         # Fall back to the pattern's own size if CHOLMOD's prediction is unavailable
         factor_nnz = something(cholmod_symbolic_nnz(chol_fac, nr), nnz(pattern.S_sparse))
@@ -203,46 +220,54 @@ end
 
 function optimvars(problem::Model; unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction::Symbol=:auto, storage::Symbol=:auto,
         max_dense_bytes::Integer=MAX_DENSE_BYTES, min_work::Integer=MIN_WORK_PER_THREAD_HESSIAN,
-        min_work_cost::Integer=MIN_WORK_PER_THREAD_COST)
+        min_work_cost::Integer=MIN_WORK_PER_THREAD_COST, precision::Type=Float64)
     check_reduction(reduction)
     check_storage(storage)
-    return optimvars_dispatch(problem, convertunfixed(unfixed, problem), static(numthreads), reduction, storage, Int(max_dense_bytes), min_work, min_work_cost)
+    check_precision(precision)
+    return optimvars_dispatch(problem, convertunfixed(unfixed, problem), static(numthreads), reduction, storage, Int(max_dense_bytes), min_work, min_work_cost, precision)
 end
 
 # The static rule for one variable's system: static (stack-allocated `StaticArrays`) when the variable's size is static and
-# at most MAX_STATIC_SYSTEM, dense otherwise. The value is that of the inline rule this replaced; not measured here.
+# at most MAX_STATIC_SYSTEM, dense otherwise. A static system is accumulated in values (src/staticfold.jl).
+# 12 was measured (2026-11-24, Apple M1 Pro, Julia 1.13 and 1.10, one thread; one and eight residual rows per cost): at
+# n <= 12 the static system with the fold was faster than the dense one in every case measured but one (up to 3.4x;
+# eight rows at n = 8 on 1.10 was 1.09x slower); at n = 16
+# it was slower with eight rows (about 1.1x), and from n = 16 its compilation grows quickly (about 7 to 9 s for a first
+# optimize at n = 16 against under 5 s dense, on 1.13). Above 12 single-row problems give up some speed for the shorter
+# compilation (dense was 1.1x to 1.6x slower than static at n = 16).
 # SecondOrderOptimization has a twin (its `usesstaticsystem` and `MAX_STATIC_SYSTEM`), deliberately not shared: neither
-# package depends on the other except weakly (decided 2026-11-16, rules.md 4). The two may differ; when they do, the
-# optimizer converts the Hessian to its own system's storage, which costs a copy, not correctness.
-const MAX_STATIC_SYSTEM = 16
+# package depends on the other except weakly (decided 2026-11-16, rules.md 4). The two may differ. Through `optimvars`
+# they do not meet: the prototype `H` decides the optimizer's system. Only when the optimizer builds its own system
+# (`H = nothing`) can `fdf!` be handed buffers of another type, which it fills through a copy.
+const MAX_STATIC_SYSTEM = 12
 usesstaticsystem(x0) = isstaticsize(nvars(x0))
 isstaticsize(n) = dynamic(is_static(n)) && n <= MAX_STATIC_SYSTEM
 
-function optimvars_dispatch(problem::Model, unfixed::Integer, numthreads::StaticInt, reduction::Symbol, storage::Symbol, max_dense_bytes::Int, min_work::Integer, min_work_cost::Integer)
+function optimvars_dispatch(problem::Model, unfixed::Integer, numthreads::StaticInt, reduction::Symbol, storage::Symbol, max_dense_bytes::Int, min_work::Integer, min_work_cost::Integer, ::Type{T}=Float64) where T
     # One variable's system is always dense (or static)
     storage === :sparse && throw(ArgumentError("storage = :sparse is not available for a single unfixed variable: its Hessian is always dense; use :auto or :dense."))
     x0 = problem.variables[unfixed]
     varlen = nvars(x0)
-    check_densefits("Hessian of a single variable", dynamic(varlen), dynamic(varlen), max_dense_bytes, "raise max_dense_bytes")
+    check_densefits("Hessian of a single variable", dynamic(varlen), dynamic(varlen), max_dense_bytes, "raise max_dense_bytes", T)
     if usesstaticsystem(x0)
-        ls = LinearSystem{UniVariateLSstatic_x{dynamic(varlen)}, UniVariateLSstatic_ls{dynamic(varlen), dynamic(varlen * varlen)}}((unfixed,), ())
+        ls = LinearSystem{UniVariateLSstatic_x{dynamic(varlen)}, UniVariateLSstatic_ls{dynamic(varlen), dynamic(varlen * varlen), T}}((unfixed,), ())
     else
-        ls = LinearSystem{UniVariateLSdynamic_x, UniVariateLSdynamic_ls}((unfixed, dynamic(varlen)), (dynamic(varlen),))
+        ls = LinearSystem{UniVariateLSdynamic_x, UniVariateLSdynamic_ls{T}}((unfixed, dynamic(varlen)), (dynamic(varlen),))
     end
     ls_shared = sharedlinearsystem(ls, workestimates(problem, unfixed).hessianfill, numthreads, costsplit(problem.costs), min_work)
     f = SingleVarCostFunc(problem, unfixed, numthreads, min_work_cost)
     fdf! = SingleVarCostGradHess(ls_shared, problem, unfixed)
     # The Hessian prototype has the type of the system's own storage (an MMatrix or a Matrix), so buffers built from it
     # take fdf!'s direct-write branch
-    H = fill!(copy_structure(ls.ls).A, 0.0)
+    H = fill!(copy_structure(ls.ls).A, zero(T))
     return (f, fdf!, x0, H)
 end
 
-function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads::StaticInt, reduction::Symbol, storage::Symbol, max_dense_bytes::Int, min_work::Integer, min_work_cost::Integer)
+function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads::StaticInt, reduction::Symbol, storage::Symbol, max_dense_bytes::Int, min_work::Integer, min_work_cost::Integer, ::Type{T}=Float64) where T
     isempty(problem.variables) && throw(ArgumentError("The model has no variables"))
     nblocks = sum(unfixed)
     if nblocks == 1
-        return optimvars_dispatch(problem, findfirst(unfixed), numthreads, reduction, storage, max_dense_bytes, min_work, min_work_cost)
+        return optimvars_dispatch(problem, findfirst(unfixed), numthreads, reduction, storage, max_dense_bytes, min_work, min_work_cost, T)
     end
 
     partition = schur_partition(problem, unfixed, reduction)
@@ -257,15 +282,15 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
         # Dense or sparse. The pattern includes retained-retained pairs sharing a cost, not only those sharing an
         # eliminated variable. When the symbolic analysis is run for the decision, it is kept and handed on with the
         # pattern, so the linear system does not analyse the same pattern again.
-        is_dense, pattern, analysed = reduced_storage(structure, storage, max_dense_bytes, "reduced Hessian"; needpattern=true)
+        is_dense, pattern, analysed = reduced_storage(structure, storage, max_dense_bytes, "reduced Hessian", T; needpattern=true)
 
         # BlockLinearSystems allocates the system; a sparse one on the pattern built for the decision
         H = if is_dense
-            SchurBlockHessian{Float64, Matrix{Float64}}(structure)
+            SchurBlockHessian{T, Matrix{T}}(structure)
         else
             # The pattern (and analysed factor, if any) travel with the matrix to the linear system
             carried = isnothing(analysed) ? pattern : merge(pattern, (S_factor = analysed,))
-            SchurBlockHessian{Float64, SparseBlockLinearSystem{Float64}}(structure; pattern=carried)
+            SchurBlockHessian{T, SparseBlockLinearSystem{T}}(structure; pattern=carried)
         end
 
         blockindices = zeros(UInt, length(problem.variables))
@@ -304,21 +329,22 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
     f = MultiVarCostFunc(problem, unfixed_sync, numthreads, min_work_cost)
 
     # storage forces the choice; :auto takes the structure's, but never a dense Hessian above max_dense_bytes
-    storage === :dense && check_densefits("Hessian", len, len, max_dense_bytes)
+    storage === :dense && check_densefits("Hessian", len, len, max_dense_bytes, "raise max_dense_bytes or use storage = :sparse", T)
     sparsity = block_sparsity(problem, unfixed_inds)
     issparse = storage === :sparse ||
-        (storage === :auto && (!densefits(len, len, max_dense_bytes) || (len >= 40 && sparse_dense_decision(len, sparsity, blocksizes))))
+        (storage === :auto && (!densefits(len, len, max_dense_bytes, T) || (len >= 40 && sparse_dense_decision(len, sparsity, blocksizes))))
     if issparse
-        bsm = SparseBlockLinearSystem{Float64}(TransposedPattern(sparsity), blocksizes, blocksizes)
+        bsm = SparseBlockLinearSystem{T}(TransposedPattern(sparsity), blocksizes, blocksizes)
         lssparse = MultiVariateLSsparse(bsm, blockindices, true)
         ls_shared = sharedlinearsystem(lssparse, workestimates(problem, unfixed).hessianfill, numthreads, costsplit(problem.costs), min_work)
         fdf! = MultiVarSparseFDF(ls_shared, problem, unfixed_sync)
         return (f, fdf!, x0, lssparse.x.hessian)
     else
-        lsdense = MultiVariateLSdense(blocksizes, blockindices)
+        lsdense = MultiVariateLSdense(blocksizes, blockindices, T)
         ls_shared = sharedlinearsystem(lsdense, workestimates(problem, unfixed).hessianfill, numthreads, costsplit(problem.costs), min_work)
         fdf! = MultiVarDenseFDF(ls_shared, problem, unfixed_sync)
-        return (f, fdf!, x0, nothing)
+        # A Float64 dense Hessian needs no prototype (the optimizer allocates its own); another precision is carried by one
+        return (f, fdf!, x0, T === Float64 ? nothing : zeros(T, len, len))
     end
 end
 

@@ -126,7 +126,7 @@ function cost_multithreaded(vars, costs::CostStruct, nthreads::Int)::Float64
         @batch reduction=((+, tot),) for taskid in 1:nthreads
             vars_, costs_ = fromthreadargs(args)
             tot += sumsubset(bindleadingargs(computecost, vars_), costs_, bindleadingargs(ithchunk, nthreads, taskid); init=0.0)
-        end
+        end # COV_EXCL_LINE
     end
     return tot
 end
@@ -149,7 +149,7 @@ function costgradhess!(linsystem::LinearSystemShared{F, V, N}, vars::AbstractVec
             ls = LinearSystem(linsystem_, taskid)
             zero!(ls)
             linsystem_.costs[taskid] = costgradhess_chunk!(ls, vars_, costs_, N, taskid)
-        end
+        end # COV_EXCL_LINE
 
         # Phase 2: Parallel tree reduction across the N buffers
         n = N
@@ -160,7 +160,7 @@ function costgradhess!(linsystem::LinearSystemShared{F, V, N}, vars::AbstractVec
                 linsystem_ = fromthreadargs(args)[1]
                 add!(linsystem_.ls[taskid], linsystem_.ls[taskid + n_])
                 linsystem_.costs[taskid] += linsystem_.costs[taskid + n_]
-            end
+            end # COV_EXCL_LINE
             n = n_
         end
     end

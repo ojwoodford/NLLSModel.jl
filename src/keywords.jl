@@ -21,12 +21,24 @@ function check_storage(storage::Symbol)
     storage in STORAGE_VALUES || throw(ArgumentError("Unknown storage $(repr(storage)); expected :auto, :dense or :sparse."))
     return storage
 end
+# The element type of the linear system (single-precision.md, decision 6): Float64 or Float32
+const PRECISION_VALUES = (Float64, Float32)
+function check_precision(precision)
+    precision in PRECISION_VALUES || throw(ArgumentError("Unknown precision $(repr(precision)); expected Float64 or Float32."))
+    return precision
+end
+# The wrappers that hand a plain system to external solvers take Float64 only, as they take no elimination
+function check_plain_precision(precision, name)
+    check_precision(precision)
+    precision === Float64 || throw(ArgumentError("$name hands a plain system to external solvers, which is Float64: precision = $precision is not supported; use Float64."))
+    return Float64
+end
 
-# A dense `rows`-by-`cols` matrix of Float64 fits under the cap
-densefits(rows::Integer, cols::Integer, max_dense_bytes::Integer) = 8 * Int(rows) * Int(cols) <= max_dense_bytes
-function check_densefits(what, rows::Integer, cols::Integer, max_dense_bytes::Integer, remedy="raise max_dense_bytes or use storage = :sparse")
-    densefits(rows, cols, max_dense_bytes) && return nothing
-    throw(ArgumentError("A dense $(rows)×$(cols) $what needs $(8 * Int(rows) * Int(cols)) bytes, which exceeds max_dense_bytes = $max_dense_bytes; $remedy."))
+# A dense `rows`-by-`cols` matrix of element type `T` fits under the cap
+densefits(rows::Integer, cols::Integer, max_dense_bytes::Integer, ::Type{T}=Float64) where T = sizeof(T) * Int(rows) * Int(cols) <= max_dense_bytes
+function check_densefits(what, rows::Integer, cols::Integer, max_dense_bytes::Integer, remedy="raise max_dense_bytes or use storage = :sparse", ::Type{T}=Float64) where T
+    densefits(rows, cols, max_dense_bytes, T) && return nothing
+    throw(ArgumentError("A dense $(rows)×$(cols) $what needs $(sizeof(T) * Int(rows) * Int(cols)) bytes, which exceeds max_dense_bytes = $max_dense_bytes; $remedy."))
 end
 
 # What `formulation = :jacobian` supports, interpolated into the docstrings of the front door (`optimize!(model, options)`) and
@@ -76,6 +88,14 @@ The same for [`optimvars`](@ref), [`optimvars_nls`](@ref), [`flat_optimvars_nls`
   forming `JᵀJ` and `Jᵀr`; default $MIN_WORK_PER_THREAD_HESSIAN) one number written, per cost `m * n * (n + 1)`; on the Jacobian path (the
   Jacobian fill, writing `r` and `J`; default $MIN_WORK_PER_THREAD_JACOBIAN) one entry of `r` or `J` written, per cost `m * (n + 1)`.
 - `min_work_cost = $MIN_WORK_PER_THREAD_COST`: per-thread floor of a cost evaluation, one residual entry, per cost `m`.
+- `precision = Float64`: the element type of the linear system, `Float64` or `Float32` (anything else is an
+  `ArgumentError`). With `Float32` the Hessian (on the Jacobian path the Jacobian), its reduction and its factorization
+  are single precision; the variables, the residuals, the cost, the gradient and the step stay `Float64`, each cost's
+  derivatives are computed in `Float64` and narrowed as they are added into the system. The byte counts of
+  `max_dense_bytes` and of the dense-or-sparse decisions are of the system in this precision. Which solvers offer
+  `Float32` is DampedLinearSolve's table (its "Precision"); one that does not is an `ArgumentError` when the system is
+  built. The wrappers that hand a plain system to external solvers (`flat_optimvars_nls`, `NLPLSModel`, `NLLSNLSModel`,
+  `nls_callbacks`) take `Float64` only.
 
 Each kind of work is split over `clamp(work ÷ floor, 1, numthreads)` threads: one thread when its estimate is below
 twice the floor, and every thread at a floor of 0. The costs of each type are split into one chunk per thread, so the

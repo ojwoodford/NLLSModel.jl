@@ -225,6 +225,10 @@ fixture("nls_interface")
         @test isfinite(c)
         @test isfinite(r[1])
         @test isfinite(J[1, 1])
+        # The residual alone: the kernel is read from the adaptive cost's first variable too
+        r_only = zeros(1)
+        @test flat_adapt.res!(r_only, flat_adapt.x0) ≈ c
+        @test r_only == r
     end
 
     @testset "6.1.8 Guards & Trait Checks" begin
@@ -337,3 +341,110 @@ end
     @test objgrad!(nls, x, g2)[1] == c && g2 == grad!(fresh, x, g)
 end
 
+
+@testset "NLS Interface - guards and rare reweighting paths" begin
+    # A cost whose variable indices became duplicated after addcost! checked them
+    prob_dup = Model(Float64, MutableIdxRes)
+    addvariable!(prob_dup, 1.0)
+    addvariable!(prob_dup, 2.0)
+    dup = MutableIdxRes([1, 2])
+    addcost!(prob_dup, dup)
+    dup.idx[2] = 1
+    @test_throws ArgumentError optimvars_nls(prob_dup)
+
+    # A zero linear weight warns, and gives zero rows in r and J, and zero cost
+    prob_zero = Model(Float64, RobustWrapper{ScalarVarIndRes, Scaled{Float64, NoRobust}})
+    addvariable!(prob_zero, 5.0)
+    addcost!(prob_zero, RobustWrapper(ScalarVarIndRes(), Scaled(NoRobust(), 0.0)))
+    flat_zero = @test_logs (:warn, r"zero linear robust weight") flat_optimvars_nls(prob_zero)
+    r, J = ones(1), ones(1, 1)
+    @test flat_zero.res!(r, flat_zero.x0) == 0.0 && r == [0.0]
+    r, J = ones(1), ones(1, 1)
+    @test flat_zero.resjac!(r, J, flat_zero.x0) == 0.0 && r == [0.0] && J == zeros(1, 1)
+
+    # robust_weights: a non-finite cost, derivative or second-order correction gives NaN rows
+    @test NLLSModel.robust_weights(FixedDerivKernel(Inf, 1.0, 0.0), 4.0)[1:2] == (NLLSModel.WEIGHT_NAN, Inf)
+    mode, c = NLLSModel.robust_weights(FixedDerivKernel(1.0, NaN, 0.0), 4.0)
+    @test mode == NLLSModel.WEIGHT_NAN && isnan(c)
+    mode, c = NLLSModel.robust_weights(FixedDerivKernel(1.0, 1.0, 1e308), 4.0) # 2 d2c s / dc overflows
+    @test mode == NLLSModel.WEIGHT_NAN && isnan(c)
+    @test NLLSModel.is_finite(1.0) && !NLLSModel.is_finite(Inf) && !NLLSModel.is_finite(NaN)
+    # ... and through the evaluators: NaN in the cost's residual rows and Jacobian block
+    for kernel in (FixedDerivKernel(1.0, NaN, 0.0), FixedDerivKernel(1.0, 1.0, 1e308))
+        prob_nan = Model(Float64, RobustWrapper{ScalarVarIndRes, FixedDerivKernel})
+        addvariable!(prob_nan, 5.0)
+        addcost!(prob_nan, RobustWrapper(ScalarVarIndRes(), kernel))
+        flat_nan = flat_optimvars_nls(prob_nan)
+        r, J = zeros(1), zeros(1, 1)
+        @test isnan(flat_nan.res!(r, flat_nan.x0)) && isnan(r[1])
+        r = zeros(1)
+        @test isnan(flat_nan.resjac!(r, J, flat_nan.x0)) && isnan(r[1]) && isnan(J[1, 1])
+    end
+
+    # Wrong sizes and element types of the caller's r and J
+    prob = Model(SVector{1, Float64}, TestPairDiff)
+    for i in 1:4
+        addvariable!(prob, SVector(Float64(i)))
+    end
+    for i in 1:3
+        addcost!(prob, TestPairDiff(i, i + 1, 0.5))
+    end
+    flat = flat_optimvars_nls(prob; storage=:dense)
+    M, N = size(flat.J_proto)
+    @test_throws DimensionMismatch flat.res!(zeros(M + 1), flat.x0)
+    @test_throws DimensionMismatch flat.resjac!(zeros(M), zeros(M + 1, N), flat.x0)
+    @test_throws ArgumentError flat.resjac!(zeros(M), zeros(Float32, M, N), flat.x0)
+    flat_sp = flat_optimvars_nls(prob; storage=:sparse)
+    @test flat_sp.J_proto isa SparseMatrixCSC
+    @test_throws DimensionMismatch flat_sp.resjac!(zeros(M), spzeros(M, N), flat_sp.x0)
+
+    # reset_clamped_count! on a named tuple that holds only the evaluator
+    prob_clamp = Model(Float64, RobustWrapper{ScalarVarIndRes, MockClampingKernel})
+    addvariable!(prob_clamp, 3.0)
+    addcost!(prob_clamp, RobustWrapper(ScalarVarIndRes(), MockClampingKernel(-1e-15)))
+    _, _, resjac_clamp, x0_clamp, J_clamp = optimvars_nls(prob_clamp)
+    nt = (; resjac! = resjac_clamp)
+    @test_logs (:warn,) resjac_clamp(zeros(1), J_clamp, x0_clamp)
+    @test NLLSModel.clamped_count(nt) == 1
+    @test NLLSModel.reset_clamped_count!(nt) === nt
+    @test NLLSModel.clamped_count(nt) == 0
+
+    # throw_nonlinear names no cost when every cost is linear (its callers only call it when one is not)
+    @test_throws ArgumentError NLLSModel.throw_nonlinear("nls_callbacks", prob)
+
+    # nls_callbacks: a Float32 J is rejected, and f reuses the cost of the last residual evaluation at the same point
+    cb = NLLSModel.nls_callbacks(prob; storage=:dense)
+    @test_throws ArgumentError cb.jac!(zeros(Float32, M, N), cb.x0)
+    x = cb.x0 .+ 0.1
+    r = cb.res!(zeros(M), x)
+    @test cb.f(x) ≈ 0.5 * sum(abs2, r)
+    @test cb.f(x) == cb.f(copy(x)) # the cached value, the same as when evaluated
+end
+
+@testset "NLS Interface - NLLSNLSModel sparse Jacobian and write-back" begin
+    prob = Model(SVector{1, Float64}, TestPairDiff)
+    for i in 1:4
+        addvariable!(prob, SVector(Float64(i)))
+    end
+    for i in 1:3
+        addcost!(prob, TestPairDiff(i, i + 1, 0.5))
+    end
+    x = [0.3, -0.1, 0.7, 0.2]
+    nls_dense = NLLSNLSModel(prob; storage=:dense, numthreads=static(1))
+    nls_sparse = NLLSNLSModel(prob; storage=:sparse, numthreads=static(1))
+    @test nls_dense.J_buf isa Matrix && nls_sparse.J_buf isa SparseMatrixCSC
+    Jd = jac_residual(nls_dense, x)
+    rows, cols = jac_structure_residual(nls_sparse)
+    vals = jac_coord_residual(nls_sparse, x)
+    @test length(rows) == length(cols) == length(vals) == nls_sparse.nls_meta.nnzj
+    @test Matrix(sparse(rows, cols, vals, size(Jd)...)) ≈ Jd
+    @test jac_residual(nls_sparse, x) ≈ Jd
+
+    # syncvars! writes the flat vector back: every variable unfixed, and a list of them
+    nls_all = NLLSNLSModel(prob; numthreads=static(1))
+    m = syncvars!(nls_all, x)
+    @test m === prob && prob.variables == [SVector(v) for v in x]
+    nls_list = NLLSNLSModel(prob; unfixed=[1, 3], numthreads=static(1))
+    syncvars!(prob, nls_list, [5.0, 6.0])
+    @test prob.variables == [SVector(5.0), SVector(x[2]), SVector(6.0), SVector(x[4])]
+end

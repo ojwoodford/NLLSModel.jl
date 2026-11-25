@@ -14,6 +14,7 @@ Nonlinear Least Squares (NLLS) and factor-graph modeling in Julia.
 - **Automatic & Analytic Derivatives**: Uses `ForwardDiff.jl` automatically on `computeresidual`, or user-defined analytic Jacobians via `computeresjac`.
 - **Robust M-Estimators**: Built-in `HuberKernel`, `GemanMcclureKernel`, `Scaled`, and the adaptive kernels `ContaminatedGaussian` and `GaussianPlusUniform`, whose parameters can be optimized jointly or fitted to the residuals with `optimizerobustifier!`.
 - **Block-Dense & Block-Sparse Linear Systems**: Uses `DenseBlockLinearSystem` and `SparseBlockLinearSystem` from `BlockLinearSystems.jl` for fast, zero-allocation Hessian assembly.
+- **Single Precision**: `optimize!(model, options; precision = Float32)` holds the Hessian (or the Jacobian), its Schur or QR reduction and its factorization in single precision, and everything else (the variables, the residuals, the cost, the gradient, the step) in double: the answer is the double-precision one, in possibly more iterations, for half the memory of the system.
 - **One-Call Solving**: `optimize!(model, options)` solves a `Model` with `SecondOrderOptimization.jl` and writes the solution back into it (load `SecondOrderOptimization`).
 - **Optimizer-Agnostic Problem Interface**: For advanced use, extract `(f, fdf!, x0, H) = optimvars(problem; unfixed=unfixed, numthreads=numthreads)` for integration with other second order optimizers, such as `Optim.jl`.
 - **NLPModels.jl Ecosystem**: Load `NLPModels` to wrap a `Model` as an `AbstractNLPModel` via `NLPLSModel(problem)` and solve with `JSOSolvers.jl` (`trunk`, `tron`), `Ipopt.jl`, or `Optim.jl`. These solvers see a flat vector, so every unfixed variable must pack into one and update by plain addition (numbers, `SVector`, `Vector`); manifold variables are solved with `optimize!`.
@@ -166,6 +167,14 @@ tests need.
 Costs not on the full static path use ForwardDiff with run-time sized buffers, cached per task. `MAX_STATIC_VAR`,
 `MAX_STATIC_JAC` and `MAX_STATIC_ROWS` are starting values that have not been tuned; they are constants in `src/NLLSModel.jl`.
 A scalar residual (`nres == 1`) with a run-time sized variable uses an outer-product kernel.
+
+With one unfixed variable whose size `n` is static and at most 12, the linear system is static (an `MMatrix` and an
+`MVector`), and it is accumulated in values: each cost's gradient and Hessian are added to a running sum held as
+`StaticArrays` values (the Hessian's triangle only), and the sum is written to the system once per evaluation. Above 12,
+or for a run-time size, the system is a `Matrix` and a `Vector`, and each cost is added to it in place. 12 was measured
+on an Apple M1 Pro: up to it the static system was faster in every case measured but one (up to 3.4 times; eight
+residual rows at `n = 8` on Julia 1.10 was 1.09 times slower), while above it compilation grows quickly with `n` and,
+for costs with several residual rows, the static system was no longer faster.
 
 Rules for your own `computeresidual`, `computeresjac` and `computecostgradhess`, because residuals are evaluated on
 several threads at once:

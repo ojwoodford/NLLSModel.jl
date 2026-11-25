@@ -18,14 +18,6 @@ mutable struct Model{VarTypes, CostTypes, CostVecs, TCT<:Tuple}
         costs isa CostStruct{TCT} || throw(ArgumentError("Expected costs of type CostStruct{$TCT}, got $(typeof(costs))"))
         return new{VarTypes, CostTypes, typeof(costs.data), TCT}(costs, vars, varcostmap, varcostmapvalid)
     end
-    function Model{VarTypes, CostTypes, CostVecs, TCT}(
-        vars::Vector{VarTypes},
-        costs::CostStruct{TCT, CostVecs},
-        varcostmap = spzeros(Bool, 0, 0),
-        varcostmapvalid = false
-    ) where {VarTypes, CostTypes, CostVecs, TCT}
-        return new{VarTypes, CostTypes, CostVecs, TCT}(costs, vars, varcostmap, varcostmapvalid)
-    end
 end
 
 Model(::Type{VT}, ::Type{CT}) where {VT, CT} = Model{VT, CT}()

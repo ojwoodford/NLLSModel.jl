@@ -196,3 +196,24 @@ NLLSModel.varindices(r::CountedNLS) = NLLSModel.varindices(r.c)
 NLLSModel.getvars(r::CountedNLS, vars::AbstractVector) = NLLSModel.getvars(r.c, vars)
 NLLSModel.computeresidual(r::CountedNLS, args...) = (NLS_EVALS[] += 1; NLLSModel.computeresidual(r.c, args...))
 Base.eltype(::CountedNLS) = Float64
+
+# A kernel returning fixed values for (cost, dc, d2c), to reach the non-finite and overflow branches of the reweighting
+struct FixedDerivKernel <: AbstractRobustifier
+    c::Float64
+    dc::Float64
+    d2c::Float64
+end
+NLLSModel.robustify(k::FixedDerivKernel, s) = k.c
+NLLSModel.robustifydcost(k::FixedDerivKernel, s) = (k.c, k.dc, k.d2c)
+
+# A residual whose variable indices can be changed after it is added, so that a model can hold a cost with duplicate
+# indices, which addcost! rejects
+struct MutableIdxRes <: AbstractResidual
+    idx::Vector{Int}
+end
+NLLSModel.ndeps(::MutableIdxRes) = static(2)
+NLLSModel.nres(::MutableIdxRes) = static(1)
+NLLSModel.varindices(r::MutableIdxRes) = SVector(r.idx[1], r.idx[2])
+NLLSModel.getvars(r::MutableIdxRes, vars::AbstractVector) = (vars[r.idx[1]]::Float64, vars[r.idx[2]]::Float64)
+NLLSModel.computeresidual(::MutableIdxRes, a, b) = SVector(a - b)
+Base.eltype(::MutableIdxRes) = Float64

@@ -45,4 +45,8 @@ fixture("robust")
     sigma, w, A = 0.8, 0.6, 30.0
     out = -2 .* log.(w * exp.(costs / (-2 * sigma^2)) / (2π * sigma^2) .+ (1 - w) / A)
     testrobustifier(GaussianPlusUniform(sigma, w, static(2); volume=A), costs, out)
+
+    # A user's kernel with only `robustify`: robustifydcost differentiates it
+    k, s = UserCauchy(0.5), 2.0
+    @test SVector(robustifydcost(k, s)) ≈ SVector(robustify(k, s), 1 / (1 + s / k.c2), -1 / (k.c2 * (1 + s / k.c2)^2))
 end

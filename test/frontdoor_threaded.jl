@@ -11,14 +11,16 @@ fixture("frontdoor", "optimization")
     # For one variable, the H that optimvars returns has the types of the linear system's own storage, so buffers built
     # from it (H by deepcopy, g by `zero(H[:, 1])`) take fdf!'s direct-write branch: the costs accumulate straight into
     # them, with no internal accumulation and no copy. Other buffer types take the fallback, with the same result.
-    @testset "single-variable prototype: $name" for (name, V, n, nt) in (
-            ("static 3", SVector{3, Float64}, 3, 1), ("static 16", SVector{16, Float64}, 16, 1),
-            ("static 3, shared", SVector{3, Float64}, 3, 4), ("static 17", SVector{17, Float64}, 17, 1),
-            ("dynamic 3", Vector{Float64}, 3, 1), ("dynamic 3, shared", Vector{Float64}, 3, 4))
+    # The cases on one thread (nt = 1) do not depend on the suite's thread count, and compile slowly under coverage (static
+    # 12): they run in the one-thread run only.
+    @testset "single-variable prototype: $name" for (name, V, n, nt) in filter(c -> c[4] > 1 || Threads.nthreads() == 1, (
+            ("static 3", SVector{3, Float64}, 3, 1), ("static 12", SVector{12, Float64}, 12, 1),
+            ("static 3, shared", SVector{3, Float64}, 3, 4), ("static 13", SVector{13, Float64}, 13, 1),
+            ("dynamic 3", Vector{Float64}, 3, 1), ("dynamic 3, shared", Vector{Float64}, 3, 4)))
         model = linsingleproblem(V, n, 11)
         _, fdf!, x0, H = optimvars(model; numthreads=static(nt), min_work=0) # min_work=0: share the system when nt > 1
         @test (fdf!.linsystem isa NLLSModel.LinearSystemShared) == (nt > 1)
-        isstatic = V <: StaticVector && n <= 16
+        isstatic = V <: StaticVector && n <= NLLSModel.MAX_STATIC_SYSTEM
         @test H isa (isstatic ? MMatrix{n, n, Float64, n * n} : Matrix{Float64})
         @test size(H) == (n, n)
         @test all(iszero, H)
@@ -33,7 +35,9 @@ fixture("frontdoor", "optimization")
         # The fallback: buffers of another type than the system's
         gf, Hf = isstatic ? (zeros(n), zeros(n, n)) : (view(zeros(n), :), view(zeros(n, n), :, :))
         cf = fdf!(gf, Hf, x0)
-        @test !all(==(7.0), internal) # The fallback accumulates internally, then copies
+        # The fallback: a static system on one thread writes from its values (internal storage untouched, item 19);
+        # otherwise it accumulates internally, then copies
+        @test all(==(7.0), internal) == (isstatic && nt == 1)
         @test cf == c
         @test gf == gd
         @test Hf == Hd
