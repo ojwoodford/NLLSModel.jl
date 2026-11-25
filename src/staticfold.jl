@@ -25,7 +25,6 @@ trianglesize(N) = (N * (N + 1)) >> 1
 @inline zerosum(::Val{N}, ::Type{T}) where {N, T} =
     StaticSum{N, T, trianglesize(N)}(zero(SVector{N, Float64}), SHermitianCompact{N, T, trianglesize(N)}(zero(SVector{trianglesize(N), T})))
 @inline zerosum(::LinearSystem{UniVariateLSstatic_x{N}, <:UniVariateLSstatic_ls{N, <:Any, T}}) where {N, T} = zerosum(Val(N), T)
-@inline zerosum(ls::LinearSystemShared) = zerosum(LinearSystem(ls, 1))
 
 # (i, j) of each entry of the lower triangle, column-major, as constants
 @generated trianglepairs(::Val{N}) where N = Expr(:tuple, [:(($i, $j)) for j in 1:N for i in j:N]...)
@@ -175,7 +174,7 @@ function staticfold_shared!(linsystem::LinearSystemShared{F, V, N}, vars, costs:
             c, acc = foldcosts(zerosum(ls), ls, vars_, costs_, bindleadingargs(ithchunk, N, taskid))
             writesum!(ls.ls.b, ls.ls.A, acc)
             linsystem_.costs[taskid] = c
-        end
+        end # COV_EXCL_LINE
         # The tree reduction of the in-place path (costgradhess! of a LinearSystemShared), unchanged
         n = N
         while n > 1
@@ -185,7 +184,7 @@ function staticfold_shared!(linsystem::LinearSystemShared{F, V, N}, vars, costs:
                 linsystem_ = fromthreadargs(args)[1]
                 add!(linsystem_.ls[taskid], linsystem_.ls[taskid + n_])
                 linsystem_.costs[taskid] += linsystem_.costs[taskid + n_]
-            end
+            end # COV_EXCL_LINE
             n = n_
         end
     end

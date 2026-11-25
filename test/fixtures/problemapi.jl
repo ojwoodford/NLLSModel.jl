@@ -11,6 +11,11 @@ NLLSModel.getvars(res::DiffResidual, vars::Vector) = (vars[res.i]::Float64, vars
 NLLSModel.computeresidual(::DiffResidual, a, b) = a - b
 Base.eltype(::DiffResidual) = Float64
 
+# Measurements of three and four 2-vectors, for SimpleError3 and SimpleError4
+const V2 = SVector{2, Float64}
+NLLSModel.generatemeasurement(a::SVector{2}, b::SVector{2}, c::SVector{2}) = a + 2 * b - c
+NLLSModel.generatemeasurement(a::SVector{2}, b::SVector{2}, c::SVector{2}, d::SVector{2}) = a + b + c + d
+
 # A difference of two variables of either type
 struct EitherDiff <: NLLSModel.AbstractResidual
     i::Int

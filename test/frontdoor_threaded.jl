@@ -11,10 +11,12 @@ fixture("frontdoor", "optimization")
     # For one variable, the H that optimvars returns has the types of the linear system's own storage, so buffers built
     # from it (H by deepcopy, g by `zero(H[:, 1])`) take fdf!'s direct-write branch: the costs accumulate straight into
     # them, with no internal accumulation and no copy. Other buffer types take the fallback, with the same result.
-    @testset "single-variable prototype: $name" for (name, V, n, nt) in (
+    # The cases on one thread (nt = 1) do not depend on the suite's thread count, and compile slowly under coverage (static
+    # 12): they run in the one-thread run only.
+    @testset "single-variable prototype: $name" for (name, V, n, nt) in filter(c -> c[4] > 1 || Threads.nthreads() == 1, (
             ("static 3", SVector{3, Float64}, 3, 1), ("static 12", SVector{12, Float64}, 12, 1),
             ("static 3, shared", SVector{3, Float64}, 3, 4), ("static 13", SVector{13, Float64}, 13, 1),
-            ("dynamic 3", Vector{Float64}, 3, 1), ("dynamic 3, shared", Vector{Float64}, 3, 4))
+            ("dynamic 3", Vector{Float64}, 3, 1), ("dynamic 3, shared", Vector{Float64}, 3, 4)))
         model = linsingleproblem(V, n, 11)
         _, fdf!, x0, H = optimvars(model; numthreads=static(nt), min_work=0) # min_work=0: share the system when nt > 1
         @test (fdf!.linsystem isa NLLSModel.LinearSystemShared) == (nt > 1)

@@ -12,7 +12,6 @@ macro bitiset(flags, bit)
 end
 
 bitiset(flags::StaticInt, bit) = (static(1 << (bit - 1)) & flags) != static(0)
-bitiset(flags, bit) = (1 << (bit - 1)) & flags != 0
 
 function block_sparsity(problem, unfixed_inds::AbstractVector{<:Integer})
     # Compute the block sparsity for the given unfixed variable ordering
@@ -22,7 +21,6 @@ function block_sparsity(problem, unfixed_inds::AbstractVector{<:Integer})
     return sparsity
 end
 block_sparsity(problem, unfixed::AbstractVector{Bool}) = block_sparsity(problem, findall(unfixed))
-block_sparsity(problem, unfixed) = block_sparsity(problem, convert(Vector{Int}, findall(unfixed)))
 
 # Dimension of a variable as a block of a block linear system, as an Int. BlockLinearSystems checks block sizes against
 # its own limit when it builds the system; any size is fine for a variable optimized on its own.

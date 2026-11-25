@@ -8,7 +8,6 @@ function convertunfixed(unfixed::AbstractVector{<:Integer}, problem)
     mask[unfixed] .= true
     return mask
 end
-convertunfixed(unfixed, problem) = unfixed
 
 # Single-variable objective and gradient/Hessian functors
 struct SingleVarCostFunc{P, U}
@@ -96,7 +95,7 @@ struct MultiVarDenseFDF{LS, P, U}
     problem::P
     unfixed_inds::U
 end
-@inline function (f::MultiVarDenseFDF)(g, H_mat::Matrix{<:Union{Float64, Float32}}, vars)
+@inline function (f::MultiVarDenseFDF)(g::Vector{Float64}, H_mat::Matrix{<:Union{Float64, Float32}}, vars)
     full_vars = sync_unfixed_vars!(f.problem, f.unfixed_inds, vars)
     # The optimizer's matrix, with the system's layout, which it shares: this allocates nothing
     bdm = DenseBlockLinearSystem(H_mat, getA(f.linsystem))
@@ -117,7 +116,7 @@ struct MultiVarSparseFDF{LS, P, U}
     problem::P
     unfixed_inds::U
 end
-@inline function (f::MultiVarSparseFDF)(g, H_csc::SparseMatrixCSC{<:Union{Float64, Float32}, Int}, vars)
+@inline function (f::MultiVarSparseFDF)(g::Vector{Float64}, H_csc::SparseMatrixCSC{<:Union{Float64, Float32}, Int}, vars)
     full_vars = sync_unfixed_vars!(f.problem, f.unfixed_inds, vars)
     if f.linsystem isa LinearSystemShared
         target = replace_first_ls(f.linsystem, MultiVariateLSsparse_ls(f.linsystem.ls[1].A, g))
@@ -137,7 +136,7 @@ struct MultiVarSchurFDF{LS, P, U, PL}
     unfixed_inds::U
     plan::PL # SchurThreadPlan when linearizing on several threads, otherwise nothing
 end
-@inline function (f::MultiVarSchurFDF)(g, H_schur::SchurBlockHessian, vars)
+@inline function (f::MultiVarSchurFDF)(g::Vector{Float64}, H_schur::SchurBlockHessian, vars)
     full_vars = sync_unfixed_vars!(f.problem, f.unfixed_inds, vars)
     if f.linsystem isa LinearSystemShared
         c = schur_threaded!(f.linsystem, f.plan, H_schur, g, full_vars, f.problem.costs)
@@ -146,6 +145,18 @@ end
         zero!(target_ls)
         c = costgradhess_nozero!(target_ls, full_vars, f.problem.costs)
     end
+    return c
+end
+
+# A gradient that is not a Vector{Float64} (a view, another element type) cannot be the system's own gradient: the costs
+# accumulate into a vector of Float64, copied into it at the end
+(f::MultiVarDenseFDF)(g::AbstractVector, H::Matrix{<:Union{Float64, Float32}}, vars) = gradviacopy(f, g, H, vars)
+(f::MultiVarSparseFDF)(g::AbstractVector, H::SparseMatrixCSC{<:Union{Float64, Float32}, Int}, vars) = gradviacopy(f, g, H, vars)
+(f::MultiVarSchurFDF)(g::AbstractVector, H::SchurBlockHessian, vars) = gradviacopy(f, g, H, vars)
+function gradviacopy(f, g, H, vars)
+    gv = Vector{Float64}(undef, length(g))
+    c = f(gv, H, vars)
+    copyto!(g, gv)
     return c
 end
 

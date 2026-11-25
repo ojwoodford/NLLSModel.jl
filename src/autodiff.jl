@@ -8,7 +8,7 @@ function staticduals(varflags::StaticInt, residual, vars)::Bool
     dynamic(is_static(M)) || return false
     N = length(vars)
     totalnumvars = static(0)
-    @unroll for i in 1:MAX_ARGS
+    @unroll for i in 1:MAX_ARGS # COV_EXCL_LINE
         if i <= N && bitiset(varflags, i)
             nvi = nvars(vars[i])
             if dynamic(!is_static(nvi))
@@ -16,10 +16,9 @@ function staticduals(varflags::StaticInt, residual, vars)::Bool
             end
             totalnumvars += nvi
         end
-    end
+    end # COV_EXCL_LINE
     return totalnumvars <= MAX_STATIC_VAR ? true : false
 end
-staticduals(varflags, residual, vars) = false
 usestatic(varflags, residual, vars)::Bool =
     staticduals(varflags, residual, vars) && nres(residual) * computetotalnumvars(varflags, vars) <= MAX_STATIC_JAC ? true : false
 
@@ -27,21 +26,11 @@ usestatic(varflags, residual, vars)::Bool =
 function computetotalnumvars(varflags::StaticInt, vars)
     N = length(vars)
     totalnumvars = static(0)
-    @unroll for i in 1:MAX_ARGS
+    @unroll for i in 1:MAX_ARGS # COV_EXCL_LINE
         if i <= N && bitiset(varflags, i)
             totalnumvars += nvars(vars[i])
         end
-    end
-    return totalnumvars
-end
-function computetotalnumvars(varflags, vars)
-    N = length(vars)
-    totalnumvars = 0
-    @unroll for i in 1:MAX_ARGS
-        if i <= N
-            totalnumvars += ifelse(bitiset(varflags, i), dynamic(nvars(vars[i])), 0)
-        end
-    end
+    end # COV_EXCL_LINE
     return totalnumvars
 end
 
@@ -53,7 +42,6 @@ end
     TG = ForwardDiff.Tag(computeresidual, T)
     return SVector{Last-First+1, ForwardDiff.Dual{TG, T, N}}(tuple([ForwardDiff.Dual{TG, T, N}(zero(T), singleseed(T, Val(N), Val(i))) for i in First:Last]...))
 end
-dualzeros(T, N) = dualzeros(T, N, Val(1), N)
 
 # Generate the updated (dualized) variables
 @generated function dualvars(vars::NTuple{N, Any}, ::StaticInt{varflags}, ::Type{T}) where {N, varflags, T}
@@ -195,15 +183,6 @@ function computehessian(f, x::AbstractArray)
 end
 
 computehessian(f, x::T) where T <: Number = map(first, computehessian(f ∘ first, SVector{1, T}(x)))
-
-# Gradient computation wrapper
-function computegradient(f, x::AbstractArray)
-    result = DiffResults.GradientResult(x)
-    result = ForwardDiff.gradient!(result, f, x)
-    return DiffResults.value(result), DiffResults.gradient(result)
-end
-
-computegradient(f, x::T) where T <: Number = map(first, computegradient(f ∘ first, SVector{1, T}(x)))
 
 # Automatic computation of the cost, gradient and Hessian
 function computecostgradhess(varflags, cost::AbstractCost, vars...)

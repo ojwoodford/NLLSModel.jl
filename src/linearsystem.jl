@@ -3,7 +3,6 @@ struct LinearSystem{F, V}
     ls::V
 end
 LinearSystem{F, V}(xargs::Tuple, lsargs::Tuple) where {F, V} = LinearSystem{F, V}(F(xargs...), V(lsargs...))
-updateunfixed(old::LinearSystem{F, V}, unfixed) where {F, V} = LinearSystem{F, V}(F(unfixed, old.x), old.ls)
 
 struct LinearSystemShared{F, V, N}
     x::F
@@ -13,7 +12,6 @@ end
 function LinearSystemShared{F, V, N}(xargs::Tuple, lsargs::Tuple) where {F, V, N}
     return LinearSystemShared{F, V, N}(F(xargs...), SVector{N, V}(ntuple(i -> V(lsargs...), Val(N))), MVector{N, Float64}(undef))
 end
-updateunfixed(old::LinearSystemShared{F, V, N}, unfixed) where {F, V, N} = LinearSystemShared{F, V, N}(F(unfixed, old.x), old.ls, old.costs)
 
 # Ephemeral task wrapper constructed on the stack
 LinearSystem(ls::LinearSystemShared{F, V, N}, ind) where {F, V, N} = LinearSystem{F, V}(ls.x, ls.ls[ind])
@@ -25,15 +23,12 @@ end
 
 getA(ls::LinearSystem) = ls.ls.A
 getb(ls::LinearSystem) = ls.ls.b
-getx(ls::LinearSystem) = ls.x.x
 
 getA(ls::LinearSystemShared) = ls.ls[1].A
 getb(ls::LinearSystemShared) = ls.ls[1].b
-getx(ls::LinearSystemShared) = ls.x.x
 
 getA(ls) = ls.A
 getb(ls) = ls.b
-getx(ls) = ls.x
 
 # Uni-variate linear system. `T` is the element type of the Hessian (the `precision` keyword, single-precision.md); the
 # gradient is Float64 whatever it is.
@@ -46,7 +41,6 @@ struct UniVariateLSdynamic_ls{T}
     end
     UniVariateLSdynamic_ls(A::Matrix{T}, b::Vector{Float64}) where T = new{T}(A, b)
 end
-UniVariateLSdynamic_ls(varlen::Integer) = UniVariateLSdynamic_ls{Float64}(varlen)
 
 struct UniVariateLSdynamic_x
     varindex::UInt
@@ -54,9 +48,6 @@ struct UniVariateLSdynamic_x
 
     function UniVariateLSdynamic_x(unfixed, varlen)
         return new(UInt(unfixed), Vector{Float64}(undef, varlen))
-    end
-    function UniVariateLSdynamic_x(unfixed, old::UniVariateLSdynamic_x)
-        return new(UInt(unfixed), old.x)
     end
 end
 
@@ -69,7 +60,6 @@ struct UniVariateLSstatic_ls{N, N2, T}
     end
     UniVariateLSstatic_ls(A::MMatrix{N, N, T, N2}, b::MVector{N, Float64}) where {N, N2, T} = new{N, N2, T}(A, b)
 end
-UniVariateLSstatic_ls{N, N2}() where {N, N2} = UniVariateLSstatic_ls{N, N2, Float64}()
 
 struct UniVariateLSstatic_x{N}
     varindex::UInt
@@ -77,9 +67,6 @@ struct UniVariateLSstatic_x{N}
 
     function UniVariateLSstatic_x{N}(unfixed) where N
         return new(UInt(unfixed), MVector{N, Float64}(undef))
-    end
-    function UniVariateLSstatic_x{N}(unfixed, old::UniVariateLSstatic_x{N}) where N
-        return new(UInt(unfixed), old.x)
     end
 end
 
@@ -101,8 +88,6 @@ struct MultiVariateLSsparse_ls{T}
     A::SparseBlockLinearSystem{T}
     b::Vector{Float64}
 end
-# The gradient converted to a Vector{Float64}, as the non-parametric type did
-MultiVariateLSsparse_ls(A::SparseBlockLinearSystem{T}, b::AbstractVector) where T = MultiVariateLSsparse_ls{T}(A, b)
 
 struct MultiVariateLSdense_x
     x::Vector{Float64}
@@ -114,7 +99,6 @@ struct MultiVariateLSdense_ls{T, M<:AbstractMatrix{T}}
     A::DenseBlockLinearSystem{T, M}
     b::Vector{Float64}
 end
-MultiVariateLSdense_ls(A::DenseBlockLinearSystem{T, M}, b::AbstractVector) where {T, M} = MultiVariateLSdense_ls{T, M}(A, b)
 
 # Schur linear system
 struct MultiVariateLSSchur_x
@@ -129,7 +113,6 @@ struct MultiVariateLSSchur_ls{T, BType}
     A::SchurBlockHessian{T, BType}
     b::Vector{Float64}
 end
-MultiVariateLSSchur_ls(A::SchurBlockHessian{T, BType}, b::AbstractVector) where {T, BType} = MultiVariateLSSchur_ls{T, BType}(A, b)
 
 const MultiVariateLSsparse = Union{LinearSystem{<:MultiVariateLSsparse_x, <:MultiVariateLSsparse_ls}, LinearSystemShared{X, V, M} where {X <: MultiVariateLSsparse_x, V <: MultiVariateLSsparse_ls, M}}
 const MultiVariateLSdense = Union{LinearSystem{MultiVariateLSdense_x, <:MultiVariateLSdense_ls}, LinearSystemShared{MultiVariateLSdense_x, <:MultiVariateLSdense_ls, M} where M}
@@ -184,9 +167,7 @@ BlockLinearSystems.copy_structure(ls::UniVariateLSdynamic_ls{T}) where T = UniVa
 BlockLinearSystems.copy_structure(::UniVariateLSstatic_ls{N, N2, T}) where {N, N2, T} = UniVariateLSstatic_ls{N, N2, T}()
 BlockLinearSystems.copy_structure(ls::MultiVariateLSdense_ls) = MultiVariateLSdense_ls(copy_structure(ls.A), zeros(Float64, length(ls.b)))
 BlockLinearSystems.copy_structure(ls::MultiVariateLSsparse_ls) = MultiVariateLSsparse_ls(copy_structure(ls.A), zeros(Float64, length(ls.b)))
-BlockLinearSystems.copy_structure(ls::MultiVariateLSSchur_ls) = MultiVariateLSSchur_ls(copy_structure(ls.A), zeros(Float64, length(ls.b)))
 BlockLinearSystems.copy_structure(ls::LinearSystem{F, V}) where {F, V} = LinearSystem{F, V}(ls.x, copy_structure(ls.ls))
-BlockLinearSystems.copy_structure(ls::LinearSystemShared{F, V, N}) where {F, V, N} = LinearSystemShared{F, V, N}(ls.x, SVector{N, V}(ntuple(i -> copy_structure(ls.ls[i]), Val(N))), MVector{N, Float64}(undef))
 
 sharedlinearsystem(ls::LinearSystem, ::StaticInt{1}) = ls
 sharedlinearsystem(ls::LinearSystemShared, ::StaticInt) = ls
@@ -212,17 +193,6 @@ add!(dest::UniVariateLSdynamic_ls, src::UniVariateLSdynamic_ls) = (dest.A .+= sr
 add!(dest::UniVariateLSstatic_ls, src::UniVariateLSstatic_ls) = (dest.A .+= src.A; dest.b .+= src.b; nothing)
 add!(dest::MultiVariateLSdense_ls, src::MultiVariateLSdense_ls) = (dest.A.data .+= src.A.data; dest.b .+= src.b; nothing)
 add!(dest::MultiVariateLSsparse_ls, src::MultiVariateLSsparse_ls) = (dest.A.data .+= src.A.data; dest.b .+= src.b; nothing)
-function add!(dest::MultiVariateLSSchur_ls, src::MultiVariateLSSchur_ls)
-    dest.b .+= src.b
-    if dest.A.R isa Matrix
-        dest.A.R .+= src.A.R
-    else
-        dest.A.R.data .+= src.A.R.data
-    end
-    dest.A.E_data .+= src.A.E_data
-    dest.A.C_data .+= src.A.C_data
-    return nothing
-end
 add!(dest::LinearSystem, src::LinearSystem) = add!(dest.ls, src.ls)
 
 # The end of an evaluation: a dynamic single-variable system accumulated in its lower triangle (from the lazy product)
@@ -249,11 +219,11 @@ function addsys!(b, A, g, H)
     n = length(b)
     @inbounds @simd for i in 1:n
         b[i] += g[i]
-    end
+    end # COV_EXCL_LINE
     @inbounds for j in 1:n
         @simd for i in 1:n
             A[i, j] += H[i, j]
-        end
+        end # COV_EXCL_LINE
     end
     return nothing
 end
@@ -261,7 +231,7 @@ end
 function updatesymA!(A, a, vars, varflags, blockindices)
     # Update the blocks in the problem
     loffseti = static(0)
-    @unroll for i in 1:MAX_ARGS
+    @unroll for i in 1:MAX_ARGS # COV_EXCL_LINE
         if i <= length(vars) && bitiset(varflags, i)
             nvi = nvars(vars[i])
             rangei = blockrange(loffseti + static(1), nvi)
@@ -269,7 +239,7 @@ function updatesymA!(A, a, vars, varflags, blockindices)
             @inbounds block(A, blockindices[i], blockindices[i], nvi, nvi) .+= view(a, rangei, rangei)
 
             loffsetj = static(0)
-            @unroll for j in 1:i-1
+            @unroll for j in 1:i-1 # COV_EXCL_LINE
                 if bitiset(varflags, j)
                     @inbounds nvj = nvars(vars[j])
                     rangej = blockrange(loffsetj + static(1), nvj)
@@ -280,21 +250,21 @@ function updatesymA!(A, a, vars, varflags, blockindices)
                         @inbounds block(A, blockindices[j], blockindices[i], nvj, nvi) .+= view(a, rangej, rangei)
                     end
                 end
-            end
+            end # COV_EXCL_LINE
         end
-    end
+    end # COV_EXCL_LINE
 end
 
 function updateb!(B, b, vars, varflags, boffsets, blockindices)
     # Update the blocks in the problem
     loffset = static(1)
-    @unroll for i in 1:MAX_ARGS
+    @unroll for i in 1:MAX_ARGS # COV_EXCL_LINE
         if i <= length(vars) && bitiset(varflags, i)
             nv = nvars(vars[i])
             @inbounds view(B, blockrange(boffsets[blockindices[i]], nv)) .+= view(b, blockrange(loffset, nv))
             loffset += nv
         end
-    end
+    end # COV_EXCL_LINE
 end
 
 function updatesymlinearsystem!(linsystem::MultiVariateLS, g::AbstractVector, H::AbstractArray, vars, varflags, blockindices)
@@ -310,7 +280,7 @@ function updatesymschur!(H_schur::SchurBlockHessian, g_full::Vector{Float64}, g:
     updateb!(g_full, g, vars, varflags, boffsets, blockindices)
 
     loffseti = static(0)
-    @unroll for i in 1:MAX_ARGS
+    @unroll for i in 1:MAX_ARGS # COV_EXCL_LINE
         if i <= length(vars) && bitiset(varflags, i)
             bi = Int(blockindices[i])
             nvi = nvars(vars[i])
@@ -319,7 +289,7 @@ function updatesymschur!(H_schur::SchurBlockHessian, g_full::Vector{Float64}, g:
             @inbounds addblock!(H_schur, bi, bi, H, rangei, rangei)
 
             loffsetj = static(0)
-            @unroll for j in 1:i-1
+            @unroll for j in 1:i-1 # COV_EXCL_LINE
                 if bitiset(varflags, j)
                     bj = Int(blockindices[j])
                     nvj = nvars(vars[j])
@@ -327,9 +297,9 @@ function updatesymschur!(H_schur::SchurBlockHessian, g_full::Vector{Float64}, g:
                     loffsetj += nvj
                     @inbounds addblock!(H_schur, bi, bj, H, rangei, rangej)
                 end
-            end
+            end # COV_EXCL_LINE
         end
-    end
+    end # COV_EXCL_LINE
 end
 
 function updatesymlinearsystem!(linsystem::MultiVariateLSSchur, g::AbstractVector, H::AbstractArray, vars, varflags, blockindices)
@@ -349,9 +319,7 @@ function gethessian(x::MultiVariateLSsparse_x, ls::MultiVariateLSsparse_ls)
     copyto!(x.hessian, ls.A, x.sparseindices)
     return x.hessian
 end
-gethessian(::MultiVariateLSSchur_x, ls::MultiVariateLSSchur_ls) = ls.A
 gethessian(linsystem) = getA(linsystem)
-gethessgrad(linsystem) = gethessian(linsystem), getgrad(linsystem)
 
 function BlockLinearSystems.zero!(linsystem::Union{LinearSystem, LinearSystemShared})
     fill!(getb(linsystem), 0)
@@ -365,18 +333,4 @@ function getoffsets(block, linsystem::UniVariateLS)
         return SVector(UInt(varind == linsystem.x.varindex))
     end
     return convert.(UInt, varind .== linsystem.x.varindex)
-end
-
-function OptimizationVariableInterface.update!(to::Vector, from::Vector, linsystem::MultiVariateLS, step=getx(linsystem))
-    # Update each variable
-    for (i, j) in enumerate(linsystem.x.blockindices)
-        if j != 0
-            @inbounds to[i] = update(from[i], step, linsystem.x.boffsets[j])
-        end
-    end
-end
-
-@inline function OptimizationVariableInterface.update!(to::Vector, from::Vector, linsystem::UniVariateLS, step=getx(linsystem))
-    # Update one variable
-    @inbounds to[linsystem.x.varindex] = update(from[linsystem.x.varindex], step)
 end

@@ -153,10 +153,8 @@ end
     @test NLLSModel.gethessian(ls_static_single.ls) === ls_static_single.ls.A
     @test NLLSModel.getA(ls_static_single.ls) === ls_static_single.ls.A
     @test NLLSModel.getb(ls_static_single.ls) === ls_static_single.ls.b
-    @test NLLSModel.getx(ls_static_single.x) === ls_static_single.x.x
     lss_direct = NLLSModel.LinearSystemShared{NLLSModel.UniVariateLSstatic_x{1}, NLLSModel.UniVariateLSstatic_ls{1, 1, Float64}, 2}((1,), ())
     @test lss_direct isa NLLSModel.LinearSystemShared
-    @test NLLSModel.updateunfixed(ls_static_shared, 1) isa NLLSModel.LinearSystemShared
 
     # 2. UniVariateLSdynamic
     dim = 20

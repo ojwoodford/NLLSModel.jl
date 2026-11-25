@@ -42,6 +42,21 @@ fixture("frontdoor", "optimization", "recommender")
         @test NLLSModel.cost(model) < 1e-3 * c0
     end
 
+    # A gradient that is not a Vector{Float64} (here a view) is written too: the costs accumulate into a vector of the
+    # system's own, copied into it
+    @testset "a view as the gradient: $name" for (name, make, storage) in (("dense", () -> chainproblem(5, 2, 2)[1], :auto),
+            ("sparse", () -> chainproblem(60, 2, 2)[1], :auto), ("Schur", () -> (Random.seed!(3); optlandmark_problem(4, 20)), :dense))
+        model = make()
+        _, fdf!, x0, H = optimvars(model; numthreads=static(1), storage)
+        n = sum(v -> Int(OptimizationVariableInterface.nvars(v)), x0)
+        H = H === nothing ? zeros(n, n) : H
+        g = zeros(n)
+        c = fdf!(g, deepcopy(H), x0)
+        gv = view(fill(NaN, n + 1), 2:n+1)
+        @test fdf!(gv, deepcopy(H), x0) == c
+        @test gv == g && any(!iszero, g)
+    end
+
     @testset "write-back order, unfixed = $name" for (name, unfixed, free) in (
             ("all", nothing, 1:7),
             ("an index", 6, [6]),

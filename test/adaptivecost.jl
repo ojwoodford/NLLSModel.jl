@@ -50,6 +50,7 @@ end
     # d is a StaticInt of at least 1
     @test_throws ArgumentError ContaminatedGaussian(2.0, 5.0, 0.9, 1)
     @test_throws ArgumentError ContaminatedGaussian(2.0, 5.0, 0.9, static(0))
+    @test_throws ArgumentError ContaminatedGaussian(NLLSModel.ZeroToInfScalar(0.5), NLLSModel.ZeroToInfScalar(0.2), NLLSModel.ZeroToOneScalar(0.9), 1)
     err = try ContaminatedGaussian(2.0, 5.0, 0.9, 2); nothing catch e e end
     @test occursin("static(2)", err.msg)
     # Arguments are promoted to one float type

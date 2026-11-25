@@ -67,14 +67,14 @@ end
         return (blockindices[vinds] != 0) ? 1 : 0
     else
         flags = 0 # An Int (not a StaticInt): the value is only known at run time
-        @unroll for i in 1:MAX_ARGS
+        @unroll for i in 1:MAX_ARGS # COV_EXCL_LINE
             if i <= length(vinds)
                 b = @inbounds blockindices[vinds[i]]
                 if b != 0
                     flags |= 1 << (i - 1)
                 end
             end
-        end
+        end # COV_EXCL_LINE
         return flags
     end
 end
@@ -831,7 +831,7 @@ function jacobian_eval!(evalone::F, costvecs, layout, status, task_results, N_ch
             evalone_, costvecs_, start_idx_, task_results_ = fromthreadargs(args)
             local_cost, local_clamped, local_err, local_val = eval_costvecs(evalone_, costvecs_, start_idx_, N_chunks, taskid, 1)
             task_results_[taskid] = TaskResult(local_cost, local_clamped, local_err, local_val)
-        end
+        end # COV_EXCL_LINE
     end
     for t in 1:N_chunks
         if task_results[t].err_code != 0

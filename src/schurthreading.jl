@@ -148,7 +148,7 @@ function schur_threaded!(linsystem::LinearSystemShared{F, V, N}, plan, H::SchurB
         @batch for t in 1:N
             args_ = fromthreadargs(targs)
             args_.linsystem.costs[t] = schur_thread_task!(args_, t)
-        end
+        end # COV_EXCL_LINE
     end
 
     # Only R and the gradient were written by more than one thread

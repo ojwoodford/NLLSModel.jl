@@ -196,6 +196,9 @@ end
     syncvars!(nlp, [7.0])
     @test prob.variables[1] == SVector(10.0)
     @test prob.variables[2] == SVector(7.0)
+    # The form with the model first, as for the other functors
+    @test syncvars!(prob, nlp, [6.0]) === prob && prob.variables[2] == SVector(6.0)
+    syncvars!(nlp, [7.0])
     @test isapprox(cost(prob.variables, prob.costs), 0.0, atol=1e-20)
 end
 
