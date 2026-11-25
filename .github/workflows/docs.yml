@@ -37,6 +37,6 @@ jobs:
           Pkg.instantiate()
       - name: Build and deploy documentation
         shell: julia --project=docs --color=yes {0}
-        run: include("docs/make.jl")
+        run: include(joinpath(pwd(), "docs", "make.jl")) # include is relative to this step's script in _temp, not the checkout
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
