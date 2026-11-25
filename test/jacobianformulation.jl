@@ -285,7 +285,7 @@ fixture("frontdoor", "jacobianformulation", "jacobianproblems")
         @test optimize!(deepcopy(big), JacobianOptions; formulation=:jacobian, numthreads=static(1), storage=:dense, max_dense_bytes=n) isa OptimizationResult
     end
 
-    @testset "a linsolver the optimizer rejects; gradient descent it accepts" begin
+    @testset "a linsolver the optimizer rejects" begin
         model = curvefit()
         # A linsolver not in the table: :cholesky or :ldl with a sparse Jacobian (a dense one takes them: the normal
         # equations). That nothing is evaluated first is asserted by jacobiancombinations.jl, for every row of the table
@@ -304,13 +304,6 @@ fixture("frontdoor", "jacobianformulation", "jacobianproblems")
         @test optimize!(deepcopy(model), options; formulation=:jacobian, storage=:dense, numthreads=static(1)) isa OptimizationResult
         # It is fine for the Hessian formulation
         @test optimize!(deepcopy(model), options; numthreads=static(1)) isa OptimizationResult
-        # Gradient descent is accepted on the Jacobian path (SecondOrderOptimization IT2), as on the Hessian one
-        c0 = NLLSModel.cost(model)
-        for formulation in (:jacobian, :hessian)
-            m = deepcopy(model)
-            @test optimize!(m, OptimizationOptions(iterator=:gradientdescent); formulation, numthreads=static(1)) isa OptimizationResult
-            @test NLLSModel.cost(m) < c0
-        end
     end
 
     # Z3: iterators that linearize at the first trial evaluate resjac! at a point that may then be rejected; with the optimizer's

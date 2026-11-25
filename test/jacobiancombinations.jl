@@ -34,14 +34,7 @@ fixture("jacobiancombinations")
                 @test outcome isa Tuple
                 outcome isa Tuple || continue
                 c, result = outcome
-                if iterator === :gradientdescent
-                    # Gradient descent does not reach the minimum in 200 iterations (on either formulation it stalls about
-                    # 3.5e-5 above it after some 17 000), so its cost is not compared with the Hessian path's: it must
-                    # reduce the cost as the other iterators do
-                    @test c < 0.1 * c0
-                else
-                    @test c ≈ cn rtol=(linsolver === :lsmr ? 1e-6 : 1e-8)
-                end
+                @test c ≈ cn rtol=(linsolver === :lsmr ? 1e-6 : 1e-8)
                 @test c ≈ result.bestcost rtol=1e-12
             else
                 @test outcome isa ArgumentError
