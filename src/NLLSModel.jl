@@ -20,7 +20,7 @@ using Static, StaticArrays, SparseArrays, LinearAlgebra
 import BlockLinearSystems:
     SparseBlockLinearSystem, DenseBlockLinearSystem, TransposedPattern,
     block, zero!, copy_structure,
-    symmetrifyfull, symmetrifyfull!, sparse_with_map, copyto!,
+    symmetrifyfull, symmetrifyfull!, sparse_with_map,
     block_sparse_nnz, computestartindices,
     SchurStructure, SchurBlockHessian, build_schur_pattern,
     threadargs, fromthreadargs

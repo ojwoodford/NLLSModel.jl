@@ -70,7 +70,6 @@ struct UniVariateLSstatic_x{N}
     end
 end
 
-const UniVariateLSsingle = Union{LinearSystem{UniVariateLSdynamic_x, <:UniVariateLSdynamic_ls}, LinearSystem{UniVariateLSstatic_x{N}, <:UniVariateLSstatic_ls{N}} where N}
 const UniVariateLSdynamic = Union{LinearSystem{UniVariateLSdynamic_x, <:UniVariateLSdynamic_ls}, LinearSystemShared{UniVariateLSdynamic_x, V, M} where {V <: UniVariateLSdynamic_ls, M}}
 const UniVariateLSstatic = Union{LinearSystem{UniVariateLSstatic_x{N}, <:UniVariateLSstatic_ls{N}} where N, LinearSystemShared{UniVariateLSstatic_x{N}, V, M} where {N, V <: UniVariateLSstatic_ls{N}, M}}
 const UniVariateLS = Union{UniVariateLSdynamic, UniVariateLSstatic}
