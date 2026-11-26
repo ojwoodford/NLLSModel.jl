@@ -167,11 +167,13 @@ fixture("frontdoor", "jacobianformulation", "jacobianproblems")
     end
 
     @testset "keywords: reduction" begin
-        # One variable: never partitioned, on either path, whatever the reduction (NTP2)
+        # One variable: never partitioned, on either path (NTP2); :eliminate is an ArgumentError there (A2)
         model = curvefit()
-        for reduction in (:auto, :none, :eliminate)
+        for reduction in (:auto, :none)
             @test optimize!(deepcopy(model), JacobianOptions; formulation=:jacobian, reduction, numthreads=static(1)) isa OptimizationResult
         end
+        err = try optimize!(deepcopy(model), JacobianOptions; formulation=:jacobian, reduction=:eliminate, numthreads=static(1)); nothing catch e e end
+        @test err isa ArgumentError && startswith(err.msg, "formulation = :jacobian:") && occursin("more than one unfixed variable", err.msg)
         # Several variables, none eliminable: :eliminate is the partition's error, from optimvars_nls, prefixed by the front door
         err = try optimize!(posemodel(), JacobianOptions; formulation=:jacobian, reduction=:eliminate); nothing catch e e end
         @test err isa ArgumentError

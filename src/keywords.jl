@@ -17,6 +17,11 @@ function check_plain_reduction(reduction::Symbol, name)
     reduction === :eliminate && throw(ArgumentError("$name hands a plain Jacobian to external solvers, which cannot eliminate variables: reduction = :eliminate is not supported; use :auto or :none (neither eliminates here)."))
     return :none
 end
+# A single unfixed variable is never eliminated: `:eliminate` is refused for it up front, on both paths (rules.md 3)
+function check_single_reduction(reduction::Symbol)
+    reduction === :eliminate && throw(ArgumentError("reduction = :eliminate needs more than one unfixed variable; use :auto or :none."))
+    return nothing
+end
 function check_storage(storage::Symbol)
     storage in STORAGE_VALUES || throw(ArgumentError("Unknown storage $(repr(storage)); expected :auto, :dense or :sparse."))
     return storage
@@ -74,7 +79,7 @@ The same for [`optimvars`](@ref), [`optimvars_nls`](@ref), [`flat_optimvars_nls`
   `ArgumentError`; `:none` never eliminates. The rule is the same on the Jacobian path (the residual and Jacobian, where the
   eliminated variables are eliminated by QR), which also needs every eliminated variable to be in a cost. The wrappers
   that hand a plain Jacobian to external solvers (`flat_optimvars_nls`, `NLLSNLSModel`) never eliminate: there `:auto`
-  does not eliminate and `:eliminate` is an `ArgumentError`. A single unfixed variable is never eliminated.
+  does not eliminate and `:eliminate` is an `ArgumentError`. A single unfixed variable is never eliminated under `:auto`, and `:eliminate` is an `ArgumentError` there.
 - `storage = :auto`: storage of the matrix the solver receives: the Hessian, the reduced system under elimination (on
   either path), or the Jacobian. `:auto` chooses from the structure (the sparsity of the Hessian, the predicted fill of the reduced
   system's Cholesky factor, or the fill of the Jacobian); `:dense` and `:sparse` force the choice. On the Jacobian path the

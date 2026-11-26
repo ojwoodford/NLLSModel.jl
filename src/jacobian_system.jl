@@ -103,7 +103,7 @@ end
 # in a cost (QR cannot eliminate a block of the Jacobian with no rows). A single unfixed variable is never partitioned,
 # as on the Hessian path.
 function jacobian_schur_partition(problem::Model, unfixed, reduction::Symbol)
-    unfixed isa Integer && return nothing
+    (unfixed isa Integer || count(unfixed) == 1) && (check_single_reduction(reduction); return nothing)
     partition = schur_partition(problem, unfixed, reduction)
     isnothing(partition) && return nothing
     incost = falses(length(problem.variables))

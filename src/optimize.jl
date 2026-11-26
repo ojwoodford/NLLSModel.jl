@@ -244,6 +244,7 @@ usesstaticsystem(x0) = isstaticsize(nvars(x0))
 isstaticsize(n) = dynamic(is_static(n)) && n <= MAX_STATIC_SYSTEM
 
 function optimvars_dispatch(problem::Model, unfixed::Integer, numthreads::StaticInt, reduction::Symbol, storage::Symbol, max_dense_bytes::Int, min_work::Integer, min_work_cost::Integer, ::Type{T}=Float64) where T
+    check_single_reduction(reduction)
     # One variable's system is always dense (or static)
     storage === :sparse && throw(ArgumentError("storage = :sparse is not available for a single unfixed variable: its Hessian is always dense; use :auto or :dense."))
     x0 = problem.variables[unfixed]
