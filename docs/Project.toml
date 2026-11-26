@@ -9,5 +9,4 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 SIRBSDispatch = "c8e4d12a-5f3b-4a9c-8d2e-1f6b3a7c9e04"
 
 [sources]
-DampedLinearSolve = {url = "https://github.com/ojwoodford/DampedLinearSolve.jl", rev = "main"}
 NLLSModel = {path = ".."}
