@@ -38,6 +38,9 @@ using DampedLinearSolve: DampedLinearSolve, makehessiansystem, dampen!, solve!, 
 export Model, NLPLSModel, NLLSNLSModel
 export addvariable!, addcost!, subproblem, subproblem!
 export cost, optimvars, optimvars_nls, flat_optimvars_nls, syncvars!
+
+# Solving a model (methods defined by the SecondOrderOptimization extension)
+export ModelWorkspace
 export islinear
 
 # Choosing how to solve a model
@@ -114,6 +117,7 @@ include("schurthreading.jl")
 include("keywords.jl")
 include("flatvars.jl")
 include("optimize.jl")
+include("modelworkspace.jl")
 include("jacobian_system.jl")
 include("recommender.jl")
 include("docstrings.jl")

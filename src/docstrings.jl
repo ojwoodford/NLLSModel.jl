@@ -661,3 +661,40 @@ used. Its fields are internal, and it cannot be changed: to change a choice, set
 `optimize!(model, options; ...)`, starting from the call it prints.
 """
 OptimizationRecommendation
+
+"""
+    ModelWorkspace()
+    ModelWorkspace(model::Model, options = OptimizationOptions(); formulation=:hessian, unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work, min_work_cost=$MIN_WORK_PER_THREAD_COST, precision=Float64)
+
+A workspace for repeated solves of a model: pass it as `optimize!(model, options; workspace)`. It holds the model's setup
+(what [`optimvars`](@ref) or [`optimvars_nls`](@ref) builds: the linear system's layout, its storage and the functors)
+and the optimizer's `OptimizationWorkspace` (its linear system, factorization and iterator state), so a repeated call
+builds neither. Both constructors are defined when `SecondOrderOptimization` is loaded.
+
+A call reuses the setup when it is for the same `Model` object, with the same variable vector, the same structure and the
+same keywords (`formulation`, `unfixed`, `numthreads`, `reduction`, `storage`, `max_dense_bytes`, `min_work`,
+`min_work_cost` and `precision`); otherwise it builds a new setup and keeps that. The structure is the number, types and
+sizes of the variables and, for each cost, its variables and its number of residuals; it is hashed at each call, which
+costs one pass over the variables and the costs. Values are not part of it: a call starts from the variables' values at
+the time of the call, and the costs' data are read when they are evaluated. The optimizer's workspace follows its own
+rule, that of `OptimizationWorkspace`.
+
+`ModelWorkspace()` is empty and adapts to any call. The second form builds the setup and the optimizer's workspace for
+`model`, `options` and the keywords (the keywords of `optimize!(model, options; ...)` that decide the
+setup, with the same defaults); it is typed for them, so that a repeated call with the same arguments is type-stable and,
+after the first, allocates nothing. A call it cannot hold (another kind of `unfixed`, another formulation) empties it,
+with a one-time warning, and builds its setup every time. `empty!` empties a workspace, and `isempty` tells whether it
+holds a setup.
+
+`optimize(model, ...)`, which solves a copy of the model, never reuses the setup, since each copy is another `Model`.
+
+# Example
+```julia
+workspace = ModelWorkspace(model, options; unfixed = 2)
+for t in 1:10
+    # ... change the values of the variables or the costs' data ...
+    optimize!(model, options; unfixed = 2, workspace)
+end
+```
+"""
+ModelWorkspace

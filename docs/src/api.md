@@ -32,6 +32,13 @@ With `using SecondOrderOptimization`, a package extension adds methods to its fu
 The keywords after `workspace` are the set every entry point takes, described under [`optimvars`](@ref) and in
 [Linear Solvers & Sparsity](@ref). For custom outer loops use [`optimvars`](@ref) and `HessianObjective` directly.
 
+`workspace` is `nothing`, a SecondOrderOptimization `OptimizationWorkspace` (the optimizer's state is reused, the model's
+setup is built for each call) or a [`ModelWorkspace`](@ref) (both are reused):
+
+```@docs
+ModelWorkspace
+```
+
 ## Choosing How to Solve
 
 See [Choosing a Configuration Automatically](@ref).

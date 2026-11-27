@@ -29,11 +29,11 @@ const TEST_GROUPS = (
         "adaptivecost.jl", "robustfit.jl", "gramkernels.jl", "problemapi.jl", "runtimeblocks.jl", "bigvariable.jl", "optimizeba.jl",
         "optimization.jl", "frontdoor.jl", "jacobiankernels.jl", "jacobianformulation.jl", "jacobiancontract.jl", "jacobianiterators.jl",
         "jacobianalloc.jl", "jacobianelimination.jl", "eliminablesizes.jl", "jacobiancombinations.jl", "NLPModel.jl", "nls_interface.jl",
-        "keywords.jl", "recommender.jl", "precision.jl", "staticfold.jl"],
+        "keywords.jl", "recommender.jl", "precision.jl", "staticfold.jl", "modelworkspace.jl"],
     threaded = ["multithreading.jl", "gramkernels_threaded.jl", "runtimeblocks_threaded.jl", "optimization_threaded.jl",
         "frontdoor_threaded.jl", "jacobianformulation_threaded.jl", "manyvariables.jl", "jacobianalloc_threaded.jl",
         "jacobianelimination_threaded.jl", "eliminablesizes_threaded.jl", "nls_interface_threaded.jl", "keywords_threaded.jl",
-        "precision_threaded.jl", "staticfold_threaded.jl"],
+        "precision_threaded.jl", "staticfold_threaded.jl", "modelworkspace_threaded.jl"],
     integration = ["nls_integration.jl"],
 )
 const SELECTED_GROUPS = isempty(ARGS) ? collect(keys(TEST_GROUPS)) : Symbol.(ARGS)
