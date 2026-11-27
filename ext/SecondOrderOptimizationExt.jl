@@ -4,6 +4,8 @@ using NLLSModel
 using SecondOrderOptimization
 using OptimizationVariableInterface
 using Static
+using StaticArrays: SVector
+using PrecompileTools: @setup_workload, @compile_workload
 import NLLSModel: MIN_WORK_PER_THREAD_HESSIAN, MIN_WORK_PER_THREAD_COST, MIN_WORK_PER_THREAD_JACOBIAN, MAX_DENSE_BYTES, KEYWORDS_DOC, JACOBIAN_FORMULATION_DOC,
     OptimizationRecommendation
 
@@ -151,5 +153,8 @@ function SecondOrderOptimization.optimize(model::Model, rec::OptimizationRecomme
     result = SecondOrderOptimization.optimize!(copied, rec; kwargs...)
     return copied, result
 end
+
+# The precompile workload, last (improvements.md item 3)
+include("SecondOrderOptimizationExtPrecompile.jl")
 
 end
