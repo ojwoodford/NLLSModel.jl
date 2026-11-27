@@ -20,7 +20,7 @@ using Static, StaticArrays, SparseArrays, LinearAlgebra
 import BlockLinearSystems:
     SparseBlockLinearSystem, DenseBlockLinearSystem, TransposedPattern,
     block, zero!, copy_structure,
-    symmetrifyfull, symmetrifyfull!, sparse_with_map, copyto!,
+    symmetrifyfull, symmetrifyfull!, sparse_with_map,
     block_sparse_nnz, computestartindices,
     SchurStructure, SchurBlockHessian, build_schur_pattern,
     threadargs, fromthreadargs
@@ -38,6 +38,9 @@ using DampedLinearSolve: DampedLinearSolve, makehessiansystem, dampen!, solve!, 
 export Model, NLPLSModel, NLLSNLSModel
 export addvariable!, addcost!, subproblem, subproblem!
 export cost, optimvars, optimvars_nls, flat_optimvars_nls, syncvars!
+
+# Solving a model (methods defined by the SecondOrderOptimization extension)
+export ModelWorkspace, optimizesingles!
 export islinear
 
 # Choosing how to solve a model
@@ -114,6 +117,7 @@ include("schurthreading.jl")
 include("keywords.jl")
 include("flatvars.jl")
 include("optimize.jl")
+include("modelworkspace.jl")
 include("jacobian_system.jl")
 include("recommender.jl")
 include("docstrings.jl")

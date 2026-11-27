@@ -661,3 +661,68 @@ used. Its fields are internal, and it cannot be changed: to change a choice, set
 `optimize!(model, options; ...)`, starting from the call it prints.
 """
 OptimizationRecommendation
+
+"""
+    ModelWorkspace()
+    ModelWorkspace(model::Model, options = OptimizationOptions(); formulation=:hessian, unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work, min_work_cost=$MIN_WORK_PER_THREAD_COST, precision=Float64)
+
+A workspace for repeated solves of a model: pass it as `optimize!(model, options; workspace)`. It holds the model's setup
+(what [`optimvars`](@ref) or [`optimvars_nls`](@ref) builds: the linear system's layout, its storage and the functors)
+and the optimizer's `OptimizationWorkspace` (its linear system, factorization and iterator state), so a repeated call
+builds neither. Both constructors are defined when `SecondOrderOptimization` is loaded.
+
+A call reuses the setup when it is for the same `Model` object, with the same variable vector, the same structure and the
+same keywords (`formulation`, `unfixed`, `numthreads`, `reduction`, `storage`, `max_dense_bytes`, `min_work`,
+`min_work_cost` and `precision`); otherwise it builds a new setup and keeps that. The structure is the number, types and
+sizes of the variables and, for each cost, its variables and its number of residuals; it is hashed at each call, which
+costs one pass over the variables and the costs. Values are not part of it: a call starts from the variables' values at
+the time of the call, and the costs' data are read when they are evaluated. The optimizer's workspace follows its own
+rule, that of `OptimizationWorkspace`.
+
+`ModelWorkspace()` is empty and adapts to any call. The second form builds the setup and the optimizer's workspace for
+`model`, `options` and the keywords (the keywords of `optimize!(model, options; ...)` that decide the
+setup, with the same defaults); it is typed for them, so that a repeated call with the same arguments is type-stable and,
+after the first, allocates nothing. A call it cannot hold (another kind of `unfixed`, another formulation) empties it,
+with a one-time warning, and builds its setup every time. `empty!` empties a workspace, and `isempty` tells whether it
+holds a setup.
+
+`optimize(model, ...)`, which solves a copy of the model, never reuses the setup, since each copy is another `Model`.
+
+# Example
+```julia
+workspace = ModelWorkspace(model, options; unfixed = 2)
+for t in 1:10
+    # ... change the values of the variables or the costs' data ...
+    optimize!(model, options; unfixed = 2, workspace)
+end
+```
+"""
+ModelWorkspace
+
+"""
+    optimizesingles!(model::Model, options, variables; precision=Float64, max_dense_bytes=$MAX_DENSE_BYTES) -> OptimizationResult
+
+Optimize each of `variables` on its own, the other variables fixed, and write each solution into `model.variables`: one
+step of an alternation, such as every landmark of a bundle adjustment with the cameras held. `variables` is a type (every
+variable that `isa` it) or a vector of variable indices. Defined when `SecondOrderOptimization` is loaded; `options` is an
+`OptimizationOptions`.
+
+Each variable is solved on its own costs, as `optimize!(sub, options; unfixed = i, numthreads = 1)` solves it on a
+[`subproblem!`](@ref) `sub` that holds them, and in this order: by size, then by type (in the order in which the types
+first appear in `variables`), and otherwise in the order given. The order matters only when two of the variables share a
+cost: each is solved with those before it at their new values. The variables of one type and size share one linear system
+and one optimizer workspace, so after the first of them a variable costs no allocation; this is what makes it faster than
+that loop.
+
+It returns the sum (`+`) of the variables' results: the costs, counts and times summed, the termination flags or-ed. With
+no variable to optimize, every number in the result is zero. It runs on one thread. `precision` and `max_dense_bytes` are
+as for [`optimvars`](@ref); a variable's system is static or dense, never sparse or eliminated. An index out of range, or
+given twice, is an `ArgumentError`.
+
+# Example
+```julia
+optimizesingles!(model, OptimizationOptions(), SVector{3, Float64})   # every landmark, the cameras held
+optimizesingles!(model, OptimizationOptions(), [1, 2, 3])             # the first three variables
+```
+"""
+optimizesingles!

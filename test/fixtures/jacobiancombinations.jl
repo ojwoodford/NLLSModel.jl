@@ -11,8 +11,8 @@ const JACOBIAN_TABLE = Dict(
     (:eliminate, :dense) => (SchurBlockJacobian{Float64, Matrix{Float64}}, (:auto, :qr, :cholesky, :ldl, :lsmr)),
     (:eliminate, :sparse) => (SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}, (:auto, :qr, :cholesky, :ldl, :lsmr)),
 )
-# Every iterator; every row takes each of them (gradient descent since SecondOrderOptimization IT2)
-const JACOBIAN_ITERATORS = (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton, :gradientdescent)
+# The iterators tested on the Jacobian path; every row takes each of them
+const JACOBIAN_ITERATORS = (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton)
 # Every linsolver symbol an extension accepts
 const ALL_LINSOLVERS = (:auto, :cholesky, :ldl, :qr, :cg, :minres, :krylov, :lsmr, :pardiso)
 

@@ -87,8 +87,10 @@ fixture("allocations", "frontdoor", "jacobianelimination")
         @test err isa ArgumentError && occursin("in none", err.msg)
         # Front door: :eliminate is not rejected
         @test optimize!(deepcopy(ba), ElimOptions; formulation=:jacobian, reduction=:eliminate, numthreads=static(1)) isa OptimizationResult
-        # A single unfixed variable is never partitioned, as on the Hessian path
-        @test optimvars_nls(ba; unfixed=1, numthreads=static(1), reduction=:eliminate)[5] isa Matrix{Float64}
+        # A single unfixed variable is never partitioned, as on the Hessian path: :eliminate is an ArgumentError (A2)
+        @test optimvars_nls(ba; unfixed=1, numthreads=static(1), reduction=:auto)[5] isa Matrix{Float64}
+        err = try optimvars_nls(ba; unfixed=1, numthreads=static(1), reduction=:eliminate); nothing catch e e end
+        @test err isa ArgumentError && occursin("more than one unfixed variable", err.msg)
         # A dense reduced system above the cap: an ArgumentError naming it (4 cameras of 6: 24×24, 4608 bytes)
         err = try optimvars_nls(ba; numthreads=static(1), reduction=:eliminate, storage=:dense, max_dense_bytes=4607); nothing catch e e end
         @test err isa ArgumentError && occursin("24×24 reduced system", err.msg)

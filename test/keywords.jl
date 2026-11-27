@@ -77,6 +77,37 @@ fixture("keywords", "jacobianformulation")
         @test_throws ArgumentError NLLSNLSModel(model; storage=:dense, max_dense_bytes=6399)
     end
 
+    # A2: :eliminate with a single unfixed variable is an ArgumentError on both paths, before any work; :auto and :none
+    # are unchanged (they never eliminate one variable)
+    @testset "reduction = :eliminate with a single unfixed variable" begin
+        single = spymodel(50)
+        entries = (("optimvars", (m; kw...) -> optimvars(m; kw...)),
+                   ("optimvars_nls", (m; kw...) -> optimvars_nls(m; kw...)),
+                   ("optimize!, Hessian", (m; kw...) -> optimize!(deepcopy(m), KW_OPTIONS; kw...)),
+                   ("optimize!, Jacobian", (m; kw...) -> optimize!(deepcopy(m), KW_OPTIONS; formulation=:jacobian, kw...)))
+        @testset "$what, $name" for (what, m, unf) in (("one variable", single, nothing), ("unfixed index", model, 1),
+                                                      ("unfixed mask", model, [true, false])), (name, entry) in entries
+            err = try entry(m; unfixed=unf, reduction=:eliminate); nothing catch e e end
+            @test err isa ArgumentError && occursin("more than one unfixed variable", err.msg)
+            if name == "optimvars"
+                f_a, _, x_a, H_a = optimvars(m; unfixed=unf, reduction=:auto)
+                f_n, _, x_n, H_n = optimvars(m; unfixed=unf, reduction=:none)
+                @test x_a == x_n && typeof(H_a) == typeof(H_n) && f_a(x_a) == f_n(x_n)
+            elseif name == "optimvars_nls"
+                nr = m === single ? 50 : 400; r_a, r_n = zeros(nr), zeros(nr)
+                _, res_a!, _, x_a, J_a = optimvars_nls(m; unfixed=unf, reduction=:auto)
+                _, res_n!, _, x_n, J_n = optimvars_nls(m; unfixed=unf, reduction=:none)
+                @test typeof(J_a) == typeof(J_n) && res_a!(r_a, x_a) == res_n!(r_n, x_n) && r_a == r_n
+            else
+                ma, mn = deepcopy(m), deepcopy(m)
+                kw = name == "optimize!, Jacobian" ? (; formulation=:jacobian) : (;)
+                optimize!(ma, KW_OPTIONS; unfixed=unf, reduction=:auto, kw...)
+                optimize!(mn, KW_OPTIONS; unfixed=unf, reduction=:none, kw...)
+                @test ma.variables == mn.variables
+            end
+        end
+    end
+
     @testset "NLPLSModel works on the full system" begin
         @test_throws ArgumentError NLPLSModel(model; reduction=:eliminate)
         @test NLPLSModel(model; reduction=:auto).fdf! isa NLLSModel.MultiVarDenseFDF

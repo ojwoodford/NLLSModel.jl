@@ -4,6 +4,8 @@ using NLLSModel
 using SecondOrderOptimization
 using OptimizationVariableInterface
 using Static
+using StaticArrays: SVector
+using PrecompileTools: @setup_workload, @compile_workload
 import NLLSModel: MIN_WORK_PER_THREAD_HESSIAN, MIN_WORK_PER_THREAD_COST, MIN_WORK_PER_THREAD_JACOBIAN, MAX_DENSE_BYTES, KEYWORDS_DOC, JACOBIAN_FORMULATION_DOC,
     OptimizationRecommendation
 
@@ -16,29 +18,101 @@ struct JacobianResJac{RJ}
 end
 (w::JacobianResJac)(r, J, x) = w.resjac!(r, J, x; prezeroed=true)
 
+# What a solve of a model is built from: the objective, the cost functor (which knows the unfixed variables), the start
+# point and the functor that writes a solution back. A `ModelWorkspace` keeps one between calls.
+struct ModelSetup{O, F, X, S}
+    obj::O
+    f::F
+    x0::X
+    sync::S
+end
+
+# The Hessian formulation: `optimvars`, wrapped in a `HessianObjective`
+function hessiansetup(model::Model, keywords::NamedTuple)
+    f, fdf!, x0, H = optimvars(model; keywords...)
+    return ModelSetup(HessianObjective(f, fdf!; H), f, x0, fdf!)
+end
+
 # The Jacobian formulation: the residual vector and the Jacobian, solved by the optimizer from the Jacobian prototype that
 # `optimvars_nls` returns (its type decides the linear system; the optimizer validates it against `linsolver`). A dense
 # Jacobian forced above `max_dense_bytes` is refused by `optimvars_nls` before it is allocated.
-function optimize_jacobian!(model::Model, options; unfixed, numthreads, callback, workspace, reduction, storage, max_dense_bytes, min_work, min_work_cost, precision)
+function jacobiansetup(model::Model, keywords::NamedTuple)
     f, _, resjac!, x0, J = try
-        optimvars_nls(model; unfixed, numthreads, reduction, storage, max_dense_bytes, min_work, min_work_cost, precision)
+        optimvars_nls(model; keywords...)
     catch err
         err isa ArgumentError ? throw(ArgumentError("formulation = :jacobian: " * err.msg)) : rethrow()
     end
-    obj = JacobianObjective(f, JacobianResJac(resjac!), J)
-    if ismutablevar(x0)
-        result = SecondOrderOptimization.optimize!(x0, obj, options; callback, workspace)
-        syncvars!(model, resjac!, x0)
-    else
-        x, result = SecondOrderOptimization.optimize(x0, obj, options; callback, workspace)
-        syncvars!(model, resjac!, x)
-    end
-    return result
+    return ModelSetup(JacobianObjective(f, JacobianResJac(resjac!), J), f, x0, resjac!)
 end
 
-# Solves the model on the Hessian path (`HessianObjective`). A single variable of static size is immutable, so it goes
-# through `optimize` (which returns the solution); everything else is updated in place by `optimize!`. Either way the
-# solution is written back with `syncvars!`, which knows the block order and the Schur partition.
+# The start point of a stored setup, read from the model's variables as they are now: a single variable is the model's
+# own; several are copied into the setup's vector, unless it is the model's variable vector itself
+startpoint!(x0, f::NLLSModel.SingleVarCostFunc, model::Model) = @inbounds model.variables[f.unfixed]::typeof(x0)
+function startpoint!(x0, f::NLLSModel.MultiVarCostFunc, model::Model)
+    inds = f.unfixed_inds
+    isnothing(inds) && return x0
+    @inbounds for k in eachindex(inds)
+        x0[k] = model.variables[inds[k]]
+    end
+    return x0
+end
+
+# Solves from a setup and writes the solution back with `syncvars!`, which knows the block order and the Schur partition.
+# A single variable of static size is immutable, so it goes through `optimize` (which returns the solution); everything
+# else is updated in place by `optimize!`. `callback` is a type parameter here and in the callers below, so that these
+# methods are specialized on it (a function passed through is otherwise not), and a cached call dispatches nothing.
+function runsetup!(model::Model, s::ModelSetup, x0, options, callback::CB, workspace) where CB
+    if ismutablevar(x0)
+        result = SecondOrderOptimization.optimize!(x0, s.obj, options; callback, workspace)
+        syncvars!(model, s.sync, x0)
+    else
+        x, result = SecondOrderOptimization.optimize(x0, s.obj, options; callback, workspace)
+        syncvars!(model, s.sync, x)
+    end
+    return result::OptimizationResult
+end
+runsetup!(model::Model, s::ModelSetup, options, callback::CB, workspace) where CB = runsetup!(model, s, s.x0, options, callback, workspace)
+
+function checkkeywords(formulation::Symbol, reduction::Symbol, storage::Symbol, precision::Type)
+    formulation in (:hessian, :jacobian) || throw(ArgumentError("Unknown formulation $(repr(formulation)); expected :hessian or :jacobian."))
+    NLLSModel.check_reduction(reduction)
+    NLLSModel.check_storage(storage)
+    NLLSModel.check_precision(precision)
+    return nothing
+end
+
+# The keywords a setup is keyed on, with the numbers as Ints (a StaticInt and an Int of the same value are one key)
+keykeywords(formulation::Symbol, k::NamedTuple) = (; formulation, k.unfixed, numthreads = Int(dynamic(k.numthreads)), k.reduction,
+    k.storage, max_dense_bytes = Int(k.max_dense_bytes), min_work = Int(k.min_work), min_work_cost = Int(k.min_work_cost), k.precision)
+
+newsetup(model::Model, formulation::Symbol, keywords::NamedTuple) =
+    formulation === :jacobian ? jacobiansetup(model, keywords) : hessiansetup(model, keywords)
+
+# A solve with a ModelWorkspace: the stored setup when its key matches, otherwise a new one, stored in the workspace
+function optimize_cached!(model::Model, options, formulation::Symbol, keywords::NamedTuple, callback::CB, ws::ModelWorkspace) where CB
+    if NLLSModel.keymatches(ws.key, model, keykeywords(formulation, keywords))
+        s = something(ws.setup)
+        return runsetup!(model, s, startpoint!(s.x0, s.f, model), options, callback, ws.optimizer)
+    end
+    return optimize_newsetup!(model, options, formulation, keywords, callback, ws)
+end
+@noinline function optimize_newsetup!(model::Model, options, formulation::Symbol, keywords::NamedTuple, callback::CB, ws::ModelWorkspace) where CB
+    s = newsetup(model, formulation, keywords)
+    storesetup!(ws, NLLSModel.setupkey(model, keykeywords(formulation, keywords)), s)
+    return runsetup!(model, s, options, callback, ws.optimizer)
+end
+
+function storesetup!(ws::ModelWorkspace{K, S}, key, setup) where {K, S}
+    if key isa K && setup isa S
+        ws.key = key
+        ws.setup = setup
+    else
+        @warn "ModelWorkspace{$K, $S} can't hold the setup for this call, so it was emptied and every call with it builds the setup. Use `ModelWorkspace()` for a workspace that adapts to any call." maxlog=1
+        empty!(ws)
+    end
+    return ws
+end
+
 """
     optimize!(model::Model, options = OptimizationOptions(); formulation=:hessian, callback=nullcallback, workspace=nothing, unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction=:auto, storage=:auto, max_dense_bytes=$MAX_DENSE_BYTES, min_work, min_work_cost=$MIN_WORK_PER_THREAD_COST, precision=Float64) -> OptimizationResult
 
@@ -66,8 +140,16 @@ $JACOBIAN_FORMULATION_DOC
 `formulation` is a keyword here only: it is not a field of `OptimizationOptions` and is not inferred from `options.linsolver`. Any
 other value is an `ArgumentError`. `precision = Float32` builds the linear system (on either path, and its elimination) in
 single precision, everything else in double; see the keywords below, and the "Single Precision" section of the
-linear-solvers tutorial for when it pays. `callback` and `workspace` are passed to the optimizer. The default of `min_work` is the
+linear-solvers tutorial for when it pays. `callback` is passed to the optimizer. The default of `min_work` is the
 formulation's ($MIN_WORK_PER_THREAD_HESSIAN for `:hessian`, $MIN_WORK_PER_THREAD_JACOBIAN for `:jacobian`).
+
+`workspace` is one of:
+
+- `nothing` (default): everything is built for this call.
+- an `OptimizationWorkspace`: passed to the optimizer, which reuses its own state (its linear system, factorization and
+  iterator state) when it fits. The model's setup (what `optimvars` or `optimvars_nls` builds) is built for each call.
+- a [`ModelWorkspace`](@ref): the model's setup is reused too, while the model's structure and the keywords are those it
+  was built for, so a repeated call with a typed one allocates nothing.
 
 $KEYWORDS_DOC"""
 function SecondOrderOptimization.optimize!(model::Model, options::OptimizationOptions=OptimizationOptions();
@@ -76,21 +158,28 @@ function SecondOrderOptimization.optimize!(model::Model, options::OptimizationOp
         max_dense_bytes::Integer=MAX_DENSE_BYTES,
         min_work::Integer=(formulation === :jacobian ? MIN_WORK_PER_THREAD_JACOBIAN : MIN_WORK_PER_THREAD_HESSIAN),
         min_work_cost::Integer=MIN_WORK_PER_THREAD_COST, precision::Type=Float64)
-    formulation in (:hessian, :jacobian) || throw(ArgumentError("Unknown formulation $(repr(formulation)); expected :hessian or :jacobian."))
-    NLLSModel.check_reduction(reduction)
-    NLLSModel.check_storage(storage)
-    NLLSModel.check_precision(precision)
-    formulation === :jacobian && return optimize_jacobian!(model, options; unfixed, numthreads, callback, workspace, reduction, storage, max_dense_bytes, min_work, min_work_cost, precision)
-    f, fdf!, x0, H = optimvars(model; unfixed, numthreads, reduction, storage, max_dense_bytes, min_work, min_work_cost, precision)
-    obj = HessianObjective(f, fdf!; H)
-    if ismutablevar(x0)
-        result = SecondOrderOptimization.optimize!(x0, obj, options; callback, workspace)
-        syncvars!(model, fdf!, x0)
-    else
-        x, result = SecondOrderOptimization.optimize(x0, obj, options; callback, workspace)
-        syncvars!(model, fdf!, x)
-    end
-    return result
+    checkkeywords(formulation, reduction, storage, precision)
+    keywords = (; unfixed, numthreads, reduction, storage, max_dense_bytes, min_work, min_work_cost, precision)
+    workspace isa ModelWorkspace && return optimize_cached!(model, options, formulation, keywords, callback, workspace)
+    formulation === :jacobian && return runsetup!(model, jacobiansetup(model, keywords), options, callback, workspace)
+    return runsetup!(model, hessiansetup(model, keywords), options, callback, workspace)
+end
+
+# The constructors of `ModelWorkspace` (its docstring is in NLLSModel): they need the optimizer's workspace
+NLLSModel.ModelWorkspace() = ModelWorkspace{Any, Any, OptimizationWorkspace{Any, Any}}(nothing, nothing, OptimizationWorkspace())
+
+function NLLSModel.ModelWorkspace(model::Model, options::OptimizationOptions=OptimizationOptions();
+        formulation::Symbol=:hessian, unfixed=nothing, numthreads=StaticInt(Threads.nthreads()), reduction::Symbol=:auto,
+        storage::Symbol=:auto, max_dense_bytes::Integer=MAX_DENSE_BYTES,
+        min_work::Integer=(formulation === :jacobian ? MIN_WORK_PER_THREAD_JACOBIAN : MIN_WORK_PER_THREAD_HESSIAN),
+        min_work_cost::Integer=MIN_WORK_PER_THREAD_COST, precision::Type=Float64)
+    checkkeywords(formulation, reduction, storage, precision)
+    keywords = (; unfixed, numthreads, reduction, storage, max_dense_bytes, min_work, min_work_cost, precision)
+    return typedworkspace(model, newsetup(model, formulation, keywords), options, NLLSModel.setupkey(model, keykeywords(formulation, keywords)))
+end
+function typedworkspace(model::Model, s::ModelSetup, options, key)
+    optimizer = OptimizationWorkspace(s.x0, s.obj, options)
+    return ModelWorkspace{typeof(key), typeof(s), typeof(optimizer)}(key, s, optimizer)
 end
 
 """
@@ -151,5 +240,56 @@ function SecondOrderOptimization.optimize(model::Model, rec::OptimizationRecomme
     result = SecondOrderOptimization.optimize!(copied, rec; kwargs...)
     return copied, result
 end
+
+# optimizesingles! (NLLSsolver D6): each named variable optimized on its own, the others fixed. The variables are taken in
+# runs of one type and size; a run's setup (its linear system and the optimizer's workspace) is built for its first
+# variable and retargeted to each of the others, so a run builds one system, whatever its length.
+function NLLSModel.optimizesingles!(model::Model{VT, CT}, options::OptimizationOptions, variables::Union{Type, AbstractVector{<:Integer}};
+        precision::Type=Float64, max_dense_bytes::Integer=MAX_DENSE_BYTES) where {VT, CT}
+    NLLSModel.check_precision(precision)
+    indices = NLLSModel.singlesindices(model, variables)
+    result = emptyresult(options)
+    isempty(indices) && return result
+    costsof = NLLSModel.costsbyvariable(model)
+    sub = Model{VT, CT}(model.variables) # Shares the variables with the model; the costs of one variable at a time
+    for run in NLLSModel.singlesruns(model, indices)
+        result = optimizerun!(sub, model, options, run, costsof, precision, Int(max_dense_bytes), result)
+    end
+    return result
+end
+
+# The identity of `+` on results: what a call that optimizes no variable returns
+emptyresult(options::OptimizationOptions) = OptimizationResult(0.0, 0.0, UInt64(0), UInt64(0), UInt64(0), UInt64(0), UInt64(0),
+    0, 0, 0, 0, 0, dynamic(options.iterator), 0, 0, 0, 0)
+
+# One run: the setup is built for the run's first variable, on its costs (selected again in the loop, so that the loop
+# holds for any run)
+function optimizerun!(sub::Model, model::Model, options, run, costsof, precision, max_dense_bytes, result)
+    first_ = first(run)
+    subproblem!(sub, model, NLLSModel.costsof(costsof, first_))
+    f, fdf!, x0, H = optimvars(sub; unfixed=first_, numthreads=StaticInt(1), max_dense_bytes, precision)
+    workspace = OptimizationWorkspace(x0, HessianObjective(f, fdf!; H), options)
+    return optimizerun!(sub, model, options, run, costsof, f, fdf!, x0, H, workspace, result)
+end
+function optimizerun!(sub::Model, model::Model, options, run, costsof, f, fdf!, x0::X, H, workspace, result) where X
+    for i in run
+        subproblem!(sub, model, NLLSModel.costsof(costsof, i))
+        fi, fdfi! = NLLSModel.retarget(f, sub, i), NLLSModel.retarget(fdf!, i)
+        obj = HessianObjective(fi, fdfi!; H)
+        xi = @inbounds(sub.variables[i])::X
+        if ismutablevar(xi)
+            r = SecondOrderOptimization.optimize!(xi, obj, options; workspace)
+            syncvars!(sub, fdfi!, xi)
+        else
+            x, r = SecondOrderOptimization.optimize(xi, obj, options; workspace)
+            syncvars!(sub, fdfi!, x)
+        end
+        result += r
+    end
+    return result
+end
+
+# The precompile workload, last (improvements.md item 3)
+include("SecondOrderOptimizationExtPrecompile.jl")
 
 end

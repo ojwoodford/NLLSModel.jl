@@ -103,6 +103,21 @@ Also:
 `formulation` is a keyword of `optimize!` and `optimize` only. It is not an `OptimizationOptions` field and is not inferred from
 `linsolver`; a caller of `optimvars` or `optimvars_nls` chooses by which one they call.
 
+## Repeated solves
+
+A model solved many times (in a loop that changes its data, or in alternation) can keep what each solve builds in a
+[`ModelWorkspace`](@ref): the model's setup (the linear system's layout, its storage and the functors) and the
+optimizer's state. Built for a model, options and keywords, it makes a repeated call with the same arguments
+allocation-free after the first; a change to the model's structure or to the keywords builds a new setup.
+
+```julia
+workspace = ModelWorkspace(problem, options; unfixed = 2)
+for t in 1:10
+    # ... change the values of the variables or the costs' data ...
+    optimize!(problem, options; unfixed = 2, workspace)
+end
+```
+
 ## Advanced Use: `optimvars`
 
 Use [`optimvars`](@ref) when you need the pieces yourself: a custom outer loop, a reused `OptimizationWorkspace`, the NLPModels

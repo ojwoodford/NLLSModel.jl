@@ -3,7 +3,7 @@ using Test
 # Every name in an `import M: a, b` or `using M: a, b` list of the package and of its extensions is referenced in the
 # module that imports it (rules.md 11: no unused imports). A reference is a bare use of the name outside import and
 # using statements; `M.a` does not count, since it needs no import. The package's `src/` files form one module; each
-# file in `ext/` is a module of its own.
+# extension in `ext/` is a module of its own, made of its file and the files that includes (`modulefiles`).
 module ImportCheck
 
 # Names listed after the colon of `import M: …` / `using M: …`
@@ -82,6 +82,31 @@ function moduleimports(file)
         end
     end
     return importlines(body), first_include
+end
+
+# The paths of the `include("…")` calls in `ex` (literal paths only), relative to `dir`
+function includes!(paths, ex, dir)
+    ex isa Expr || return paths
+    if ex.head === :call && length(ex.args) == 2 && ex.args[1] === :include && ex.args[2] isa AbstractString
+        push!(paths, normpath(joinpath(dir, ex.args[2])))
+    else
+        foreach(a -> includes!(paths, a, dir), ex.args)
+    end
+    return paths
+end
+
+# The files of the module that `file` defines: `file`, then every file it includes, directly or through another
+function modulefiles(file)
+    files = [normpath(file)]
+    i = 1
+    while i <= length(files)
+        f = files[i]
+        for inc in includes!(String[], Meta.parseall(read(f, String); filename=f), dirname(f))
+            inc in files || push!(files, inc)
+        end
+        i += 1
+    end
+    return files
 end
 
 end # module ImportCheck
