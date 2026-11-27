@@ -36,11 +36,14 @@ addcost!(problem, SimpleError2{CamType, PtType}(SVector(0.5, -0.2), cam1, pt1))
 
 Because individual 3D landmarks do not interact directly with each other, you can either:
 1. **Jointly optimize** all cameras and landmarks with `optimize!(problem, options)` (after `using SecondOrderOptimization`), which automatically uses `BlockSparseMatrix` and `LDLFactorizations.jl`, or eliminates the landmarks by a Schur complement when they are `iseliminable`.
-2. **Optimize landmarks (or cameras) individually** in alternation using [`optimvars`](@ref) for a single variable index (or `NLLSsolver.optimizesingles!`), which solves a tiny $3 \times 3$ static linear system per 3D point with zero heap allocations:
+2. **Optimize landmarks (or cameras) individually** in alternation with [`optimizesingles!`](@ref), which solves a tiny $3 \times 3$ static linear system per 3D point, one system shared by all the points, with no heap allocation per point. For one variable, `optimize!` with `unfixed` does the same.
 
 ```julia
 using SecondOrderOptimization
 options = OptimizationOptions(iterator = :levenbergmarquardt_dtd)
+
+# Optimize every 3D landmark on its own, the cameras held
+res_pts = optimizesingles!(problem, options, PtType)
 
 # Optimize a single 3D landmark (3x3 static system)
 res_pt = optimize!(problem, options; unfixed = pt1)

@@ -40,7 +40,7 @@ export addvariable!, addcost!, subproblem, subproblem!
 export cost, optimvars, optimvars_nls, flat_optimvars_nls, syncvars!
 
 # Solving a model (methods defined by the SecondOrderOptimization extension)
-export ModelWorkspace
+export ModelWorkspace, optimizesingles!
 export islinear
 
 # Choosing how to solve a model

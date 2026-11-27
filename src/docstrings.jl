@@ -698,3 +698,31 @@ end
 ```
 """
 ModelWorkspace
+
+"""
+    optimizesingles!(model::Model, options, variables; precision=Float64, max_dense_bytes=$MAX_DENSE_BYTES) -> OptimizationResult
+
+Optimize each of `variables` on its own, the other variables fixed, and write each solution into `model.variables`: one
+step of an alternation, such as every landmark of a bundle adjustment with the cameras held. `variables` is a type (every
+variable that `isa` it) or a vector of variable indices. Defined when `SecondOrderOptimization` is loaded; `options` is an
+`OptimizationOptions`.
+
+Each variable is solved on its own costs, as `optimize!(sub, options; unfixed = i, numthreads = 1)` solves it on a
+[`subproblem!`](@ref) `sub` that holds them, and in this order: by size, then by type (in the order in which the types
+first appear in `variables`), and otherwise in the order given. The order matters only when two of the variables share a
+cost: each is solved with those before it at their new values. The variables of one type and size share one linear system
+and one optimizer workspace, so after the first of them a variable costs no allocation; this is what makes it faster than
+that loop.
+
+It returns the sum (`+`) of the variables' results: the costs, counts and times summed, the termination flags or-ed. With
+no variable to optimize, every number in the result is zero. It runs on one thread. `precision` and `max_dense_bytes` are
+as for [`optimvars`](@ref); a variable's system is static or dense, never sparse or eliminated. An index out of range, or
+given twice, is an `ArgumentError`.
+
+# Example
+```julia
+optimizesingles!(model, OptimizationOptions(), SVector{3, Float64})   # every landmark, the cameras held
+optimizesingles!(model, OptimizationOptions(), [1, 2, 3])             # the first three variables
+```
+"""
+optimizesingles!

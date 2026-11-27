@@ -349,6 +349,47 @@ function optimvars_dispatch(problem::Model, unfixed::AbstractVector, numthreads:
     end
 end
 
+# optimizesingles!: its methods are in the SecondOrderOptimization extension, which runs the optimizer; what it needs of the
+# model is here
+function optimizesingles! end
+
+# The variables optimizesingles! is given, as indices: every variable of a type, or the indices given, checked
+singlesindices(model::Model, ::Type{T}) where T = findall(v -> v isa T, model.variables)
+function singlesindices(model::Model, indices::AbstractVector{<:Integer})
+    n = length(model.variables)
+    all(i -> 1 <= i <= n, indices) || throw(ArgumentError("optimizesingles!: the variable indices must be between 1 and the number of variables, $n"))
+    allunique(indices) || throw(ArgumentError("optimizesingles!: each variable can be named once"))
+    return collect(Int, indices)
+end
+
+# The costs of each variable: column `v` of the transposed variable-cost map holds the indices of `v`'s costs, sorted, in
+# the order of `subproblem!`
+costsbyvariable(model::Model) = sparse(getvarcostmap(model)')
+costsof(costsbyvar::SparseMatrixCSC, v::Integer) = view(rowvals(costsbyvar), nzrange(costsbyvar, v))
+
+# `indices` in runs of one type and size, which can share a linear system: by size, then by the order in which each type
+# first appears in `indices`; within a run, in the order given
+function singlesruns(model::Model, indices::Vector{Int})
+    keys = [(typeof(model.variables[i]), block_dimension(model.variables[i])) for i in indices]
+    rank = Dict{eltype(keys), Int}()
+    foreach(k -> get!(rank, k, length(rank) + 1), keys)
+    perm = sortperm(keys; by=k -> (k[2], rank[k]), alg=Base.Sort.MergeSort)
+    runs = Vector{Int}[]
+    for (j, p) in enumerate(perm)
+        (j == 1 || keys[p] != keys[perm[j - 1]]) && push!(runs, Int[])
+        push!(last(runs), indices[p])
+    end
+    return runs
+end
+
+# The single-variable functors of `optimvars` on one thread, for another variable of the same type and size: the same
+# linear system's storage, and the other variable's index (optimizesingles!)
+retarget(f::SingleVarCostFunc, problem::Model, unfixed::Int) = SingleVarCostFunc(problem, unfixed, StaticInt(1), f.min_work)
+retarget(f::SingleVarCostGradHess{<:LinearSystem}, unfixed::Int) = SingleVarCostGradHess(retarget(f.linsystem, unfixed), f.problem, unfixed)
+retarget(ls::LinearSystem{F, V}, unfixed::Int) where {F, V} = LinearSystem{F, V}(retarget(ls.x, unfixed), ls.ls)
+retarget(x::UniVariateLSstatic_x{N}, unfixed::Int) where N = UniVariateLSstatic_x{N}(unfixed, x.x)
+retarget(x::UniVariateLSdynamic_x, unfixed::Int) = UniVariateLSdynamic_x(unfixed, x.x)
+
 function NLPLSModel end
 
 NLPLSModel(problem::Model, args...; kwargs...) =

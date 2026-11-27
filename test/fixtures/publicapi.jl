@@ -9,7 +9,7 @@ const PUBLIC_NAMES = sort([
     :SimpleError2, :SimpleError3, :SimpleError4,
     :addcost!, :addvariable!, :computecost, :computecostgradhess, :computeresidual, :computeresjac,
     :cost, :flat_optimvars_nls, :generatemeasurement, :getvars, :islinear, :ndeps, :nres,
-    :optimizerobustifier, :optimizerobustifier!, :optimvars, :optimvars_nls, :recommendoptimizer, :robustify, :robustifydcost, :robustifydkernel, :robustkernel,
+    :optimizerobustifier, :optimizerobustifier!, :optimizesingles!, :optimvars, :optimvars_nls, :recommendoptimizer, :robustify, :robustifydcost, :robustifydkernel, :robustkernel,
     :subproblem, :subproblem!, :syncvars!, :varindices, :withlogvolume,
 ])
 

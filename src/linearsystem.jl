@@ -46,9 +46,10 @@ struct UniVariateLSdynamic_x
     varindex::UInt
     x::Vector{Float64}
 
-    function UniVariateLSdynamic_x(unfixed, varlen)
+    function UniVariateLSdynamic_x(unfixed, varlen::Integer)
         return new(UInt(unfixed), Vector{Float64}(undef, varlen))
     end
+    UniVariateLSdynamic_x(unfixed, x::Vector{Float64}) = new(UInt(unfixed), x) # Another variable, the same buffer
 end
 
 struct UniVariateLSstatic_ls{N, N2, T}
@@ -68,6 +69,7 @@ struct UniVariateLSstatic_x{N}
     function UniVariateLSstatic_x{N}(unfixed) where N
         return new(UInt(unfixed), MVector{N, Float64}(undef))
     end
+    UniVariateLSstatic_x{N}(unfixed, x::MVector{N, Float64}) where N = new(UInt(unfixed), x) # Another variable, the same buffer
 end
 
 const UniVariateLSdynamic = Union{LinearSystem{UniVariateLSdynamic_x, <:UniVariateLSdynamic_ls}, LinearSystemShared{UniVariateLSdynamic_x, V, M} where {V <: UniVariateLSdynamic_ls, M}}

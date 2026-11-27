@@ -241,6 +241,54 @@ function SecondOrderOptimization.optimize(model::Model, rec::OptimizationRecomme
     return copied, result
 end
 
+# optimizesingles! (NLLSsolver D6): each named variable optimized on its own, the others fixed. The variables are taken in
+# runs of one type and size; a run's setup (its linear system and the optimizer's workspace) is built for its first
+# variable and retargeted to each of the others, so a run builds one system, whatever its length.
+function NLLSModel.optimizesingles!(model::Model{VT, CT}, options::OptimizationOptions, variables::Union{Type, AbstractVector{<:Integer}};
+        precision::Type=Float64, max_dense_bytes::Integer=MAX_DENSE_BYTES) where {VT, CT}
+    NLLSModel.check_precision(precision)
+    indices = NLLSModel.singlesindices(model, variables)
+    result = emptyresult(options)
+    isempty(indices) && return result
+    costsof = NLLSModel.costsbyvariable(model)
+    sub = Model{VT, CT}(model.variables) # Shares the variables with the model; the costs of one variable at a time
+    for run in NLLSModel.singlesruns(model, indices)
+        result = optimizerun!(sub, model, options, run, costsof, precision, Int(max_dense_bytes), result)
+    end
+    return result
+end
+
+# The identity of `+` on results: what a call that optimizes no variable returns
+emptyresult(options::OptimizationOptions) = OptimizationResult(0.0, 0.0, UInt64(0), UInt64(0), UInt64(0), UInt64(0), UInt64(0),
+    0, 0, 0, 0, 0, dynamic(options.iterator), 0, 0, 0, 0)
+
+# One run: the setup is built for the run's first variable, on its costs (selected again in the loop, so that the loop
+# holds for any run)
+function optimizerun!(sub::Model, model::Model, options, run, costsof, precision, max_dense_bytes, result)
+    first_ = first(run)
+    subproblem!(sub, model, NLLSModel.costsof(costsof, first_))
+    f, fdf!, x0, H = optimvars(sub; unfixed=first_, numthreads=StaticInt(1), max_dense_bytes, precision)
+    workspace = OptimizationWorkspace(x0, HessianObjective(f, fdf!; H), options)
+    return optimizerun!(sub, model, options, run, costsof, f, fdf!, x0, H, workspace, result)
+end
+function optimizerun!(sub::Model, model::Model, options, run, costsof, f, fdf!, x0::X, H, workspace, result) where X
+    for i in run
+        subproblem!(sub, model, NLLSModel.costsof(costsof, i))
+        fi, fdfi! = NLLSModel.retarget(f, sub, i), NLLSModel.retarget(fdf!, i)
+        obj = HessianObjective(fi, fdfi!; H)
+        xi = @inbounds(sub.variables[i])::X
+        if ismutablevar(xi)
+            r = SecondOrderOptimization.optimize!(xi, obj, options; workspace)
+            syncvars!(sub, fdfi!, xi)
+        else
+            x, r = SecondOrderOptimization.optimize(xi, obj, options; workspace)
+            syncvars!(sub, fdfi!, x)
+        end
+        result += r
+    end
+    return result
+end
+
 # The precompile workload, last (improvements.md item 3)
 include("SecondOrderOptimizationExtPrecompile.jl")
 

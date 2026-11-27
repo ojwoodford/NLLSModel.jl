@@ -39,6 +39,12 @@ setup is built for each call) or a [`ModelWorkspace`](@ref) (both are reused):
 ModelWorkspace
 ```
 
+For alternation, each of a set of variables optimized on its own:
+
+```@docs
+optimizesingles!
+```
+
 ## Choosing How to Solve
 
 See [Choosing a Configuration Automatically](@ref).
