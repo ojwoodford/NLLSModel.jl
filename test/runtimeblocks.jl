@@ -34,10 +34,10 @@ fixture("allocations", "runtimeblocks")
         a = rand(4, 4)
         b = rand(4)
         boffsets = ls.x.boffsets
-        NLLSModel.updatesymA!(A, a, vars, static(3), blockindices)
-        NLLSModel.updateb!(b_vec, b, vars, static(3), boffsets, blockindices)
-        @test allocs_warm(NLLSModel.updatesymA!, A, a, vars, static(3), blockindices) == 0
-        @test allocs_warm(NLLSModel.updateb!, b_vec, b, vars, static(3), boffsets, blockindices) == 0
+        NLLSModel.updatesymA!(A, a, map(NLLSModel.nvars, vars), static(3), blockindices)
+        NLLSModel.updateb!(b_vec, b, map(NLLSModel.nvars, vars), static(3), boffsets, blockindices)
+        @test allocs_warm(NLLSModel.updatesymA!, A, a, map(NLLSModel.nvars, vars), static(3), blockindices) == 0
+        @test allocs_warm(NLLSModel.updateb!, b_vec, b, map(NLLSModel.nvars, vars), static(3), boffsets, blockindices) == 0
     end
 end
 

@@ -227,12 +227,12 @@ function addsys!(b, A, g, H)
     return nothing
 end
 
-function updatesymA!(A, a, vars, varflags, blockindices)
+function updatesymA!(A, a, sizes::Tuple, varflags, blockindices)
     # Update the blocks in the problem
     loffseti = static(0)
     @unroll for i in 1:MAX_ARGS # COV_EXCL_LINE
-        if i <= length(vars) && bitiset(varflags, i)
-            nvi = nvars(vars[i])
+        if i <= length(sizes) && bitiset(varflags, i)
+            nvi = sizes[i]
             rangei = blockrange(loffseti + static(1), nvi)
             loffseti += nvi
             @inbounds block(A, blockindices[i], blockindices[i], nvi, nvi) .+= view(a, rangei, rangei)
@@ -240,7 +240,7 @@ function updatesymA!(A, a, vars, varflags, blockindices)
             loffsetj = static(0)
             @unroll for j in 1:i-1 # COV_EXCL_LINE
                 if bitiset(varflags, j)
-                    @inbounds nvj = nvars(vars[j])
+                    @inbounds nvj = sizes[j]
                     rangej = blockrange(loffsetj + static(1), nvj)
                     loffsetj += nvj
                     if @inbounds blockindices[i] >= blockindices[j] # Make sure the block matrix is lower triangular
@@ -254,12 +254,12 @@ function updatesymA!(A, a, vars, varflags, blockindices)
     end # COV_EXCL_LINE
 end
 
-function updateb!(B, b, vars, varflags, boffsets, blockindices)
+function updateb!(B, b, sizes::Tuple, varflags, boffsets, blockindices)
     # Update the blocks in the problem
     loffset = static(1)
     @unroll for i in 1:MAX_ARGS # COV_EXCL_LINE
-        if i <= length(vars) && bitiset(varflags, i)
-            nv = nvars(vars[i])
+        if i <= length(sizes) && bitiset(varflags, i)
+            nv = sizes[i]
             @inbounds view(B, blockrange(boffsets[blockindices[i]], nv)) .+= view(b, blockrange(loffset, nv))
             loffset += nv
         end
@@ -267,22 +267,23 @@ function updateb!(B, b, vars, varflags, boffsets, blockindices)
 end
 
 function updatesymlinearsystem!(linsystem::MultiVariateLS, g::AbstractVector, H::AbstractArray, vars, varflags, blockindices)
-    updateb!(getb(linsystem), g, vars, varflags, linsystem.x.boffsets, blockindices)
-    updatesymA!(getA(linsystem), H, vars, varflags, blockindices)
+    sizes = map(nvars, vars)
+    updateb!(getb(linsystem), g, sizes, varflags, linsystem.x.boffsets, blockindices)
+    updatesymA!(getA(linsystem), H, sizes, varflags, blockindices)
 end
 
 # One cost's gradient and Hessian into a Schur system: each block of the cost's Hessian is added to the system by naming
 # the pair of variables, once for each variable with itself and once for each pair `j < i`. BlockLinearSystems decides
 # where and in which orientation the pair is stored. No cost has two unfixed eliminated variables (the partition's
 # check), so every pair named has storage.
-function updatesymschur!(H_schur::SchurBlockHessian, g_full::Vector{Float64}, g::AbstractVector, H::AbstractArray, vars, varflags, boffsets, blockindices)
-    updateb!(g_full, g, vars, varflags, boffsets, blockindices)
+function updatesymschur!(H_schur::SchurBlockHessian, g_full::Vector{Float64}, g::AbstractVector, H::AbstractArray, sizes::Tuple, varflags, boffsets, blockindices)
+    updateb!(g_full, g, sizes, varflags, boffsets, blockindices)
 
     loffseti = static(0)
     @unroll for i in 1:MAX_ARGS # COV_EXCL_LINE
-        if i <= length(vars) && bitiset(varflags, i)
+        if i <= length(sizes) && bitiset(varflags, i)
             bi = Int(blockindices[i])
-            nvi = nvars(vars[i])
+            nvi = sizes[i]
             rangei = blockrange(loffseti + static(1), nvi)
             loffseti += nvi
             @inbounds addblock!(H_schur, bi, bi, H, rangei, rangei)
@@ -291,7 +292,7 @@ function updatesymschur!(H_schur::SchurBlockHessian, g_full::Vector{Float64}, g:
             @unroll for j in 1:i-1 # COV_EXCL_LINE
                 if bitiset(varflags, j)
                     bj = Int(blockindices[j])
-                    nvj = nvars(vars[j])
+                    nvj = sizes[j]
                     rangej = blockrange(loffsetj + static(1), nvj)
                     loffsetj += nvj
                     @inbounds addblock!(H_schur, bi, bj, H, rangei, rangej)
@@ -302,7 +303,7 @@ function updatesymschur!(H_schur::SchurBlockHessian, g_full::Vector{Float64}, g:
 end
 
 function updatesymlinearsystem!(linsystem::MultiVariateLSSchur, g::AbstractVector, H::AbstractArray, vars, varflags, blockindices)
-    updatesymschur!(getA(linsystem), getb(linsystem), g, H, vars, varflags, linsystem.x.boffsets, blockindices)
+    updatesymschur!(getA(linsystem), getb(linsystem), g, H, map(nvars, vars), varflags, linsystem.x.boffsets, blockindices)
 end
 
 getgrad(ls::LinearSystem) = ls.ls.b
